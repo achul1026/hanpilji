@@ -100,3 +100,61 @@ LANGUAGE sql STABLE AS $$
     ORDER BY c.approval_date NULLS LAST, c.bld_pk
     LIMIT 50
 $$;
+
+-- ── 시세: 단지 x 전용면적별 매매 · 전세 (이너시티 「타입별 인수가 분석 표」의 거래단가 · 거래가격 · 전세단가 · 전세시세) ──
+-- 해제된 거래는 뺌. 전세 = 월세 0원인 계약. 면적은 ±p_area_tol ㎡ 안을 같은 타입으로 봄. 최대 20줄
+CREATE OR REPLACE FUNCTION mart.q_complex_price(
+    p_sigungu text, p_name text, p_area numeric DEFAULT NULL, p_months int DEFAULT 12,
+    p_area_tol numeric DEFAULT 3)
+RETURNS TABLE (complex_name text, emd text, area_m2 numeric,
+               trade_count bigint, trade_avg bigint, trade_per_m2 bigint, trade_per_pyeong bigint,
+               trade_last_date date, trade_last_amount bigint,
+               jeonse_count bigint, jeonse_avg bigint, jeonse_per_m2 bigint, jeonse_ratio numeric,
+               period_from date, period_to date, source text, asof date, row_total bigint)
+LANGUAGE sql STABLE AS $$
+    WITH c AS (
+        SELECT x.complex_id, x.name, r.emd
+        FROM core.dim_complex x
+        LEFT JOIN core.dim_region r ON r.lawd_cd = x.lawd_cd
+        WHERE left(x.lawd_cd, 5) = p_sigungu
+          AND replace(x.name, ' ', '') LIKE '%' || replace(p_name, ' ', '') || '%'
+    ), win AS (
+        SELECT (current_date - make_interval(months => p_months))::date AS d_from, current_date AS d_to
+    ), t AS (
+        SELECT d.complex_id, round(d.area) AS area_m2, d.amount, d.area, d.contract_date, d.asof
+        FROM core.fact_deal d JOIN c USING (complex_id), win
+        WHERE NOT d.is_cancelled AND d.contract_date >= win.d_from
+          AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
+    ), j AS (
+        SELECT e.complex_id, round(e.area) AS area_m2, e.deposit, e.area, e.asof
+        FROM core.fact_rent e JOIN c USING (complex_id), win
+        WHERE e.monthly_rent = 0 AND e.area > 0 AND e.contract_date >= win.d_from
+          AND (p_area IS NULL OR abs(e.area - p_area) <= p_area_tol)
+    ), tg AS (
+        SELECT complex_id, area_m2, count(*) AS n, avg(amount)::bigint AS avg_amt,
+               (sum(amount) / sum(area))::bigint AS per_m2,
+               max(contract_date) AS last_date,
+               (array_agg(amount ORDER BY contract_date DESC))[1] AS last_amt, max(asof) AS asof
+        FROM t GROUP BY 1, 2
+    ), jg AS (
+        SELECT complex_id, area_m2, count(*) AS n, avg(deposit)::bigint AS avg_dep,
+               (sum(deposit) / sum(area))::bigint AS per_m2, max(asof) AS asof
+        FROM j GROUP BY 1, 2
+    ), g AS (
+        SELECT coalesce(tg.complex_id, jg.complex_id) AS complex_id,
+               coalesce(tg.area_m2, jg.area_m2) AS area_m2, tg.n AS tn, tg.avg_amt, tg.per_m2 AS t_m2,
+               tg.last_date, tg.last_amt, jg.n AS jn, jg.avg_dep, jg.per_m2 AS j_m2,
+               greatest(tg.asof, jg.asof) AS asof
+        FROM tg FULL JOIN jg ON jg.complex_id = tg.complex_id AND jg.area_m2 = tg.area_m2
+    )
+    SELECT c.name, c.emd, g.area_m2,
+           coalesce(g.tn, 0), g.avg_amt, g.t_m2, (g.t_m2 * 3.305785)::bigint, g.last_date, g.last_amt,
+           coalesce(g.jn, 0), g.avg_dep, g.j_m2,
+           CASE WHEN g.avg_amt > 0 AND g.avg_dep IS NOT NULL THEN round(g.avg_dep::numeric / g.avg_amt * 100, 1) END,
+           win.d_from, win.d_to,
+           '국토교통부 아파트 매매 · 전월세 실거래가', g.asof,
+           count(*) OVER ()
+    FROM g JOIN c USING (complex_id), win
+    ORDER BY c.name, g.area_m2
+    LIMIT 20
+$$;

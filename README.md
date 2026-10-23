@@ -9,7 +9,7 @@
 
 ![stage](https://img.shields.io/badge/stage-0%20%EA%B7%9C%EC%A0%9C%20%EC%B6%95-f6d365?style=for-the-badge)
 ![laws](https://img.shields.io/badge/%EB%B2%95%EB%A0%B9-17%EA%B0%9C%20%C2%B7%201%2C542%EC%A1%B0-81c995?style=for-the-badge)
-![tests](https://img.shields.io/badge/tests-11%20passed-4fc3f7?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-22%20passed-4fc3f7?style=for-the-badge)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
@@ -32,7 +32,7 @@ flowchart LR
     subgraph SRC["공공 데이터"]
         LAW["⚖️ 법제처<br/>국가법령정보 API"]
         EUM["🗺️ 토지이음<br/>행위제한 CSV"]
-        DG["🏢 공공데이터포털<br/>건축물대장 · 실거래가"]
+        DG["🏢 공공데이터포털<br/>행위제한 · 실거래가 · 건축물대장"]
     end
     RAW[("📦 raw/<br/>원본 보관")]
     STG[("stg<br/>받은 그대로")]
@@ -63,6 +63,11 @@ export HANPILJI_DSN=postgresql://user@localhost/hanpilji
 bash scripts/init_db.sh                               # 여러 번 돌려도 됨. --postgis --pgvector 선택
 python -m hanpilji.collectors.law                     # 법령 17개 → core.doc_law
 python -m hanpilji.collectors.eum_rule 행위제한.csv    # 토지이음에서 내려받은 파일
+
+# 공공데이터포털 인증키가 있으면 (키는 환경변수로만)
+export DATA_GO_KR_KEY=...
+python -m hanpilji.collectors.luinfo                  # 행위제한 API → core.reg_rule (조례 기준)
+python -m hanpilji.collectors.rtms                    # 아파트 매매 · 전월세 36개월 → core.fact_deal · fact_rent
 ```
 
 시험:
@@ -70,6 +75,14 @@ python -m hanpilji.collectors.eum_rule 행위제한.csv    # 토지이음에서 
 ```bash
 HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest discover -s tests -t .
 ```
+
+> [!TIP]
+> 인증키는 [data.go.kr](https://www.data.go.kr)에서 아래 4개를 활용신청하면 하나로 다 됩니다(자동 승인).
+> [토지이용규제정보서비스](https://www.data.go.kr/data/15058410/openapi.do) ·
+> [아파트 매매 실거래가](https://www.data.go.kr/data/15126469/openapi.do) ·
+> [아파트 전월세 실거래가](https://www.data.go.kr/data/15126474/openapi.do) ·
+> [건축HUB 건축물대장정보](https://www.data.go.kr/data/15134735/openapi.do).
+> Encoding · Decoding 키 어느 쪽을 넣어도 됩니다.
 
 > [!NOTE]
 > 법제처 수집은 공식 테스트 계정 `OC=test`로도 돌아갑니다. 운영 전에 [open.law.go.kr](https://open.law.go.kr)에서 ID를 받아 `LAW_OC` 환경변수로 넣으세요.
@@ -81,6 +94,9 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 | `mart.q_law_search(질문, 법령명?)` | 「차임 증액 청구」 「임대료 5% 상한」 | 10 |
 | `mart.q_zoning_check(용도지역, 건물종류, 시군구?)` | 「이 땅에 근린생활시설 지을 수 있나?」 | 20 |
 | `mart.q_building_filter(법정동 앞자리, 경과연수?, 승강기?, 위반?, 용도?, 주차?)` | 「준공 20년 넘고 승강기 없는 건물」 | 50 |
+| `mart.q_complex_price(시군구, 단지명, 전용면적?, 개월?)` | 「개포동 ○○아파트 84㎡ 최근 1년 매매가 · 전세가」 | 20 |
+
+`q_complex_price`는 이너시티 「타입별 인수가 분석 표」의 네 칸(거래단가 · 거래가격 · 전세단가 · 전세시세)을 한 줄로 돌려줍니다. 해제된 거래와 월세는 빼고, ㎡당 · 평당 단가와 전세가율도 같이 줍니다.
 
 모든 함수가 `row_total`(전체 건수)을 함께 돌려줘서, GPT가 「10건만 보여드렸고 전체는 39건」처럼 말할 수 있습니다.
 
@@ -106,9 +122,9 @@ SELECT article_no, law_name, row_total FROM mart.q_law_search('5% 증액') LIMIT
 
 | 단계 | 내용 | 상태 |
 |---|---|---|
-| 0 | 규제 축: 법제처 법령 · 토지이음 행위제한 | 🟢 법령 완료 · 🟡 행위제한 CSV 대기 |
-| 1 | 공공데이터포털 인증키 · 호출 확인 | ⚪ 키 대기 |
-| 2 | 시세 축: 시범 구(강남구) 3년치 | ⚪ |
+| 0 | 규제 축: 법제처 법령 · 토지이음 행위제한 | 🟢 법령 완료 · 🟡 행위제한 CSV 또는 API 키 대기 |
+| 1 | 공공데이터포털 인증키 · 호출 확인 | 🟡 수집기 준비 완료, 키 대기 |
+| 2 | 시세 축: 시범 구(강남구) 3년치 | 🟡 수집기 · 마트 함수 준비 완료, 키 대기 |
 | 3 | GPT 엔진 연결 | ⚪ |
 | 4 | 데모 | ⚪ |
 
@@ -118,7 +134,7 @@ SELECT article_no, law_name, row_total FROM mart.q_law_search('5% 증액') LIMIT
 |---|---|
 | 법령 | 17개 · 조문 1,542개 · 별표 99개 (`삭제`된 조문 163개는 뺌) |
 | 가장 큰 법령 | 도시 및 주거환경정비법 165조, 국토계획법 · 시행령 각 158조 |
-| 시험 | 오프라인 6개(실제 응답 파일 포함) + DB 5개 통과 |
+| 시험 | 22개 통과 (법제처 실제 응답 · 포털 실제 오류 응답 포함, API 정상 응답은 명세 기준 샘플) |
 
 <details>
 <summary><b>법령 17개 목록</b></summary>
@@ -144,7 +160,9 @@ SELECT article_no, law_name, row_total FROM mart.q_law_search('5% 증액') LIMIT
 - [x] 법제처 실제 응답으로 파서 확인 (2026-10-22)
 - [ ] 토지이음 행위제한 CSV를 받아 `eum_rule.py`의 `COLUMN_MAP` · `ALLOWED_MAP` 채우기
 - [ ] 토지이음 용도지역 이름이 `core.dim_zone`과 같은지 확인
-- [ ] 공공데이터포털 인증키 발급 → `국토교통부_토지이용규제정보서비스`(행위제한 API) · 건축물대장 · 실거래가
+- [x] 행위제한 API · 아파트 매매 · 전월세 수집기, 시세 마트 함수 (2026-10-23)
+- [ ] 공공데이터포털 인증키 발급 → 첫 실제 응답으로 항목 이름 · UQ 코드 확인
+- [ ] 건축물대장 수집기
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더
@@ -155,10 +173,13 @@ hanpilji/
 ├── hanpilji/
 │   ├── collectors/
 │   │   ├── law.py           # 법제처 → core.doc_law
-│   │   └── eum_rule.py      # 토지이음 CSV → core.reg_rule
+│   │   ├── eum_rule.py      # 토지이음 CSV → core.reg_rule
+│   │   ├── luinfo.py        # 행위제한 API → core.reg_rule
+│   │   └── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
+│   ├── datagokr.py          # 공공데이터포털 공통(키 · 호출 · 응답 풀기)
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
-├── sql/00~08_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
+├── sql/00~09_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
 ├── scripts/init_db.sh
 ├── tests/                   # fixtures/*_real.xml 은 법제처 실제 응답
 └── docs/assets/             # README 도트 그림 (make_banner.py로 다시 만듦)
