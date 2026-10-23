@@ -121,12 +121,12 @@ LANGUAGE sql STABLE AS $$
     ), win AS (
         SELECT (current_date - make_interval(months => p_months))::date AS d_from, current_date AS d_to
     ), t AS (
-        SELECT d.complex_id, round(d.area) AS area_m2, d.amount, d.area, d.contract_date
+        SELECT d.complex_id, round(d.area) AS area_m2, d.amount, d.area, d.contract_date, d.asof
         FROM core.fact_deal d JOIN c USING (complex_id), win
         WHERE NOT d.is_cancelled AND d.contract_date >= win.d_from
           AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
     ), j AS (
-        SELECT e.complex_id, round(e.area) AS area_m2, e.deposit, e.area
+        SELECT e.complex_id, round(e.area) AS area_m2, e.deposit, e.area, e.asof
         FROM core.fact_rent e JOIN c USING (complex_id), win
         WHERE e.monthly_rent = 0 AND e.area > 0 AND e.contract_date >= win.d_from
           AND (p_area IS NULL OR abs(e.area - p_area) <= p_area_tol)
@@ -134,16 +134,17 @@ LANGUAGE sql STABLE AS $$
         SELECT complex_id, area_m2, count(*) AS n, avg(amount)::bigint AS avg_amt,
                (sum(amount) / sum(area))::bigint AS per_m2,
                max(contract_date) AS last_date,
-               (array_agg(amount ORDER BY contract_date DESC))[1] AS last_amt
+               (array_agg(amount ORDER BY contract_date DESC))[1] AS last_amt, max(asof) AS asof
         FROM t GROUP BY 1, 2
     ), jg AS (
         SELECT complex_id, area_m2, count(*) AS n, avg(deposit)::bigint AS avg_dep,
-               (sum(deposit) / sum(area))::bigint AS per_m2
+               (sum(deposit) / sum(area))::bigint AS per_m2, max(asof) AS asof
         FROM j GROUP BY 1, 2
     ), g AS (
         SELECT coalesce(tg.complex_id, jg.complex_id) AS complex_id,
                coalesce(tg.area_m2, jg.area_m2) AS area_m2, tg.n AS tn, tg.avg_amt, tg.per_m2 AS t_m2,
-               tg.last_date, tg.last_amt, jg.n AS jn, jg.avg_dep, jg.per_m2 AS j_m2
+               tg.last_date, tg.last_amt, jg.n AS jn, jg.avg_dep, jg.per_m2 AS j_m2,
+               greatest(tg.asof, jg.asof) AS asof
         FROM tg FULL JOIN jg ON jg.complex_id = tg.complex_id AND jg.area_m2 = tg.area_m2
     )
     SELECT c.name, c.emd, g.area_m2,
@@ -151,7 +152,7 @@ LANGUAGE sql STABLE AS $$
            coalesce(g.jn, 0), g.avg_dep, g.j_m2,
            CASE WHEN g.avg_amt > 0 AND g.avg_dep IS NOT NULL THEN round(g.avg_dep::numeric / g.avg_amt * 100, 1) END,
            win.d_from, win.d_to,
-           '국토교통부 아파트 매매 · 전월세 실거래가', (SELECT max(asof) FROM core.fact_deal),
+           '국토교통부 아파트 매매 · 전월세 실거래가', g.asof,
            count(*) OVER ()
     FROM g JOIN c USING (complex_id), win
     ORDER BY c.name, g.area_m2

@@ -20,6 +20,13 @@ class ApiError(RuntimeError):
     """포털 · 기관 쪽 오류 응답(키 미등록, 한도 초과 등)."""
 
 
+def is_fatal(e):
+    """다음 호출도 똑같이 실패할 오류(키 · 한도 · 429)면 True — 수집을 멈춰야 함."""
+    if isinstance(e, ApiError):
+        return "KEY" in str(e).upper() or "LIMIT" in str(e).upper()
+    return isinstance(e, urllib.error.HTTPError) and e.code in (401, 403, 429)
+
+
 def service_key():
     key = os.environ.get("DATA_GO_KR_KEY", "").strip()
     if not key:

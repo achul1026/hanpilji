@@ -109,36 +109,35 @@ def main(argv=None, fetch=datagokr.fetch):
             "SELECT zone_cd FROM core.dim_zone WHERE code_system = 'uq' ORDER BY zone_cd").fetchall()]
         run_id = ingest.start_run(conn, SOURCE)
         loaded = rejected = failed = 0
-        stop = False
-        for sgg in sigungus:
-            for z in zones:
-                for act in acts:
-                    key = f"{sgg}:{z}:{act}"
-                    task = ingest.add_task(conn, run_id, SOURCE, key)
-                    try:
-                        data, obj = fetch(PATH, {"areaCd": sgg, "ucodeList": z, "landUseNm": act})
-                        ingest.save_raw(cfg["storage"]["raw_dir"], "luinfo", f"{sgg}_{z}_{act}.xml", data)
-                        n, r = load(conn, run_id, sgg, z, act, obj, today)
-                        ingest.end_task(conn, task, "done")
-                        conn.commit()
-                        loaded, rejected = loaded + n, rejected + r
-                        print(f"{sgg} {z} {act:12} {n}건 제외 {r}")
-                    except Exception as e:  # 한 조합이 실패해도 나머지는 계속
-                        conn.rollback()
-                        t = ingest.add_task(conn, run_id, SOURCE, key, status="failed")
-                        ingest.end_task(conn, t, "failed", str(e)[:500])
-                        conn.commit()
-                        failed += 1
-                        print(f"failed {key}: {e}", file=sys.stderr)
-                        if isinstance(e, datagokr.ApiError) and ("KEY" in str(e).upper() or "LIMIT" in str(e).upper()):
-                            stop = True
-                    if stop:
+        combos = [(sgg, z, act) for sgg in sigungus for z in zones for act in acts]
+        finished = False
+        try:
+            for sgg, z, act in combos:
+                key = f"{sgg}:{z}:{act}"
+                task = ingest.add_task(conn, run_id, SOURCE, key)
+                try:
+                    data, obj = fetch(PATH, {"areaCd": sgg, "ucodeList": z, "landUseNm": act})
+                    ingest.save_raw(cfg["storage"]["raw_dir"], "luinfo", f"{sgg}_{z}_{act}.xml", data)
+                    n, r = load(conn, run_id, sgg, z, act, obj, today)
+                    ingest.end_task(conn, task, "done")
+                    conn.commit()
+                    loaded, rejected = loaded + n, rejected + r
+                    print(f"{sgg} {z} {act:12} {n}건 제외 {r}")
+                except Exception as e:  # 한 조합이 실패해도 나머지는 계속
+                    conn.rollback()
+                    t = ingest.add_task(conn, run_id, SOURCE, key, status="failed")
+                    ingest.end_task(conn, t, "failed", str(e)[:500])
+                    conn.commit()
+                    failed += 1
+                    print(f"failed {key}: {e}", file=sys.stderr)
+                    if datagokr.is_fatal(e):  # 키 · 한도 문제는 다음 호출도 똑같이 실패하므로 멈춤
                         break
-                if stop:
-                    break
-            if stop:
-                break
-        ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, rejected)
+            ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, rejected)
+            finished = True
+        finally:
+            if not finished:  # 예상 못 한 오류 · 중단에도 실행 기록을 「running」으로 남기지 않음
+                conn.rollback()
+                ingest.finish_run(conn, run_id, "failed", loaded, rejected, "중단됨")
     return 1 if failed else 0
 
 

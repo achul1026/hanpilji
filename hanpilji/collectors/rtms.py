@@ -21,6 +21,7 @@ KINDS = {
     "trade": {"source": "dg_apt_trade", "path": "RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade", "label": "아파트"},
     "rent": {"source": "dg_apt_rent", "path": "RTMSDataSvcAptRent/getRTMSDataSvcAptRent", "label": "아파트"},
 }
+SOURCE_LABEL = {"trade": "국토교통부 아파트 매매 실거래가", "rent": "국토교통부 아파트 전월세 실거래가"}
 PAGE_ROWS = 1000
 
 
@@ -99,6 +100,8 @@ def to_rent(row, sigungu):
         return None, "계약일 형식 오류"
     if deposit is None or deposit < 0:
         return None, "보증금 없음"
+    if not area or area <= 0:
+        return None, "전용면적 없음"
     return {
         "rent_id": row_key("rent", row),
         "lawd_cd": lawd_cd(row, sigungu),
@@ -133,11 +136,16 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
     src = KINDS[kind]["source"]
     label = KINDS[kind]["label"]
     loaded = rejected = 0
+    seen, keys = {}, []
     with conn.cursor() as cur:
         cur.execute("DELETE FROM stg.rtms_raw WHERE source_id = %s AND sigungu_cd = %s AND deal_ym = %s",
                     (src, sigungu, ym))
         for row in rows:
-            key = row_key(kind, row)
+            # 모든 항목이 같은 거래가 한 달에 여러 건이면 「-1」 「-2」를 붙여 따로 셈(같은 응답이면 같은 번호)
+            base = row_key(kind, row)
+            n = seen.get(base, 0)
+            seen[base] = n + 1
+            key = base if n == 0 else f"{base}-{n}"
             cur.execute(
                 """INSERT INTO stg.rtms_raw (run_id, source_id, sigungu_cd, deal_ym, row_key, row_data)
                    VALUES (%s, %s, %s, %s, %s, %s)
@@ -149,6 +157,8 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                 ingest.reject(conn, run_id, src, "core.fact_deal" if kind == "trade" else "core.fact_rent", why, row)
                 rejected += 1
                 continue
+            v["deal_id" if kind == "trade" else "rent_id"] = key
+            keys.append(key)
             _ensure_dims(cur, v["lawd_cd"], row, asof)
             if kind == "trade":
                 cur.execute(
@@ -156,8 +166,9 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                            floor, build_year, is_cancelled, match_method, source, asof)
                        VALUES (%(deal_id)s, %(lawd_cd)s, %(complex_id)s, %(t)s, %(contract_date)s, %(amount)s, %(area)s,
                                %(floor)s, %(build_year)s, %(is_cancelled)s, '시군구·동·지번·단지명', %(src)s, %(asof)s)
-                       ON CONFLICT (deal_id) DO UPDATE SET is_cancelled = excluded.is_cancelled, asof = excluded.asof""",
-                    {**v, "t": label, "src": "국토교통부 아파트 매매 실거래가", "asof": asof},
+                       ON CONFLICT (deal_id) DO UPDATE SET lawd_cd = excluded.lawd_cd, complex_id = excluded.complex_id,
+                           build_year = excluded.build_year, is_cancelled = excluded.is_cancelled, asof = excluded.asof""",
+                    {**v, "t": label, "src": SOURCE_LABEL["trade"], "asof": asof},
                 )
             else:
                 cur.execute(
@@ -165,10 +176,21 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                            deposit, monthly_rent, contract_kind, renewal, source, asof)
                        VALUES (%(rent_id)s, %(lawd_cd)s, %(complex_id)s, %(t)s, %(contract_date)s, %(area)s, %(floor)s,
                                %(deposit)s, %(monthly_rent)s, %(contract_kind)s, %(renewal)s, %(src)s, %(asof)s)
-                       ON CONFLICT (rent_id) DO UPDATE SET asof = excluded.asof""",
-                    {**v, "t": label, "src": "국토교통부 아파트 전월세 실거래가", "asof": asof},
+                       ON CONFLICT (rent_id) DO UPDATE SET lawd_cd = excluded.lawd_cd, complex_id = excluded.complex_id,
+                           renewal = excluded.renewal, asof = excluded.asof""",
+                    {**v, "t": label, "src": SOURCE_LABEL["rent"], "asof": asof},
                 )
             loaded += 1
+        # 이번 응답에 없는 그 달 거래(정정 · 삭제된 신고)는 core에서도 뺌
+        y, m = int(ym[:4]), int(ym[4:])
+        first = datetime.date(y, m, 1)
+        nxt = datetime.date(y + (m == 12), m % 12 + 1, 1)
+        table, idcol = ("core.fact_deal", "deal_id") if kind == "trade" else ("core.fact_rent", "rent_id")
+        cur.execute(
+            f"""DELETE FROM {table} WHERE left(lawd_cd, 5) = %s AND contract_date >= %s AND contract_date < %s
+                AND source = %s AND NOT ({idcol} = ANY(%s))""",
+            (sigungu, first, nxt, SOURCE_LABEL[kind], keys),
+        )
     return loaded, rejected
 
 
@@ -212,38 +234,51 @@ def main(argv=None, fetch=datagokr.fetch):
     kinds = args.only or list(KINDS)
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = datetime.date.today()
-    failed = 0
+    failed_any = stop = False
     with psycopg.connect(cfg["db"]["dsn"]) as conn:
         for kind in kinds:
+            if stop:
+                break
             src = KINDS[kind]["source"]
             run_id = ingest.start_run(conn, src)
-            total_loaded = total_rejected = 0
-            for sgg in sigungus:
-                for ym in months:
-                    ckey = f"{sgg}:{ym}"
-                    if ym not in refetch and ingest.get_cursor(conn, src, ckey) == "done":
-                        continue
-                    task = ingest.add_task(conn, run_id, src, ckey)
-                    try:
-                        rows = fetch_month(kind, sgg, ym, cfg["storage"]["raw_dir"], fetch)
-                        n, r = load_month(conn, run_id, kind, sgg, ym, rows, today)
-                        ingest.end_task(conn, task, "done")
-                        ingest.set_cursor(conn, src, ckey, "done")
-                        conn.commit()
-                        total_loaded += n
-                        total_rejected += r
-                        print(f"{kind:5} {sgg} {ym}  {n:5}건  제외 {r}")
-                    except Exception as e:  # 한 달이 실패해도 나머지는 계속(커서는 그대로)
-                        conn.rollback()
-                        t = ingest.add_task(conn, run_id, src, ckey, status="failed")
-                        ingest.end_task(conn, t, "failed", str(e)[:500])
-                        conn.commit()
-                        failed += 1
-                        print(f"failed {kind} {sgg} {ym}: {e}", file=sys.stderr)
-                        if isinstance(e, datagokr.ApiError) and ("KEY" in str(e).upper() or "LIMIT" in str(e).upper()):
-                            break  # 키 · 한도 문제는 다음 달도 똑같이 실패하므로 멈춤
-            ingest.finish_run(conn, run_id, "failed" if failed else "done", total_loaded, total_rejected)
-    return 1 if failed else 0
+            total_loaded = total_rejected = failed = 0
+            finished = False
+            try:
+                for sgg in sigungus:
+                    for ym in months:
+                        ckey = f"{sgg}:{ym}"
+                        if ym not in refetch and ingest.get_cursor(conn, src, ckey) == "done":
+                            continue
+                        task = ingest.add_task(conn, run_id, src, ckey)
+                        try:
+                            rows = fetch_month(kind, sgg, ym, cfg["storage"]["raw_dir"], fetch)
+                            n, r = load_month(conn, run_id, kind, sgg, ym, rows, today)
+                            ingest.end_task(conn, task, "done")
+                            ingest.set_cursor(conn, src, ckey, "done")
+                            conn.commit()
+                            total_loaded += n
+                            total_rejected += r
+                            print(f"{kind:5} {sgg} {ym}  {n:5}건  제외 {r}")
+                        except Exception as e:  # 한 달이 실패해도 나머지는 계속(커서는 그대로)
+                            conn.rollback()
+                            t = ingest.add_task(conn, run_id, src, ckey, status="failed")
+                            ingest.end_task(conn, t, "failed", str(e)[:500])
+                            conn.commit()
+                            failed += 1
+                            print(f"failed {kind} {sgg} {ym}: {e}", file=sys.stderr)
+                            if datagokr.is_fatal(e):  # 키 · 한도 문제는 다음 호출도 똑같이 실패하므로 전부 멈춤
+                                stop = True
+                                break
+                    if stop:
+                        break
+                ingest.finish_run(conn, run_id, "failed" if failed else "done", total_loaded, total_rejected)
+                finished = True
+            finally:
+                if not finished:  # 예상 못 한 오류 · 중단(Ctrl+C)에도 실행 기록을 「running」으로 남기지 않음
+                    conn.rollback()
+                    ingest.finish_run(conn, run_id, "failed", total_loaded, total_rejected, "중단됨")
+            failed_any = failed_any or failed > 0
+    return 1 if failed_any else 0
 
 
 if __name__ == "__main__":
