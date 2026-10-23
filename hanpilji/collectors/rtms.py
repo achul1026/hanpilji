@@ -185,12 +185,18 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
         y, m = int(ym[:4]), int(ym[4:])
         first = datetime.date(y, m, 1)
         nxt = datetime.date(y + (m == 12), m % 12 + 1, 1)
-        table, idcol = ("core.fact_deal", "deal_id") if kind == "trade" else ("core.fact_rent", "rent_id")
-        cur.execute(
-            f"""DELETE FROM {table} WHERE left(lawd_cd, 5) = %s AND contract_date >= %s AND contract_date < %s
-                AND source = %s AND NOT ({idcol} = ANY(%s))""",
-            (sigungu, first, nxt, SOURCE_LABEL[kind], keys),
-        )
+        if kind == "trade":
+            cur.execute(
+                """DELETE FROM core.fact_deal WHERE left(lawd_cd, 5) = %s AND contract_date >= %s AND contract_date < %s
+                   AND source = %s AND NOT (deal_id = ANY(%s))""",
+                (sigungu, first, nxt, SOURCE_LABEL[kind], keys),
+            )
+        else:
+            cur.execute(
+                """DELETE FROM core.fact_rent WHERE left(lawd_cd, 5) = %s AND contract_date >= %s AND contract_date < %s
+                   AND source = %s AND NOT (rent_id = ANY(%s))""",
+                (sigungu, first, nxt, SOURCE_LABEL[kind], keys),
+            )
     return loaded, rejected
 
 
