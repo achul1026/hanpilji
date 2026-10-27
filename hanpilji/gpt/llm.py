@@ -38,7 +38,8 @@ class Anthropic:
             if not key:
                 raise MissingKey(f"환경변수 {KEY_ENV}가 없습니다")
             import anthropic
-            client = anthropic.Anthropic(api_key=key,
+            # 한 번 호출에 90초까지(재시도 1번). 웹 채팅에서 요청 스레드가 오래 묶이지 않게
+            client = anthropic.Anthropic(api_key=key, timeout=90.0, max_retries=1,
                                          base_url=os.environ.get("HANPILJI_LLM_BASE_URL", "https://api.anthropic.com"))
         self.client = client
 
