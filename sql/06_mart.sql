@@ -163,7 +163,8 @@ $$;
 
 -- ── 거래 목록: 한 단지의 거래를 한 건씩 (최고가 · 최저가 · 층 · 최근 거래) ──
 -- kind: 매매 · 전세(월세 0원) · 월세 · 전월세. order: recent(최근순) · price_desc(비싼 순) · price_asc(싼 순)
--- 금액은 매매가 또는 보증금, 월세는 따로. 해제된 매매는 뺌. 최대 30줄
+-- 금액은 매매가 또는 보증금, 월세는 따로(월세를 값 순으로 보면 월세액 순). 해제된 매매는 뺌. 최대 30줄
+-- 이름 일부가 여러 단지에 걸리면 이름이 똑같은 단지만 씀. 똑같은 게 없으면 걸린 단지를 모두 보이되 줄마다 단지명을 붙임
 CREATE OR REPLACE FUNCTION mart.q_deal_list(
     p_sigungu text, p_name text, p_kind text DEFAULT '매매', p_area numeric DEFAULT NULL,
     p_months int DEFAULT 12, p_order text DEFAULT 'recent', p_area_tol numeric DEFAULT 3)
@@ -171,12 +172,16 @@ RETURNS TABLE (complex_name text, kind text, contract_date date, area_m2 numeric
                amount bigint, monthly_rent bigint, contract_kind text,
                period_from date, period_to date, source text, asof date, row_total bigint)
 LANGUAGE sql STABLE AS $$
-    WITH c AS (
-        SELECT x.complex_id, x.name
+    WITH hit AS (
+        SELECT x.complex_id, x.name,
+               regexp_replace(replace(x.name, ' ', ''), '\([^()]*\)$', '')
+                   = regexp_replace(replace(p_name, ' ', ''), '\([^()]*\)$', '') AS exact
         FROM core.dim_complex x
         WHERE left(x.lawd_cd, 5) = p_sigungu
           AND regexp_replace(replace(x.name, ' ', ''), '\([^()]*\)$', '')
               LIKE '%' || regexp_replace(replace(p_name, ' ', ''), '\([^()]*\)$', '') || '%'
+    ), c AS (
+        SELECT complex_id, name FROM hit WHERE exact OR NOT EXISTS (SELECT 1 FROM hit WHERE exact)
     ), win AS (
         SELECT (current_date - make_interval(months => p_months))::date AS d_from, current_date AS d_to
     ), d AS (
@@ -193,9 +198,10 @@ LANGUAGE sql STABLE AS $$
     SELECT d.name, d.kind, d.contract_date, d.area, d.floor, d.amount, d.monthly, d.ckind,
            win.d_from, win.d_to, d.src, d.asof, count(*) OVER ()
     FROM d, win
-    WHERE d.contract_date >= win.d_from
+    WHERE d.contract_date BETWEEN win.d_from AND win.d_to
       AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
-    ORDER BY CASE WHEN p_order = 'price_desc' THEN -d.amount WHEN p_order = 'price_asc' THEN d.amount END NULLS LAST,
+    ORDER BY CASE WHEN p_order = 'price_desc' THEN -coalesce(nullif(d.monthly, 0), d.amount)
+                  WHEN p_order = 'price_asc' THEN coalesce(nullif(d.monthly, 0), d.amount) END NULLS LAST,
              d.contract_date DESC, d.amount DESC
     LIMIT 30
 $$;
@@ -224,7 +230,7 @@ LANGUAGE sql STABLE AS $$
         SELECT d.complex_id, count(*) AS n, avg(d.amount)::bigint AS avg_amt,
                (sum(d.amount) / sum(d.area))::bigint AS per_m2, max(d.asof) AS asof
         FROM core.fact_deal d, win
-        WHERE NOT d.is_cancelled AND d.contract_date >= win.d_from AND left(d.lawd_cd, 5) = p_sigungu
+        WHERE NOT d.is_cancelled AND d.contract_date BETWEEN win.d_from AND win.d_to AND left(d.lawd_cd, 5) = p_sigungu
           AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
         GROUP BY 1
     ), r AS (
@@ -235,7 +241,7 @@ LANGUAGE sql STABLE AS $$
                 / nullif(sum(e.area) FILTER (WHERE e.monthly_rent = 0 AND e.area > 0), 0))::bigint AS j_m2,
                count(*) FILTER (WHERE e.monthly_rent > 0) AS wn, max(e.asof) AS asof
         FROM core.fact_rent e, win
-        WHERE e.contract_date >= win.d_from AND left(e.lawd_cd, 5) = p_sigungu
+        WHERE e.contract_date BETWEEN win.d_from AND win.d_to AND left(e.lawd_cd, 5) = p_sigungu
           AND (p_area IS NULL OR abs(e.area - p_area) <= p_area_tol)
         GROUP BY 1
     ), g AS (
