@@ -46,7 +46,7 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}.sub{color
 .pc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
 .pc h3{margin:0;font-size:19px}.pc .addr{color:var(--muted);font-size:14px;margin:2px 0 12px}
 .grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
-.sec{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:14px}
+.sec{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:14px;word-break:keep-all;overflow-wrap:anywhere}
 .sec b{display:block;font-size:13px;color:var(--muted);font-weight:600;margin-bottom:4px}
 .sec .big{font-size:18px;font-weight:700}.todo{color:var(--warn)}
 table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left}
@@ -86,10 +86,10 @@ function card(r,deals){const c=el("div","pc");c.append(el("h3",null,r.complex_na
  g.append(sec("위치",[["PNU "+(r.pnu||"없음")],["준공 "+(r.build_year||"-")+"년"],["전용 "+(r.area_types||[]).join(" · ")+"㎡"]]));
  g.append(sec("거래 (최근 12개월)",[[r.trade_count?"평당 "+won(r.trade_per_pyeong):"매매 없음","big"],
   ["매매 "+r.trade_count+"건 · 마지막 "+(r.trade_last_date?r.trade_last_date+" "+won(r.trade_last_amount)+" ("+r.trade_last_area+"㎡)":"-")],
-  ["전세 "+r.jeonse_count+"건 평균 "+won(r.jeonse_avg)+(r.jeonse_ratio!=null?" · 전세가율 "+r.jeonse_ratio+"%":"")],["월세 "+r.wolse_count+"건"]]));
- g.append(sec("토지",[["지목 "+(r.land_category||"-")+" · 면적 "+(r.land_area_m2||"-")+"㎡"],["공시지가 "+(r.land_price_per_m2?won(r.land_price_per_m2)+"/㎡ ("+r.land_price_year+")":"-")]],!has("토지")));
+  ["전세 "+r.jeonse_count+"건 평균 "+won(r.jeonse_avg)+(r.jeonse_ratio!=null?" · 전세가율 "+r.jeonse_ratio+"% ("+r.jeonse_ratio_area+"㎡ 기준)":"")],["월세 "+r.wolse_count+"건"]]));
+ g.append(sec("토지",[["필지 "+(r.land_parcel_count||0)+"개 · 지목 "+(r.land_category||"-")+" · 면적 "+(r.land_area_m2||"-")+"㎡"],["공시지가 "+(r.land_price_per_m2?won(r.land_price_per_m2)+"/㎡ ("+r.land_price_year+")":"-")]],!has("토지")));
  g.append(sec("용도지역 · 규제",[[r.zones||"-"],["행위제한 규칙 "+(r.zone_rule_count||0)+"개"]],!has("용도지역")));
- g.append(sec("건물",[[(r.bld_main_use||"-")+" · 지상 "+(r.bld_floors_above||"-")+"층"],["사용승인 "+(r.bld_approval_date||"-")+" · 주차 "+(r.bld_parking??"-")+"대"],
+ g.append(sec("건물",[["건물 "+(r.bld_count||0)+"동 · "+(r.bld_main_use||"-")+" · 최고 "+(r.bld_floors_above||"-")+"층"],["사용승인 "+(r.bld_approval_date||"-")+" · 주차 "+(r.bld_parking??"-")+"대"],
   ["승강기 "+(r.bld_elevator==null?"-":r.bld_elevator?"있음":"없음")+" · 위반 "+(r.bld_violation==null?"-":r.bld_violation?"있음":"없음")]],!has("건축물대장")));
  c.append(g);
  if(deals&&deals.length){const t=el("table");const h=el("tr");["계약일","전용","층","매매가"].forEach((x,i)=>h.append(el("th",i?"n":null,x)));t.append(h);
@@ -99,10 +99,10 @@ function card(r,deals){const c=el("div","pc");c.append(el("h3",null,r.complex_na
  const a=el("button","ask","이 단지 GPT에게 자세히 묻기");a.type="button";a.onclick=()=>{q.value=r.complex_name+" 종합해서 알려줘";send()};c.append(a);return c}
 async function look(){const t=$("cq").value.trim();if(!t)return;const box=$("cards");box.textContent="찾는 중…";$("cb").disabled=true;
  try{const r=await fetch("/api/card?q="+encodeURIComponent(t),{headers:{"X-Token":token}});const j=await r.json();box.textContent="";
-  if(!r.ok){box.append(el("div","msg",j.error));return}
+  if(!r.ok){box.append(el("div","msg",j.error))}else{
   if(!j.rows.length){box.append(el("div","msg","「"+t+"」에 맞는 단지가 없습니다. 지금 데이터는 서울 강남구 아파트만 있습니다."))}
-  for(const row of j.rows){row.sources=j.sources.join(" · ");row.asof=j.asof;box.append(card(row,j.deals[row.complex_name]))}
-  if(j.row_total>j.rows.length)box.append(el("div","src","전체 "+j.row_total+"곳 중 "+j.rows.length+"곳. 이름을 더 자세히 써 주세요."))}
+  for(const row of j.rows){row.sources=j.sources.join(" · ");row.asof=j.asof;box.append(card(row,row.recent_deals))}
+  if(j.row_total>j.rows.length)box.append(el("div","src","전체 "+j.row_total+"곳 중 "+j.rows.length+"곳. 이름을 더 자세히 써 주세요."))}}
  catch(e){box.textContent="연결 오류: "+e}$("cb").disabled=false}
 $("cb").onclick=look;$("cq").onkeydown=e=>{if(e.key==="Enter")look()};
 async function send(){const t=q.value.trim();if(!t)return;q.value="";add(t,"me");b.disabled=true;const w=add("찾는 중…");
@@ -157,16 +157,12 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR):
                 self._json(404, {"error": "없는 주소"})
 
         def _card(self, query):
-            """단지 카드(LLM 없이 마트 함수만 부름, 요금 없음) + 단지마다 최근 매매 몇 건."""
+            """단지 카드(LLM 없이 마트 함수 하나만 부름, 요금 없음). 최근 매매 5건도 같은 결과에 들어 있음."""
             if not query:
                 return self._json(400, {"error": "단지명이나 주소를 넣어 주세요"})
             try:
                 with engine.connect(cfg) as conn:
                     out = tools.run(conn, "q_property_card", {"query": query})
-                    out["deals"] = {}
-                    for r in out["rows"]:   # 이름 일부 검색이라 다른 단지가 섞일 수 있어 같은 이름만 남김
-                        rows = tools.run(conn, "q_deal_list", {"name": r["complex_name"]})["rows"]
-                        out["deals"][r["complex_name"]] = [d for d in rows if d["complex_name"] == r["complex_name"]][:5]
             except Exception as e:
                 print(f"오류: {e!r}", file=sys.stderr)
                 return self._json(500, {"error": "카드를 만드는 중 오류가 났습니다."})

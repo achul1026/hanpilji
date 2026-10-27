@@ -134,6 +134,6 @@ def connect(cfg):
     """GPT용 읽기 전용 접속. HANPILJI_GPT_DSN(hanpilji_gpt 계정)을 권장, 없으면 HANPILJI_DSN."""
     import psycopg
     dsn = os.environ.get("HANPILJI_GPT_DSN") or cfg["db"]["dsn"]
-    conn = psycopg.connect(dsn, autocommit=True,
+    conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5,
                            options="-c default_transaction_read_only=on -c statement_timeout=5000")
     return conn
