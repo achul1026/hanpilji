@@ -5,19 +5,20 @@
 # 한필지 (가칭)
 
 **필지 하나로 잇는 부동산 공공데이터셋**<br>
-땅 · 건물 · 거래 · 규제 데이터를 필지 번호(PNU)로 묶고, 부동산 전용 GPT가 읽기 좋게 정리합니다.
+땅 · 건물 · 거래 · 규제 데이터를 필지 번호(PNU)로 묶고, 그 데이터로만 답하는 부동산 GPT를 얹습니다.
 
-![stage](https://img.shields.io/badge/stage-2%20%EC%8B%9C%EC%84%B8%20%EC%B6%95-f6d365?style=for-the-badge)
+![stage](https://img.shields.io/badge/stage-3%20GPT%20%EC%97%B0%EA%B2%B0-f6d365?style=for-the-badge)
 ![laws](https://img.shields.io/badge/%EB%B2%95%EB%A0%B9-17%EA%B0%9C%20%C2%B7%201%2C542%EC%A1%B0-81c995?style=for-the-badge)
-![tests](https://img.shields.io/badge/tests-29%20passed-4fc3f7?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-48%20passed-4fc3f7?style=for-the-badge)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
+![Claude](https://img.shields.io/badge/LLM-Claude%20API-d97757?logo=anthropic&logoColor=white)
 ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-16-4169E1?logo=postgresql&logoColor=white)
 ![PostGIS](https://img.shields.io/badge/PostGIS-optional-5CAE58)
 ![pgvector](https://img.shields.io/badge/pgvector-optional-8a63d2)
 ![Data](https://img.shields.io/badge/data-%EB%B2%95%EC%A0%9C%EC%B2%98%20%C2%B7%20%ED%86%A0%EC%A7%80%EC%9D%B4%EC%9D%8C%20%C2%B7%20%EA%B3%B5%EA%B3%B5%EB%8D%B0%EC%9D%B4%ED%84%B0%ED%8F%AC%ED%84%B8-f28b82)
 
-[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
+[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
 
 </div>
 
@@ -96,7 +97,7 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 | `mart.q_building_filter(법정동 앞자리, 경과연수?, 승강기?, 위반?, 용도?, 주차?)` | 「준공 20년 넘고 승강기 없는 건물」 | 50 |
 | `mart.q_complex_price(시군구, 단지명, 전용면적?, 개월?)` | 「개포동 ○○아파트 84㎡ 최근 1년 매매가 · 전세가」 | 20 |
 
-`q_complex_price`는 이너시티 「타입별 인수가 분석 표」의 네 칸(거래단가 · 거래가격 · 전세단가 · 전세시세)을 한 줄로 돌려줍니다. 해제된 거래와 월세는 빼고, ㎡당 · 평당 단가와 전세가율도 같이 줍니다.
+`q_complex_price`는 단지 x 전용면적마다 거래단가 · 거래가격 · 전세단가 · 전세시세를 한 줄로 돌려줍니다. 해제된 거래와 월세는 빼고, ㎡당 · 평당 단가와 전세가율도 같이 줍니다.
 
 모든 함수가 `row_total`(전체 건수)을 함께 돌려줘서, GPT가 「10건만 보여드렸고 전체는 39건」처럼 말할 수 있습니다.
 
@@ -118,6 +119,76 @@ SELECT article_no, law_name, row_total FROM mart.q_law_search('5% 증액') LIMIT
 
 </details>
 
+## 🤖 부동산 GPT
+
+질문을 받으면 LLM이 위 마트 함수 중 맞는 것을 **도구로 골라 부르고**, 돌아온 줄만 보고 답합니다. LLM은 SQL을 쓰지 않고 DB에도 직접 닿지 않습니다. 답 끝의 근거(어떤 함수 · 몇 건 · 출처 · 기준일)는 모델이 아니라 엔진이 실행 기록으로 붙이므로 빠지지 않습니다.
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as 사용자
+    participant E as 엔진<br/>hanpilji.gpt
+    participant L as LLM<br/>(Claude API)
+    participant M as mart 함수<br/>(읽기 전용)
+    U->>E: 도곡렉슬 84㎡ 최근 1년 시세?
+    E->>L: 질문 + 도구 4개 정의 + 지킬 것
+    L->>E: q_complex_price(name=도곡렉슬, area_m2=84)
+    E->>M: SELECT * FROM mart.q_complex_price(...)
+    M-->>E: 1줄 · row_total 1 · 출처 · 기준일
+    E->>L: 결과(JSON)
+    L-->>E: 「최근 12개월 매매 21건 평균 …」
+    E-->>U: 답 + 근거 (함수 · 건수 · 출처 · 기준일)
+```
+
+| 지키는 것 | 어떻게 |
+|---|---|
+| 데이터로만 답함 | 도구 결과에 없는 숫자 · 조문은 쓰지 않도록 지시. 조회 없이 답하면 근거에 「데이터 조회 없이 답함」이 찍힘 |
+| 모르면 모른다 | 0건이면 「가진 데이터에는 없어 모릅니다」 + 무엇이 없는지(지역 · 기간 · 종류) |
+| 건수를 밝힘 | 「매매 21건 평균」, 「전체 39건 중 10건」. 근거 줄에도 `shown` / `row_total` |
+| 투자 조언 안 함 | 사라 · 팔아라 · 오른다 같은 권유 · 전망 대신 확인 가능한 사실만 |
+| 틀린 호출 막기 | 없는 도구 · 모르는 인자 · 형식이 틀린 인자는 실행하지 않고 모델에게 오류로 돌려줌. 질문 하나에 도구 최대 6번 |
+| DB 보호 | 읽기 전용 접속(`default_transaction_read_only`) · 5초 제한. `hanpilji_gpt` 계정은 `mart`만 읽음 |
+
+### 써 보기
+
+```bash
+pip install -r requirements.txt
+export HANPILJI_LLM_API_KEY=...                       # 아래 「API 키」 참고. 파일에 쓰지 않음
+export HANPILJI_GPT_DSN=postgresql://hanpilji_gpt:...@localhost/hanpilji   # 없으면 HANPILJI_DSN
+
+python -m hanpilji.gpt "도곡렉슬 84㎡ 최근 1년 매매가랑 전세가"   # 한 번 묻기
+python -m hanpilji.gpt                                          # 이어서 묻기(대화)
+python -m hanpilji.gpt.web --port 8000                          # 웹 채팅 → http://127.0.0.1:8000
+```
+
+웹 채팅은 파이썬 표준 라이브러리만 씁니다. 예시 질문 버튼 4개(시세 · 용도지역 · 법령 · 투자 질문)가 있어 바로 시연할 수 있습니다.
+
+> [!IMPORTANT]
+> 클라우드 환경의 DB는 세션마다 새로 뜨는 로컬 PostgreSQL이라 데이터가 남지 않습니다. 새 세션에서는 [빠른 시작](#-빠른-시작)대로 `init_db.sh` → `law` → `rtms` → `luinfo`를 먼저 돌리세요(강남구 기준 실거래가만 10분쯤 걸림).
+
+### 모델과 제공자
+
+| 항목 | 기본값 | 바꾸는 곳 |
+|---|---|---|
+| 제공자 | Anthropic Claude (Messages API 도구 호출) | `config.toml` `[gpt] provider` · `HANPILJI_LLM_PROVIDER` |
+| 모델 | `claude-opus-5-5` (생각 adaptive · effort `medium`) | `[gpt] model` · `HANPILJI_LLM_MODEL`. 비용을 줄이려면 `claude-sonnet-5-5` |
+| 거절 시 | 서버가 다른 모델로 다시 돌림(`fallbacks = "default"`) | `[gpt] fallbacks = ""`로 끔 |
+| 키 | 환경변수 `HANPILJI_LLM_API_KEY` | 파일 · 채팅에 쓰지 않음 |
+
+엔진은 제공자와 상관없는 대화 형식만 알고, 제공자가 자기 API 모양으로 바꿉니다. 다른 LLM을 붙이려면 [`hanpilji/gpt/llm.py`](hanpilji/gpt/llm.py)에 `chat(system, messages, tools) -> Reply` 하나를 만들고 `PROVIDERS`에 등록하면 됩니다. 마트 함수와 도구 정의는 그대로 씁니다.
+
+<details>
+<summary><b>API 키 넣는 법 (Claude Code 클라우드 환경)</b></summary>
+
+1. [console.anthropic.com](https://console.anthropic.com) 로그인 → **Settings › Billing**에서 결제 수단 등록(선불 크레딧)
+2. **Settings › API Keys › Create Key** → 이름 `hanpilji-gpt` → 만든 키를 복사(다시 볼 수 없음)
+3. 프로젝트 설정 › **Cloud environment** › 환경 변수에 `HANPILJI_LLM_API_KEY=복사한 키` 한 줄 추가 → 저장
+4. 키는 **저장한 뒤 새로 시작한 세션**에만 보입니다
+
+`ANTHROPIC_API_KEY`라는 이름을 쓰지 않는 까닭: 클라우드 환경에 그 이름으로 넣으면 Claude Code 세션 자체가 그 키로 돌아 요금이 섞일 수 있습니다.
+
+</details>
+
 ## 📊 진행 상황
 
 | 단계 | 내용 | 상태 |
@@ -125,8 +196,8 @@ SELECT article_no, law_name, row_total FROM mart.q_law_search('5% 증액') LIMIT
 | 0 | 규제 축: 법제처 법령 · 행위제한 | 🟢 법령 완료 · 🟢 행위제한 API로 강남구 수집 (CSV 없이) |
 | 1 | 공공데이터포털 인증키 · 호출 확인 | 🟢 실제 응답으로 항목 이름 · 코드 확인 (2026-10-27) |
 | 2 | 시세 축: 시범 구(강남구) 3년치 | 🟢 매매 1만 432건 · 전월세 7만 924건 적재 |
-| 3 | GPT 엔진 연결 | ⚪ |
-| 4 | 데모 | ⚪ |
+| 3 | GPT 엔진 연결 | 🟡 Claude API 도구 호출 엔진 · 시험 완료, API 키 등록 뒤 실제 질문으로 확인 |
+| 4 | 데모 | 🟡 터미널 · 웹 채팅 준비 |
 
 **0단계 실측 (2026-10-22)**
 
@@ -181,7 +252,7 @@ SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 84, 12);
 | DB | PostgreSQL 16, DB 하나에 스키마 4개 (+ raw 폴더) | `HANPILJI_DSN` |
 | 공간 · 의미 검색 | 없이도 동작 | `scripts/init_db.sh --postgis --pgvector` |
 | 시범 구 | 서울 강남구 (11680) | `config.toml` `[pilot]` |
-| GPT 엔진 | 미정. 마트 함수는 엔진과 무관 | — |
+| GPT 엔진 | Anthropic Claude `claude-opus-5-5`. 마트 함수는 엔진과 무관 | `config.toml` `[gpt]` |
 | 법제처 ID | 테스트 계정 `test` | `LAW_OC` |
 
 ## 📝 남은 일
@@ -193,6 +264,9 @@ SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 84, 12);
 - [x] 공공데이터포털 인증키 발급 → 첫 실제 응답으로 항목 이름 · UQ 코드 확인 (2026-10-27)
 - [ ] 매매 응답에 법정동 코드가 없어 `q_complex_price`의 `emd`가 비어 있음. 법정동 코드표를 붙이거나 매매 상세 자료로 바꾸기
 - [ ] 건축물대장 수집기
+- [x] 부동산 GPT 엔진: 마트 함수 도구 호출 · 근거 자동 첨부 · 터미널 / 웹 채팅 (2026-10-27)
+- [ ] Anthropic API 키 등록 → 실제 질문 20개로 답 품질 확인(모른다 · 투자 질문 포함)
+- [ ] 단지명 · 동 이름으로 시군구를 찾는 도구(시범 구가 늘어나면)
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더
@@ -207,6 +281,12 @@ hanpilji/
 │   │   ├── luinfo.py        # 행위제한 API → core.reg_rule
 │   │   └── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
 │   ├── datagokr.py          # 공공데이터포털 공통(키 · 호출 · 응답 풀기)
+│   ├── gpt/
+│   │   ├── engine.py        # 질문 → 도구 호출 반복 → 답 + 근거
+│   │   ├── tools.py         # 마트 함수 4개 = 도구 정의 · 인자 확인
+│   │   ├── llm.py           # 제공자(Anthropic) · 교체 지점
+│   │   ├── __main__.py      # 터미널 대화
+│   │   └── web.py           # 웹 채팅
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
 ├── sql/00~09_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값

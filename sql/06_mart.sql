@@ -101,7 +101,7 @@ LANGUAGE sql STABLE AS $$
     LIMIT 50
 $$;
 
--- ── 시세: 단지 x 전용면적별 매매 · 전세 (이너시티 「타입별 인수가 분석 표」의 거래단가 · 거래가격 · 전세단가 · 전세시세) ──
+-- ── 시세: 단지 x 전용면적별 매매 · 전세 (거래단가 · 거래가격 · 전세단가 · 전세시세) ──
 -- 해제된 거래는 뺌. 전세 = 월세 0원인 계약. 면적은 ±p_area_tol ㎡ 안을 같은 타입으로 봄. 최대 20줄
 CREATE OR REPLACE FUNCTION mart.q_complex_price(
     p_sigungu text, p_name text, p_area numeric DEFAULT NULL, p_months int DEFAULT 12,
