@@ -61,7 +61,7 @@ def query(sql, read_only=False, ref=None, retries=3):
                 time.sleep(2 ** attempt * 3)
                 continue
             raise ApiError(f"HTTP {e.code}: {msg}") from None
-        except (urllib.error.URLError, TimeoutError) as e:
+        except (urllib.error.URLError, OSError) as e:   # 응답 도중 끊김(ConnectionResetError)도 포함
             if attempt < retries:
                 time.sleep(2 ** attempt * 3)
                 continue
@@ -217,7 +217,8 @@ def _send_table(table, log):
             sql = (f"INSERT INTO {table} SELECT * FROM json_populate_recordset(NULL::{table}, "
                    + literal(payload) + ")")
             try:
-                query("SET standard_conforming_strings = on; " + sql)
+                # 끊긴 요청이 이미 들어갔을 수 있어 여기서는 다시 보내지 않음(테이블째 다시 보냄)
+                query("SET standard_conforming_strings = on; " + sql, retries=0)
             except ApiError as e:
                 if "413" not in str(e) or len(rows) == 1:
                     raise
@@ -266,7 +267,15 @@ def restore(dump, log=print):
     tables = _tables()
     total = 0
     for t in tables:
-        n = _send_table(t, log)
+        for attempt in range(3):
+            try:
+                n = _send_table(t, log)
+                break
+            except ApiError as e:
+                if attempt == 2 or "접속 실패" not in str(e):
+                    raise
+                log(f"  {t}: 끊김({e}), 비우고 다시 보냄")
+                query(f"TRUNCATE {t} CASCADE")
         total += n
         log(f"{t}: {n:,}줄")
 
