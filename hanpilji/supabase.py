@@ -32,6 +32,10 @@ class ApiError(RuntimeError):
     pass
 
 
+class Ambiguous(ApiError):
+    """요청이 DB에 들어갔는지 알 수 없는 실패(응답 도중 끊김 · 게이트웨이 시간 초과)."""
+
+
 def enabled():
     return bool(os.environ.get("SUPABASE_ACCESS_TOKEN"))
 
@@ -44,8 +48,10 @@ def project_ref(dsn=None):
     return m.group(1)
 
 
-def query(sql, read_only=False, ref=None, retries=3):
-    """SQL 한 덩어리(여러 문장 가능)를 실행하고 마지막 문장의 결과를 dict 목록으로 돌려줌."""
+def query(sql, read_only=False, ref=None, retries=3, idempotent=False):
+    """SQL 한 덩어리(여러 문장 가능)를 실행하고 마지막 문장의 결과를 dict 목록으로 돌려줌.
+    429 · 503은 실행 전에 막힌 것이라 늘 다시 보냄. 끊김 · 502 · 504는 이미 실행됐을 수 있어
+    idempotent(조회처럼 두 번 돌려도 같은 것)일 때만 다시 보내고, 아니면 Ambiguous를 냄."""
     body = json.dumps({"query": sql, "read_only": read_only}).encode()
     req = urllib.request.Request(
         API.format(ref=ref or project_ref()), data=body, method="POST",
@@ -57,15 +63,16 @@ def query(sql, read_only=False, ref=None, retries=3):
                 return json.loads(r.read() or b"[]") or []
         except urllib.error.HTTPError as e:
             msg = e.read().decode("utf-8", "replace")[:500]
-            if e.code in (429, 502, 503, 504) and attempt < retries:
+            unsure = e.code in (502, 504)
+            if (e.code in (429, 503) or (unsure and idempotent)) and attempt < retries:
                 time.sleep(2 ** attempt * 3)
                 continue
-            raise ApiError(f"HTTP {e.code}: {msg}") from None
+            raise (Ambiguous if unsure else ApiError)(f"HTTP {e.code}: {msg}") from None
         except (urllib.error.URLError, OSError) as e:   # 응답 도중 끊김(ConnectionResetError)도 포함
-            if attempt < retries:
+            if idempotent and attempt < retries:
                 time.sleep(2 ** attempt * 3)
                 continue
-            raise ApiError(f"접속 실패: {e}") from None
+            raise Ambiguous(f"접속 실패: {e}") from None
 
 
 def literal(v):
@@ -139,7 +146,7 @@ class SupabaseConn:
             prefix += f"SET LOCAL ROLE {self.role}; "
         # 결과를 줄마다 JSON으로 받아야 numeric이 문자열이 아닌 숫자로 옴(열 순서도 그대로)
         wrapped = f"SELECT row_to_json(t) AS r FROM ({bind(sql, params)}) t"
-        return _Cursor([row["r"] for row in query(prefix + wrapped, ref=self.ref)])
+        return _Cursor([row["r"] for row in query(prefix + wrapped, ref=self.ref, idempotent=True)])
 
     def rollback(self):
         pass
@@ -217,10 +224,10 @@ def _send_table(table, log):
             sql = (f"INSERT INTO {table} SELECT * FROM json_populate_recordset(NULL::{table}, "
                    + literal(payload) + ")")
             try:
-                # 끊긴 요청이 이미 들어갔을 수 있어 여기서는 다시 보내지 않음(테이블째 다시 보냄)
-                query("SET standard_conforming_strings = on; " + sql, retries=0)
+                # 끊긴 요청은 이미 들어갔을 수 있어 Ambiguous로 올려 테이블째 다시 보냄
+                query("SET standard_conforming_strings = on; " + sql)
             except ApiError as e:
-                if "413" not in str(e) or len(rows) == 1:
+                if isinstance(e, Ambiguous) or not str(e).startswith("HTTP 413") or len(rows) == 1:
                     raise
                 half = len(rows) // 2
                 return flush(rows[:half]) + flush(rows[half:])
@@ -246,7 +253,7 @@ def counts_local():
 
 def counts_remote(tables):
     sql = " UNION ALL ".join(f"SELECT '{t}' AS t, count(*) AS n FROM {t}" for t in tables)
-    return {r["t"]: int(r["n"]) for r in query(sql)}
+    return {r["t"]: int(r["n"]) for r in query(sql, idempotent=True)}
 
 
 def restore(dump, log=print):
@@ -271,11 +278,11 @@ def restore(dump, log=print):
             try:
                 n = _send_table(t, log)
                 break
-            except ApiError as e:
-                if attempt == 2 or "접속 실패" not in str(e):
+            except Ambiguous as e:
+                query(f"TRUNCATE {t}", idempotent=True)   # 들어갔는지 모르는 묶음까지 비움(마지막 실패여도 반쯤 찬 표를 남기지 않음)
+                if attempt == 2:
                     raise
                 log(f"  {t}: 끊김({e}), 비우고 다시 보냄")
-                query(f"TRUNCATE {t} CASCADE")
         total += n
         log(f"{t}: {n:,}줄")
 
