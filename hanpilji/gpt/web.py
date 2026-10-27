@@ -20,7 +20,7 @@ from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hanpilji import config as config_mod
-from hanpilji.gpt import engine, llm
+from hanpilji.gpt import engine, llm, tools
 
 MAX_SESSIONS = 200
 MAX_QUESTION = 1000
@@ -32,40 +32,84 @@ PAGE = """<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>한필지 부동산 GPT</title>
 <style>
-:root{--bg:#f7f6f2;--card:#fff;--ink:#1d2433;--muted:#6b7385;--line:#e4e2da;--accent:#2f6f4f;--me:#e9f2ec}
-@media (prefers-color-scheme:dark){:root{--bg:#14171d;--card:#1d222b;--ink:#e8eaef;--muted:#9aa3b5;--line:#2c333f;--accent:#7cc79f;--me:#1f3328}}
+:root{--bg:#f7f6f2;--card:#fff;--ink:#1d2433;--muted:#6b7385;--line:#e4e2da;--accent:#2f6f4f;--on-accent:#fff;--me:#e9f2ec;--soft:#f1efe8;--warn:#9a6a12}
+@media (prefers-color-scheme:dark){:root{--bg:#14171d;--card:#1d222b;--ink:#e8eaef;--muted:#9aa3b5;--line:#2c333f;--accent:#7cc79f;--on-accent:#10221a;--me:#1f3328;--soft:#232a35;--warn:#e0b25c}}
 *{box-sizing:border-box}body{margin:0;background:var(--bg);color:var(--ink);font:16px/1.6 -apple-system,"Apple SD Gothic Neo","Noto Sans KR",sans-serif}
 main{max-width:760px;margin:0 auto;padding:24px 16px 120px}
-h1{font-size:22px;margin:0 0 4px}.sub{color:var(--muted);font-size:14px;margin:0 0 20px}
-.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:20px}
+h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}.sub{color:var(--muted);font-size:14px;margin:0 0 16px}
+.chips{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:16px}
 .chips button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer}
 .msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:12px 0;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
 .me{background:var(--me);margin-left:15%}
 .src{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);color:var(--muted);font-size:13px}
+.look{display:flex;gap:8px}.look input{flex:1}
+.pc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
+.pc h3{margin:0;font-size:19px}.pc .addr{color:var(--muted);font-size:14px;margin:2px 0 12px}
+.grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:10px}
+.sec{background:var(--soft);border-radius:10px;padding:10px 12px;font-size:14px}
+.sec b{display:block;font-size:13px;color:var(--muted);font-weight:600;margin-bottom:4px}
+.sec .big{font-size:18px;font-weight:700}.todo{color:var(--warn)}
+table{width:100%;border-collapse:collapse;font-size:13px;margin-top:10px}td,th{padding:4px 6px;border-bottom:1px solid var(--line);text-align:left}
+th{color:var(--muted);font-weight:600}td.n,th.n{text-align:right;font-variant-numeric:tabular-nums}
+.pc .ask{margin-top:12px;border:1px solid var(--accent);background:none;color:var(--accent);border-radius:8px;padding:6px 12px;font:inherit;font-size:14px;cursor:pointer}
 form{position:fixed;left:0;right:0;bottom:0;background:var(--bg);border-top:1px solid var(--line);padding:12px 16px}
 .row{max-width:760px;margin:0 auto;display:flex;gap:8px}
-input{flex:1;min-width:0;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
-form button{font:inherit;padding:10px 16px;border:0;border-radius:10px;background:var(--accent);color:#fff;cursor:pointer}
-form button:disabled{opacity:.5}
+input{min-width:0;font:inherit;padding:10px 12px;border-radius:10px;border:1px solid var(--line);background:var(--card);color:var(--ink)}
+.row input{flex:1}
+button.go{font:inherit;padding:10px 16px;border:0;border-radius:10px;background:var(--accent);color:var(--on-accent);cursor:pointer}
+button:disabled{opacity:.5}
 </style></head><body><main>
 <h1>한필지 부동산 GPT</h1>
 <p class="sub">공공데이터(실거래가 · 행위제한 · 법령)로만 답합니다. 데이터에 없으면 모른다고 합니다. 투자 조언은 하지 않습니다.</p>
+<h2>단지 · 주소 한눈에</h2>
+<div class="look"><input id="cq" autocomplete="off" placeholder="단지명 또는 동 지번. 예: 도곡렉슬, 대치동 316" maxlength="100"><button class="go" id="cb" type="button">보기</button></div>
+<div id="cards"></div>
+<h2>물어보기</h2>
 <div class="chips" id="chips"></div>
 <div id="log"></div>
 </main>
-<form id="f"><div class="row"><input id="q" autocomplete="off" placeholder="예: 도곡렉슬 84㎡ 최근 1년 매매가랑 전세가" maxlength="1000"><button id="b">묻기</button></div></form>
+<form id="f"><div class="row"><input id="q" autocomplete="off" placeholder="예: 도곡렉슬 84㎡ 최근 1년 매매가랑 전세가" maxlength="1000"><button class="go" id="b">묻기</button></div></form>
 <script>
-const EX=["도곡렉슬 84㎡ 최근 1년 매매가랑 전세가 알려줘","제2종일반주거지역에 휴게음식점 지을 수 있어?","전월세 계약 갱신할 때 임대료 5% 상한 조문 찾아줘","래미안대치팰리스 지금 사도 될까?"];
-const log=document.getElementById("log"),q=document.getElementById("q"),b=document.getElementById("b");
+const EX=["도곡렉슬 종합해서 알려줘","은마 76㎡ 최근 6개월 최고가","강남구 최근 1년 전세 거래 많은 단지 3곳","제2종일반주거지역에 휴게음식점 지을 수 있어?","전월세 계약 갱신할 때 임대료 5% 상한 조문 찾아줘","래미안대치팰리스 지금 사도 될까?"];
+const $=id=>document.getElementById(id),log=$("log"),q=$("q"),b=$("b");
 let sid=null;const token=new URLSearchParams(location.search).get("token")||"";
-for(const t of EX){const c=document.createElement("button");c.type="button";c.textContent=t;c.onclick=()=>{q.value=t;send()};document.getElementById("chips").append(c)}
-function add(text,cls,src){const d=document.createElement("div");d.className="msg "+(cls||"");d.textContent=text;
- if(src){const s=document.createElement("div");s.className="src";s.textContent=src;d.append(s)}log.append(d);d.scrollIntoView({behavior:"smooth"});return d}
+for(const t of EX){const c=document.createElement("button");c.type="button";c.textContent=t;c.onclick=()=>{q.value=t;send()};$("chips").append(c)}
+function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
+function won(v){if(v==null)return"-";const eok=Math.floor(v/1e8),man=Math.round(v%1e8/1e4);
+ return (eok?eok.toLocaleString()+"억 ":"")+(man?man.toLocaleString()+"만 ":"")+"원"}
+function add(text,cls,src){const d=el("div","msg "+(cls||""),text);if(src)d.append(el("div","src",src));log.append(d);d.scrollIntoView({behavior:"smooth"});return d}
+function sec(title,lines,todo){const s=el("div","sec");s.append(el("b",null,title));
+ if(todo){s.append(el("div","todo","데이터 수집 전"))}else for(const[l,c]of lines)s.append(el("div",c||null,l));return s}
+function card(r,deals){const c=el("div","pc");c.append(el("h3",null,r.complex_name));
+ c.append(el("div","addr",[r.address,r.road_addr&&("도로명 "+r.road_addr)].filter(Boolean).join(" · ")));
+ const g=el("div","grid"),miss=r.missing||[],has=k=>!miss.some(m=>m.startsWith(k));
+ g.append(sec("위치",[["PNU "+(r.pnu||"없음")],["준공 "+(r.build_year||"-")+"년"],["전용 "+(r.area_types||[]).join(" · ")+"㎡"]]));
+ g.append(sec("거래 (최근 12개월)",[[r.trade_count?"평당 "+won(r.trade_per_pyeong):"매매 없음","big"],
+  ["매매 "+r.trade_count+"건 · 마지막 "+(r.trade_last_date?r.trade_last_date+" "+won(r.trade_last_amount)+" ("+r.trade_last_area+"㎡)":"-")],
+  ["전세 "+r.jeonse_count+"건 평균 "+won(r.jeonse_avg)+(r.jeonse_ratio!=null?" · 전세가율 "+r.jeonse_ratio+"%":"")],["월세 "+r.wolse_count+"건"]]));
+ g.append(sec("토지",[["지목 "+(r.land_category||"-")+" · 면적 "+(r.land_area_m2||"-")+"㎡"],["공시지가 "+(r.land_price_per_m2?won(r.land_price_per_m2)+"/㎡ ("+r.land_price_year+")":"-")]],!has("토지")));
+ g.append(sec("용도지역 · 규제",[[r.zones||"-"],["행위제한 규칙 "+(r.zone_rule_count||0)+"개"]],!has("용도지역")));
+ g.append(sec("건물",[[(r.bld_main_use||"-")+" · 지상 "+(r.bld_floors_above||"-")+"층"],["사용승인 "+(r.bld_approval_date||"-")+" · 주차 "+(r.bld_parking??"-")+"대"],
+  ["승강기 "+(r.bld_elevator==null?"-":r.bld_elevator?"있음":"없음")+" · 위반 "+(r.bld_violation==null?"-":r.bld_violation?"있음":"없음")]],!has("건축물대장")));
+ c.append(g);
+ if(deals&&deals.length){const t=el("table");const h=el("tr");["계약일","전용","층","매매가"].forEach((x,i)=>h.append(el("th",i?"n":null,x)));t.append(h);
+  for(const d of deals.slice(0,5)){const tr=el("tr");tr.append(el("td",null,d.contract_date),el("td","n",d.area_m2+"㎡"),el("td","n",(d.floor??"-")+"층"),el("td","n",won(d.amount)));t.append(tr)}
+  c.append(el("div","src","최근 매매 5건"),t)}
+ c.append(el("div","src",(r.sources||"")+" · 기준 "+(r.asof||"-")+(miss.length?" · 수집 전: "+miss.join(", "):"")));
+ const a=el("button","ask","이 단지 GPT에게 자세히 묻기");a.type="button";a.onclick=()=>{q.value=r.complex_name+" 종합해서 알려줘";send()};c.append(a);return c}
+async function look(){const t=$("cq").value.trim();if(!t)return;const box=$("cards");box.textContent="찾는 중…";$("cb").disabled=true;
+ try{const r=await fetch("/api/card?q="+encodeURIComponent(t),{headers:{"X-Token":token}});const j=await r.json();box.textContent="";
+  if(!r.ok){box.append(el("div","msg",j.error));return}
+  if(!j.rows.length){box.append(el("div","msg","「"+t+"」에 맞는 단지가 없습니다. 지금 데이터는 서울 강남구 아파트만 있습니다."))}
+  for(const row of j.rows){row.sources=j.sources.join(" · ");row.asof=j.asof;box.append(card(row,j.deals[row.complex_name]))}
+  if(j.row_total>j.rows.length)box.append(el("div","src","전체 "+j.row_total+"곳 중 "+j.rows.length+"곳. 이름을 더 자세히 써 주세요."))}
+ catch(e){box.textContent="연결 오류: "+e}$("cb").disabled=false}
+$("cb").onclick=look;$("cq").onkeydown=e=>{if(e.key==="Enter")look()};
 async function send(){const t=q.value.trim();if(!t)return;q.value="";add(t,"me");b.disabled=true;const w=add("찾는 중…");
  try{const r=await fetch("/api/ask",{method:"POST",headers:{"Content-Type":"application/json","X-Token":token},body:JSON.stringify({q:t,sid})});
   const j=await r.json();w.remove();if(j.sid)sid=j.sid;add(j.answer||j.error,"",j.footer)}catch(e){w.textContent="연결 오류: "+e}
  b.disabled=false;q.focus()}
-document.getElementById("f").onsubmit=e=>{e.preventDefault();send()};
+$("f").onsubmit=e=>{e.preventDefault();send()};
 </script></body></html>"""
 
 
@@ -104,10 +148,29 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR):
         def do_GET(self):
             if not self._allowed():
                 return self._json(403, {"error": "토큰이 필요합니다"})
-            if urlsplit(self.path).path in ("/", "/index.html"):
+            url = urlsplit(self.path)
+            if url.path in ("/", "/index.html"):
                 self._send(200, PAGE, "text/html; charset=utf-8")
+            elif url.path == "/api/card":
+                self._card(parse_qs(url.query).get("q", [""])[0].strip()[:100])
             else:
                 self._json(404, {"error": "없는 주소"})
+
+        def _card(self, query):
+            """단지 카드(LLM 없이 마트 함수만 부름, 요금 없음) + 단지마다 최근 매매 몇 건."""
+            if not query:
+                return self._json(400, {"error": "단지명이나 주소를 넣어 주세요"})
+            try:
+                with engine.connect(cfg) as conn:
+                    out = tools.run(conn, "q_property_card", {"query": query})
+                    out["deals"] = {}
+                    for r in out["rows"]:   # 이름 일부 검색이라 다른 단지가 섞일 수 있어 같은 이름만 남김
+                        rows = tools.run(conn, "q_deal_list", {"name": r["complex_name"]})["rows"]
+                        out["deals"][r["complex_name"]] = [d for d in rows if d["complex_name"] == r["complex_name"]][:5]
+            except Exception as e:
+                print(f"오류: {e!r}", file=sys.stderr)
+                return self._json(500, {"error": "카드를 만드는 중 오류가 났습니다."})
+            self._json(200, out)
 
         def do_POST(self):
             if self.path != "/api/ask":

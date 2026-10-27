@@ -137,10 +137,23 @@ def _ensure_dims(cur, lawd, row, asof):
            ON CONFLICT (lawd_cd) DO NOTHING""",
         (lawd, _s(row, "umdNm") if not lawd.endswith("00000") else None, "국토교통부 실거래가 응답", asof),
     )
+    # 단지는 동 이름 → 법정동 코드(core.dim_region)로 법정동 단위에 둠. 코드표에 없으면 거래와 같은 시군구 단위
     cur.execute(
-        """INSERT INTO core.dim_complex (complex_id, name, lawd_cd, source, asof) VALUES (%s, %s, %s, %s, %s)
-           ON CONFLICT (complex_id) DO UPDATE SET asof = excluded.asof""",
-        (complex_key(row), _s(row, "aptNm") or "(이름 없음)", lawd, "국토교통부 실거래가(시군구 · 동 · 지번 · 단지명)", asof),
+        """WITH v AS (
+               SELECT coalesce((SELECT g.lawd_cd FROM core.dim_region g
+                                WHERE left(g.lawd_cd, 5) = left(%(lawd)s, 5) AND g.emd = %(emd)s LIMIT 1),
+                               %(lawd)s) AS lawd)
+           INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, road_addr, build_year, pnu, source, asof)
+           SELECT %(id)s, %(name)s, v.lawd, %(jibun)s, %(road)s, %(year)s, core.make_pnu(v.lawd, %(jibun)s),
+                  %(src)s, %(asof)s FROM v
+           ON CONFLICT (complex_id) DO UPDATE SET asof = excluded.asof, lawd_cd = excluded.lawd_cd,
+               jibun = coalesce(excluded.jibun, core.dim_complex.jibun),
+               pnu = coalesce(excluded.pnu, core.dim_complex.pnu),
+               road_addr = coalesce(excluded.road_addr, core.dim_complex.road_addr),
+               build_year = greatest(excluded.build_year, core.dim_complex.build_year)""",
+        {"id": complex_key(row), "name": _s(row, "aptNm") or "(이름 없음)", "lawd": lawd, "emd": _s(row, "umdNm"),
+         "jibun": _s(row, "jibun") or None, "road": _s(row, "roadnm") or None, "year": _int(_s(row, "buildYear")),
+         "src": "국토교통부 실거래가(시군구 · 동 · 지번 · 단지명)", "asof": asof},
     )
 
 

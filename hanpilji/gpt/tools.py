@@ -1,4 +1,4 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 6개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수 7개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
@@ -48,6 +48,27 @@ TOOLS = [
         },
         "sql": "SELECT * FROM mart.q_complex_price(%s::text, %s::text, %s::numeric, %s::int)",
         "args": lambda a: (_sigungu(a.get("sigungu")), a["name"], a.get("area_m2"), _months(a)),
+    },
+    {
+        "name": "q_property_card",
+        "description": (
+            "단지명 또는 「동 지번」(예: 도곡동 527) 하나로 그 단지의 종합 카드. 위치(주소 · 도로명 · PNU · 준공연도), "
+            "전용면적 타입, 최근 거래 요약(매매 건수 · 평당가 · 마지막 거래, 전세 건수 · 평균 · 전세가율, 월세 건수), "
+            "토지(지목 · 면적 · 공시지가) · 용도지역 · 규제 규칙 수 · 건축물대장(용도 · 층수 · 주차 · 위반)을 한 줄로 줌. "
+            "missing에 아직 수집 전이라 비어 있는 칸이 적혀 있으니 그 칸은 「데이터 수집 전」이라고 말할 것. "
+            "「○○ 알려줘」 「이 주소 어때」처럼 한 곳을 종합해서 물을 때 먼저 부름. 같은 이름이 여럿이면 최대 5줄. 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "단지명 일부 또는 「동 지번」. 예: 도곡렉슬, 대치동 1027"},
+                "months": {"type": "integer", "description": "거래 요약 기간(개월). 기본 12, 최대 36"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_property_card(%s::text, %s::text, %s::int)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a["query"], _months(a)),
     },
     {
         "name": "q_deal_list",
@@ -201,6 +222,8 @@ def check_args(name, args):
 
 
 def _plain(v):
+    if isinstance(v, (list, tuple)):
+        return [_plain(x) for x in v]
     if isinstance(v, decimal.Decimal):
         return int(v) if v == v.to_integral_value() else float(v)
     if isinstance(v, (datetime.date, datetime.datetime)):
