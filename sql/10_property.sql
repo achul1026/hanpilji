@@ -99,20 +99,20 @@ LANGUAGE sql STABLE AS $$
                (array_agg(d.amount ORDER BY d.contract_date DESC, d.amount DESC))[1] AS last_amt,
                (array_agg(d.area ORDER BY d.contract_date DESC, d.amount DESC))[1] AS last_area, max(d.asof) AS asof
         FROM core.fact_deal d JOIN c USING (complex_id), win
-        WHERE NOT d.is_cancelled AND d.contract_date >= win.d_from GROUP BY 1
+        WHERE NOT d.is_cancelled AND d.contract_date BETWEEN win.d_from AND win.d_to GROUP BY 1
     ), j AS (
         SELECT e.complex_id, count(*) FILTER (WHERE e.monthly_rent = 0) AS jn,
                avg(e.deposit) FILTER (WHERE e.monthly_rent = 0)::bigint AS j_avg,
                count(*) FILTER (WHERE e.monthly_rent > 0) AS wn, max(e.asof) AS asof
         FROM core.fact_rent e JOIN c USING (complex_id), win
-        WHERE e.contract_date >= win.d_from GROUP BY 1
+        WHERE e.contract_date BETWEEN win.d_from AND win.d_to GROUP BY 1
     ), types AS (
         SELECT d.complex_id, array_agg(DISTINCT round(d.area)) AS a
         FROM (SELECT complex_id, area FROM core.fact_deal UNION ALL SELECT complex_id, area FROM core.fact_rent) d
         JOIN c USING (complex_id) WHERE d.area > 0 GROUP BY 1
     ), avg_t AS (
         SELECT d.complex_id, avg(d.amount)::numeric AS a FROM core.fact_deal d JOIN c USING (complex_id), win
-        WHERE NOT d.is_cancelled AND d.contract_date >= win.d_from GROUP BY 1
+        WHERE NOT d.is_cancelled AND d.contract_date BETWEEN win.d_from AND win.d_to GROUP BY 1
     ), land AS (
         SELECT p.pnu, p.land_category, p.area_m2,
                (SELECT lp.price_per_m2 FROM core.fact_land_price lp WHERE lp.pnu = p.pnu ORDER BY lp.base_year DESC LIMIT 1)::bigint AS price,
@@ -155,4 +155,5 @@ LANGUAGE sql STABLE AS $$
 $$;
 ALTER FUNCTION mart.q_property_card(text, text, int) SECURITY DEFINER;
 ALTER FUNCTION mart.q_property_card(text, text, int) SET search_path = pg_catalog, public;
+REVOKE EXECUTE ON FUNCTION mart.q_property_card(text, text, int) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION mart.q_property_card(text, text, int) TO hanpilji_gpt;
