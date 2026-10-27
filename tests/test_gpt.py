@@ -31,7 +31,8 @@ def call(name, args, id="t1"):
 class Tools(unittest.TestCase):
     def test_specs_are_mart_functions(self):
         self.assertEqual({t["name"] for t in tools.specs()},
-                         {"q_complex_price", "q_law_search", "q_zoning_check", "q_building_filter"})
+                         {"q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
+                          "q_building_filter"})
         for t in tools.TOOLS:
             self.assertTrue(t["sql"].startswith("SELECT * FROM mart."), "도구는 mart 함수만 부름")
 
@@ -43,6 +44,8 @@ class Tools(unittest.TestCase):
             ("q_complex_price", {"name": "a", "sql": "x"}, "모르는 인자"),
             ("q_complex_price", {"name": "a", "months": "12"}, "integer"),
             ("q_complex_price", {"name": "a", "months": True}, "integer"),
+            ("q_deal_list", {"name": "a", "kind": "분양"}, "중 하나"),
+            ("q_complex_rank", {"metric": "price"}, "중 하나"),
         ]:
             with self.assertRaises(tools.ToolError, msg=name) as e:
                 tools.check_args(name, args)
@@ -52,6 +55,9 @@ class Tools(unittest.TestCase):
         args = tools.BY_NAME["q_complex_price"]["args"]
         self.assertEqual(args({"name": "a"}), ("11680", "a", None, 12))
         self.assertEqual(args({"name": "a", "sigungu": "강남구", "months": 999}), ("11680", "a", None, 36))
+        self.assertEqual(tools.BY_NAME["q_deal_list"]["args"]({"name": "a"}), ("11680", "a", "매매", None, 12, "recent"))
+        self.assertEqual(tools.BY_NAME["q_complex_rank"]["args"]({"metric": "jeonse_count", "limit": 99}),
+                         ("11680", "jeonse_count", 12, None, None, 20, "desc"))
 
 
 class Engine(unittest.TestCase):
@@ -236,6 +242,21 @@ class WithDb(unittest.TestCase):
             self.assertNotIn("row_total", out["rows"][0])
             json.dumps(out, ensure_ascii=False)   # 날짜 · 숫자가 JSON으로 바뀜
             self.assertEqual(tools.run(conn, "q_complex_price", {"name": "없는단지"})["row_total"], 0)
+
+    def test_deal_list_and_rank(self):
+        with engine.connect(self.cfg) as conn:
+            top = tools.run(conn, "q_deal_list", {"name": "세곡 푸르지오", "order": "price_desc"})
+            self.assertGreater(top["row_total"], 0)
+            amounts = [r["amount"] for r in top["rows"]]
+            self.assertEqual(amounts, sorted(amounts, reverse=True), "비싼 순이면 첫 줄이 최고가")
+            self.assertEqual({r["kind"] for r in top["rows"]}, {"매매"})
+            rent = tools.run(conn, "q_deal_list", {"name": "세곡 푸르지오", "kind": "전월세"})
+            self.assertTrue({r["kind"] for r in rent["rows"]} <= {"전세", "월세"})
+            rank = tools.run(conn, "q_complex_rank", {"metric": "trade_count", "limit": 3})
+            self.assertEqual(rank["rows"][0]["rank"], 1)
+            self.assertIn("세곡푸르지오", rank["rows"][0]["complex_name"].replace(" ", ""))
+            self.assertEqual(tools.run(conn, "q_complex_rank", {"metric": "trade_count", "min_build_year": 2100})
+                             ["row_total"], 0)
 
     def test_every_tool_runs(self):
         with engine.connect(self.cfg) as conn:

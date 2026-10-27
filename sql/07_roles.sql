@@ -23,3 +23,7 @@ ALTER FUNCTION mart.q_law_search(text, text) SET search_path = pg_catalog, publi
 ALTER FUNCTION mart.q_building_filter(text, int, boolean, boolean, text, int) SET search_path = pg_catalog, public;
 ALTER FUNCTION mart.q_complex_price(text, text, numeric, int, numeric) SECURITY DEFINER;
 ALTER FUNCTION mart.q_complex_price(text, text, numeric, int, numeric) SET search_path = pg_catalog, public;
+ALTER FUNCTION mart.q_deal_list(text, text, text, numeric, int, text, numeric) SECURITY DEFINER;
+ALTER FUNCTION mart.q_deal_list(text, text, text, numeric, int, text, numeric) SET search_path = pg_catalog, public;
+ALTER FUNCTION mart.q_complex_rank(text, text, int, numeric, int, int, text, int, numeric) SECURITY DEFINER;
+ALTER FUNCTION mart.q_complex_rank(text, text, int, numeric, int, int, text, int, numeric) SET search_path = pg_catalog, public;
