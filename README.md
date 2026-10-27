@@ -9,7 +9,7 @@
 
 ![stage](https://img.shields.io/badge/stage-3%20GPT%20%EC%97%B0%EA%B2%B0-f6d365?style=for-the-badge)
 ![laws](https://img.shields.io/badge/%EB%B2%95%EB%A0%B9-17%EA%B0%9C%20%C2%B7%201%2C542%EC%A1%B0-81c995?style=for-the-badge)
-![tests](https://img.shields.io/badge/tests-48%20passed-4fc3f7?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-54%20passed-4fc3f7?style=for-the-badge)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Claude](https://img.shields.io/badge/LLM-Claude%20API-d97757?logo=anthropic&logoColor=white)
@@ -146,7 +146,8 @@ sequenceDiagram
 | 모르면 모른다 | 0건이면 「가진 데이터에는 없어 모릅니다」 + 무엇이 없는지(지역 · 기간 · 종류) |
 | 건수를 밝힘 | 「매매 21건 평균」, 「전체 39건 중 10건」. 근거 줄에도 `shown` / `row_total` |
 | 투자 조언 안 함 | 사라 · 팔아라 · 오른다 같은 권유 · 전망 대신 확인 가능한 사실만 |
-| 틀린 호출 막기 | 없는 도구 · 모르는 인자 · 형식이 틀린 인자는 실행하지 않고 모델에게 오류로 돌려줌. 질문 하나에 도구 최대 6번 |
+| 틀린 호출 막기 | 없는 도구 · 모르는 인자 · 형식이 틀린 인자는 실행하지 않고 모델에게 오류로 돌려줌. 질문 하나에 주고받기 최대 6번 · 도구 실행 최대 12개, 마지막 결과는 정리할 기회를 한 번 더 줌 |
+| 대화 길이 | 이어 묻기에는 최근 질문 10개만 넘김(문맥 · 메모리가 끝없이 늘지 않게) |
 | DB 보호 | 읽기 전용 접속(`default_transaction_read_only`) · 5초 제한. `hanpilji_gpt` 계정은 `mart`만 읽음 |
 
 ### 써 보기
@@ -162,6 +163,8 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 채팅 →
 ```
 
 웹 채팅은 파이썬 표준 라이브러리만 씁니다. 예시 질문 버튼 4개(시세 · 용도지역 · 법령 · 투자 질문)가 있어 바로 시연할 수 있습니다.
+
+남에게 열 때(`--host 0.0.0.0`)는 질문마다 API 요금이 나가므로 `HANPILJI_WEB_TOKEN`을 정해야만 켜지고, 주소는 `http://서버:8000/?token=정한값`입니다. 접속 주소마다 시간당 30개까지 받습니다.
 
 > [!IMPORTANT]
 > 클라우드 환경의 DB는 세션마다 새로 뜨는 로컬 PostgreSQL이라 데이터가 남지 않습니다. 새 세션에서는 [빠른 시작](#-빠른-시작)대로 `init_db.sh` → `law` → `rtms` → `luinfo`를 먼저 돌리세요(강남구 기준 실거래가만 10분쯤 걸림).

@@ -62,23 +62,55 @@ def footer(calls):
     return "\n".join(lines)
 
 
+MAX_RESULT = "조회를 여러 번 했지만 답을 정리하지 못했습니다. 질문을 좁혀서 다시 물어 주세요."
+KEEP_TURNS = 10      # 이어 묻기에 넘기는 앞선 질문 수(오래된 것부터 버림. 문맥 · 메모리가 끝없이 늘지 않게)
+MAX_CALLS = 12       # 질문 하나에 실행하는 도구 호출 수 상한(한 번에 여러 개를 불러도 합쳐서 셈)
+
+
+def trim(history, keep=KEEP_TURNS):
+    """앞선 대화에서 최근 질문 keep개부터만 남김. 질문(user) 칸에서 끊어서 도구 호출 · 결과 짝이 깨지지 않게 함."""
+    history = list(history or [])
+    starts = [i for i, m in enumerate(history) if m["role"] == "user"]
+    return history[starts[-keep]:] if len(starts) > keep else history
+
+
+def _ended(messages, text, calls, stop, model):
+    """엔진이 만든 답(거절 · 한도)도 대화에 남겨서 이어 묻기 때 모델이 사용자가 본 답을 알게 함."""
+    messages.append({"role": "assistant", "text": text, "calls": [], "raw": None, "provider": ""})
+    return Answer(text, calls, footer(calls), stop, model, messages)
+
+
+def rounds_from(cfg):
+    """config.toml [gpt] max_rounds를 확인해 돌려줌. 시작할 때 불러서 잘못된 값이면 바로 알림."""
+    n = cfg.get("gpt", {}).get("max_rounds", 6)
+    if not isinstance(n, int) or isinstance(n, bool) or n < 1:
+        raise ValueError(f"config.toml [gpt] max_rounds는 1 이상 정수여야 함: {n!r}")
+    return n
+
+
 def ask(question, llm, conn, history=None, max_rounds=6, today=None):
-    """질문 하나에 답함. history는 앞선 Answer.messages(이어 묻기)."""
+    """질문 하나에 답함. history는 앞선 Answer.messages(이어 묻기).
+    도구는 최대 max_rounds번 주고받고, 마지막 결과를 정리할 기회를 한 번 더 줌."""
+    rounds_from({"gpt": {"max_rounds": max_rounds}})
     system = SYSTEM.format(today=(today or datetime.date.today()).isoformat())
     specs = tools_mod.specs()
-    messages = list(history or []) + [{"role": "user", "text": question}]
+    messages = trim(history) + [{"role": "user", "text": question}]
     calls = []
-    for _ in range(max_rounds):
+    for round_no in range(max_rounds + 1):
         r = llm.chat(system, messages, specs)
         if r.stop == "refusal":
-            return Answer(FALLBACK_REFUSAL, calls, footer(calls), r.stop, r.model, messages)
+            return _ended(messages, FALLBACK_REFUSAL, calls, r.stop, r.model)
         messages.append({"role": "assistant", "text": r.text, "calls": r.calls, "raw": r.raw,
                          "provider": getattr(llm, "name", "")})
         if not r.calls:
             text = r.text if r.stop != "max_tokens" else r.text + "\n\n(답이 길어 중간에 끊겼습니다)"
             return Answer(text, calls, footer(calls), r.stop, r.model, messages)
+        last = round_no == max_rounds
         results = []
         for c in r.calls:
+            if last or len(calls) >= MAX_CALLS:   # 실행하지 않고 짝만 맞춰 둠(도구 호출엔 결과가 꼭 따라야 함)
+                results.append({"id": c["id"], "content": "호출 한도를 넘어 실행하지 않음", "is_error": True})
+                continue
             try:
                 out = tools_mod.run(conn, c["name"], c["input"])
                 results.append({"id": c["id"], "content": json.dumps(out, ensure_ascii=False)})
@@ -92,8 +124,8 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None):
                 results.append({"id": c["id"], "content": f"조회 실패: {type(e).__name__}", "is_error": True})
                 calls.append({"tool": c["name"], "args": c["input"], "error": type(e).__name__})
         messages.append({"role": "tool", "results": results})
-    return Answer("조회를 여러 번 했지만 답을 정리하지 못했습니다. 질문을 좁혀서 다시 물어 주세요.",
-                  calls, footer(calls), "max_rounds", "", messages)
+        if last:
+            return _ended(messages, MAX_RESULT, calls, "max_rounds", r.model)
 
 
 def connect(cfg):

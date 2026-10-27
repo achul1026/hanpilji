@@ -97,6 +97,8 @@ class Engine(unittest.TestCase):
         ans = engine.ask("증액", bot, conn)
         self.assertEqual(bot.seen[1]["messages"][-1]["results"][0]["content"], "조회 실패: OperationalError")
         self.assertIn("오류: OperationalError", ans.footer)
+        self.assertNotIn("connection lost", ans.full(), "DB 오류 문구는 사용자에게도 모델에게도 보이지 않음")
+        self.assertNotIn("connection lost", json.dumps(bot.seen[1]["messages"][-1], ensure_ascii=False))
 
     def test_no_tool_is_marked(self):
         ans, _ = self.run_with([Reply(text="안녕하세요.", stop="end")], [])
@@ -104,20 +106,58 @@ class Engine(unittest.TestCase):
 
     def test_refusal(self):
         ans, _ = self.run_with([Reply(stop="refusal")], [])
-        self.assertEqual(ans.text, engine.FALLBACK_REFUSAL)
+        self.assertIn("답을 드리기 어렵습니다", ans.text)
+        self.assertEqual(ans.messages[-1], {"role": "assistant", "text": ans.text, "calls": [], "raw": None,
+                                            "provider": ""}, "사용자가 본 거절 문구도 대화에 남김")
 
     def test_max_rounds(self):
-        loop = [Reply(calls=[call("q_law_search", {"query": "x"}, id=f"t{i}")], stop="tool") for i in range(3)]
+        loop = [Reply(calls=[call("q_law_search", {"query": "x"}, id=f"t{i}")], stop="tool") for i in range(4)]
         bot = llm.Scripted(loop)
-        with mock.patch.object(tools, "run", side_effect=[{**PRICE_OUT, "rows": []}] * 3):
+        with mock.patch.object(tools, "run", side_effect=[{**PRICE_OUT, "rows": []}] * 3) as run:
             ans = engine.ask("x", bot, conn=None, max_rounds=3)
         self.assertEqual(ans.stop, "max_rounds")
+        self.assertEqual((len(bot.seen), run.call_count), (4, 3), "도구 3번 + 정리할 기회 1번, 4번째 호출은 실행 안 함")
+        self.assertEqual([m["role"] for m in ans.messages[-2:]], ["tool", "assistant"], "호출마다 결과 짝을 맞춤")
+        self.assertTrue(ans.messages[-2]["results"][0]["is_error"])
+
+    def test_last_round_gets_summarized(self):
+        bot = llm.Scripted([Reply(calls=[call("q_complex_price", {"name": "도곡렉슬"})], stop="tool"),
+                            Reply(text="정리", stop="end")])
+        with mock.patch.object(tools, "run", return_value=PRICE_OUT):
+            ans = engine.ask("x", bot, conn=None, max_rounds=1)
+        self.assertEqual((ans.text, ans.stop), ("정리", "end"))
+
+    def test_call_cap_across_parallel_calls(self):
+        many = [call("q_law_search", {"query": f"q{i}"}, id=f"t{i}") for i in range(engine.MAX_CALLS + 3)]
+        bot = llm.Scripted([Reply(calls=many, stop="tool"), Reply(text="끝", stop="end")])
+        with mock.patch.object(tools, "run", return_value=PRICE_OUT) as run:
+            engine.ask("x", bot, conn=None)
+        self.assertEqual(run.call_count, engine.MAX_CALLS)
+        self.assertEqual(len(bot.seen[1]["messages"][-1]["results"]), engine.MAX_CALLS + 3)
+
+    def test_bad_max_rounds(self):
+        for bad in (0, -1, "6", True):
+            with self.assertRaises(ValueError, msg=repr(bad)):
+                engine.rounds_from({"gpt": {"max_rounds": bad}})
+        self.assertEqual(engine.rounds_from({}), 6)
 
     def test_follow_up_keeps_history(self):
         first, _ = self.run_with([Reply(text="안녕하세요.", stop="end")], [])
         bot = llm.Scripted([Reply(text="네.", stop="end")])
         engine.ask("또 물어볼게", bot, None, history=first.messages)
-        self.assertEqual([m["role"] for m in bot.seen[0]["messages"]], ["user", "assistant", "user"])
+        self.assertEqual([(m["role"], m["text"]) for m in bot.seen[0]["messages"]],
+                         [("user", "도곡렉슬 84 시세"), ("assistant", "안녕하세요."), ("user", "또 물어볼게")])
+
+    def test_trim_history_at_question(self):
+        history = []
+        for i in range(engine.KEEP_TURNS + 2):
+            history += [{"role": "user", "text": f"q{i}"},
+                        {"role": "assistant", "text": "", "calls": [call("q_law_search", {"query": "x"})]},
+                        {"role": "tool", "results": [{"id": "t1", "content": "{}"}]},
+                        {"role": "assistant", "text": f"a{i}", "calls": []}]
+        kept = engine.trim(history)
+        self.assertEqual(kept[0], {"role": "user", "text": "q2"})
+        self.assertEqual(len(kept), engine.KEEP_TURNS * 4)
 
 
 def block(**kw):
@@ -208,3 +248,57 @@ class WithDb(unittest.TestCase):
         with engine.connect(self.cfg) as conn:
             with self.assertRaises(psycopg.errors.ReadOnlySqlTransaction):
                 conn.execute("CREATE TABLE mart.x (a int)")
+
+
+class Web(unittest.TestCase):
+    """웹 채팅 서버를 실제 포트로 띄워 요청 처리(키 · DB 없이: 엔진을 가짜로 바꿈)."""
+
+    def serve(self, token=None, per_hour=30):
+        import threading
+        from http.server import ThreadingHTTPServer
+
+        from hanpilji.gpt import web
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler({}, None, 6, token, per_hour))
+        threading.Thread(target=server.serve_forever, daemon=True).start()
+        self.addCleanup(server.server_close)
+        self.addCleanup(server.shutdown)
+        self.base = f"http://127.0.0.1:{server.server_address[1]}"
+        conn = mock.MagicMock()
+        p1 = mock.patch.object(engine, "connect", return_value=conn)
+        p2 = mock.patch.object(engine, "ask", side_effect=lambda q, *a, **k: engine.Answer(
+            f"답:{q}", footer="근거", messages=[{"role": "user", "text": q}]))
+        p1.start(), p2.start()
+        self.addCleanup(mock.patch.stopall)
+
+    def post(self, body, headers=None):
+        import urllib.error
+        import urllib.request
+        data = body if isinstance(body, bytes) else json.dumps(body).encode()
+        req = urllib.request.Request(self.base + "/api/ask", data=data,
+                                     headers={"Content-Type": "application/json", **(headers or {})})
+        try:
+            with urllib.request.urlopen(req) as r:
+                return r.status, json.loads(r.read())
+        except urllib.error.HTTPError as e:
+            return e.code, json.loads(e.read())
+
+    def test_ask_and_bad_bodies(self):
+        self.serve()
+        code, got = self.post({"q": "시세", "sid": ["x"]})
+        self.assertEqual((code, got["answer"], got["footer"]), (200, "답:시세", "근거"))
+        self.assertEqual(self.post({"q": "또", "sid": got["sid"]})[1]["sid"], got["sid"], "같은 창은 같은 대화")
+        self.assertEqual(self.post([1, 2])[0], 400)
+        self.assertEqual(self.post(b"not json")[0], 400)
+        self.assertEqual(self.post({"q": " "})[0], 400)
+        self.assertEqual(self.post({"q": "x" * 20000})[0], 413)
+
+    def test_token_and_rate_limit(self):
+        self.serve(token="s3cret", per_hour=2)
+        self.assertEqual(self.post({"q": "a"})[0], 403)
+        self.assertEqual(self.post({"q": "a"}, {"X-Token": "wrong"})[0], 403)
+        self.assertEqual([self.post({"q": "a"}, {"X-Token": "s3cret"})[0] for _ in range(3)], [200, 200, 429])
+
+    def test_refuses_public_host_without_token(self):
+        from hanpilji.gpt import web
+        os.environ.pop(web.TOKEN_ENV, None)
+        self.assertEqual(web.main(["--host", "0.0.0.0", "--port", "0"]), 2)

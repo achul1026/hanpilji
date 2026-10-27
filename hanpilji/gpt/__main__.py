@@ -19,12 +19,15 @@ def main(argv=None):
     a = p.parse_args(argv)
     cfg = config_mod.load(a.config)
     try:
+        rounds = engine.rounds_from(cfg)
         model = llm.make(cfg)
     except llm.MissingKey as e:
         print(f"{e}. README의 「부동산 GPT」 절에서 키 넣는 법을 보세요.", file=sys.stderr)
         return 2
+    except ValueError as e:
+        print(e, file=sys.stderr)
+        return 2
     conn = engine.connect(cfg)
-    rounds = cfg.get("gpt", {}).get("max_rounds", 6)
 
     def one(q, history):
         ans = engine.ask(q, model, conn, history, max_rounds=rounds)
