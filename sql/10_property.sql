@@ -173,7 +173,11 @@ LANGUAGE sql STABLE AS $$
                min(approval_date) AS approval, max(floors_above) AS floors, sum(parking_count) AS parking,
                sum(households) FILTER (WHERE is_main IS NOT FALSE) AS households, max(site_area) AS site_area,
                max(bc_rat) AS bc_rat, max(vl_rat) AS vl_rat, string_agg(DISTINCT source, ' · ') AS src,
-               bool_or(has_elevator) AS elevator, bool_or(is_violation) AS violation, max(asof) AS asof
+               -- 승강기는 주건축물만 봄. 한 동이라도 모름(대장에 0대로 적힌 6층 이상)이면 「없음」이라 하지 않음
+               CASE WHEN bool_or(has_elevator) FILTER (WHERE is_main IS NOT FALSE) THEN true
+                    WHEN count(*) FILTER (WHERE is_main IS NOT FALSE AND has_elevator IS NULL) > 0 THEN NULL
+                    ELSE bool_or(has_elevator) FILTER (WHERE is_main IS NOT FALSE) END AS elevator,
+               bool_or(is_violation) AS violation, max(asof) AS asof
         FROM cb GROUP BY 1
     )
     SELECT c.name,
@@ -188,7 +192,8 @@ LANGUAGE sql STABLE AS $$
                 WHEN coalesce(c.site_area_m2, bld.site_area) IS NOT NULL THEN '건축물대장 대지면적' END,
            price.price, price.yr, zone.zones, zone.rules,
            bld.n, bld.main_use, bld.approval, bld.floors, coalesce(c.households, bld.households),
-           coalesce(c.parking_total, bld.parking), bld.elevator, bld.violation,
+           -- 동별 주차 합이 0이면 「0대」가 아니라 대장에 안 적힌 것(은마 31동 모두 0, 2026-10-27 실측)으로 보고 비움
+           coalesce(c.parking_total, nullif(bld.parking, 0)), bld.elevator, bld.violation,
            coalesce(c.bc_rat, bld.bc_rat), coalesce(c.vl_rat, bld.vl_rat),
            -- 토지 칸은 지목(토지대장)과 면적을 따로 셈: 건축물대장 대지면적만 있어도 면적은 채움
            array_remove(ARRAY[

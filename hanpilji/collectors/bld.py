@@ -19,6 +19,8 @@ import datetime
 import json
 import re
 import sys
+import time
+import xml.etree.ElementTree as ET
 
 import psycopg
 
@@ -75,10 +77,15 @@ def item_pnu(row, prefix=""):
     prefix=「atch」면 부속지번 항목(atchSigunguCd · atchBun …)에서 읽음."""
     keys = ("sigunguCd", "bjdongCd", "platGbCd", "bun", "ji")
     sgg, bjd, gb, bun, ji = (_s(row, prefix + (k[0].upper() + k[1:] if prefix else k)) for k in keys)
-    if not (re.fullmatch(r"\d{5}", sgg) and re.fullmatch(r"\d{5}", bjd) and gb in ("0", "1")
-            and bun.isdigit() and ji.isdigit()):
+    if not (re.fullmatch(r"\d{5}", sgg) and re.fullmatch(r"\d{5}", bjd)):
         return None
-    return f"{sgg}{bjd}{int(gb) + 1}{int(bun):04d}{int(ji):04d}"
+    if gb in ("0", "1") and bun.isdigit() and ji.isdigit() and int(bun) > 0:
+        return f"{sgg}{bjd}{int(gb) + 1}{int(bun):04d}{int(ji):04d}"
+    # 부속지번은 번 · 지가 0000 · 대지구분이 빈칸이고 글로만(atchEtcJibunNm 「36-6」) 올 때가 많음(2026-10-27 실측 656건)
+    m = re.fullmatch(r"(산\s*)?(\d{1,4})(?:-(\d{1,4}))?", _s(row, prefix + "EtcJibunNm")) if prefix else None
+    if not m or int(m[2]) == 0:
+        return None
+    return f"{sgg}{bjd}{2 if m[1] else 1}{int(m[2]):04d}{int(m[3] or 0):04d}"
 
 
 def has_elevator(count, floors):
@@ -157,14 +164,27 @@ class Caller:
 
     def __init__(self, fetch, raw_dir, max_calls=None):
         self.fetch, self.raw_dir, self.max_calls, self.calls = fetch, raw_dir, max_calls, 0
+        self.retry_wait = 3
+
+    def _fetch_page(self, op, pnu, page, tries=3):
+        """빈 응답(「no element found」) · 05 SERVICETIMEOUT은 잠깐 뒤 다시 부르면 대개 됨(2026-10-27 실측 10건).
+        키 · 하루 한도 오류는 바로 올림."""
+        for i in range(tries):
+            self.calls += 1
+            try:
+                return self.fetch(f"BldRgstHubService/{op}", {**params(pnu), "numOfRows": PAGE_ROWS, "pageNo": page})
+            except (ET.ParseError, datagokr.ApiError) as e:
+                if datagokr.is_fatal(e) or i == tries - 1 or (isinstance(e, datagokr.ApiError) and
+                                                                not str(e).startswith(("01", "05"))):
+                    raise
+                time.sleep(self.retry_wait * (i + 1))
 
     def all_items(self, op, pnu):
         rows, page = [], 1
         while True:
             if self.max_calls is not None and self.calls >= self.max_calls:
                 raise Budget()
-            self.calls += 1
-            data, obj = self.fetch(f"BldRgstHubService/{op}", {**params(pnu), "numOfRows": PAGE_ROWS, "pageNo": page})
+            data, obj = self._fetch_page(op, pnu, page)
             ingest.save_raw(self.raw_dir, "bld_hub", f"{pnu}_{op}_p{page}.xml", data)
             got = datagokr.items(obj)
             rows += got
@@ -242,6 +262,8 @@ def load(conn, run_id, pnu, got, asof):
         # 부속지번: 단지가 걸친 다른 필지. 대장 번호가 동(표제부)이면 그 동에, 총괄표제부면 그 필지의 동 전부에 붙임
         for row in got.get("getBrAtchJibunInfo", []):
             apnu, pk = item_pnu(row, "atch"), _s(row, "mgmBldrgstPk")
+            if not apnu and not _s(row, "atchEtcJibunNm"):
+                continue   # 번 · 지 0000에 글도 빈 부속지번 줄(빈 칸만 있는 기록, 2026-10-27 실측 625줄 · 3필지)
             if not apnu:
                 ingest.reject(conn, run_id, SOURCE, "core.bridge_parcel_building", "부속지번 형식 오류", row)
                 rejected += 1

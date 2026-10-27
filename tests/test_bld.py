@@ -39,6 +39,28 @@ class Parse(unittest.TestCase):
         self.assertEqual(bld.item_pnu(title[0]), PNU)
         atch = items("bld_atch_real.xml")
         self.assertEqual([bld.item_pnu(r, "atch") for r in atch], ["1168011800105300000", "1168011800105280000"])
+        text_only = {"atchSigunguCd": "11680", "atchBjdongCd": "10400", "atchPlatGbCd": "", "atchBun": "0000",
+                     "atchJi": "0000", "atchEtcJibunNm": "36-6"}   # 청담동 36 부속지번(실제 응답 모양)
+        self.assertEqual(bld.item_pnu(text_only, "atch"), "1168010400100360006", "글로만 온 부속지번")
+        self.assertIsNone(bld.item_pnu({**text_only, "atchEtcJibunNm": "BL 3"}, "atch"))
+
+    def test_retry_empty_response(self):
+        """빈 응답 · 05는 다시 부르고, 한도 오류는 바로 올림."""
+        seq = [b"", fixture_fetch("x/getBrRecapTitleInfo", {})[0]]
+        def flaky(path, params):
+            data = seq.pop(0)
+            return data, datagokr.parse(data)
+        with tempfile.TemporaryDirectory() as d:
+            c = bld.Caller(flaky, d)
+            c.retry_wait = 0
+            self.assertEqual(len(c.all_items("getBrRecapTitleInfo", PNU)), 1)
+            self.assertEqual(c.calls, 2)
+            def over(path, params):
+                raise datagokr.ApiError("22 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR")
+            c = bld.Caller(over, d)
+            with self.assertRaises(datagokr.ApiError):
+                c.all_items("getBrTitleInfo", PNU)
+            self.assertEqual(c.calls, 1)
 
     def test_building(self):
         b = bld.to_building(items("bld_title_real.xml")[0])
