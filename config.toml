@@ -53,3 +53,13 @@ acts = [
   "생활숙박시설", "병원", "학교", "노인복지시설", "체육관", "주차장", "주유소", "공장", "창고",
   "단란주점", "유흥주점", "장례식장",
 ]
+
+[gpt]
+# 부동산 GPT 엔진. 키는 환경변수 HANPILJI_LLM_API_KEY(파일에 쓰지 않음)
+# 제공자 · 모델은 환경변수 HANPILJI_LLM_PROVIDER · HANPILJI_LLM_MODEL이 우선
+provider = "anthropic"
+model = "claude-opus-5-5"   # 비용을 줄이려면 claude-sonnet-5-5
+effort = "medium"           # low · medium · high. 높을수록 꼼꼼하지만 느리고 비쌈
+max_tokens = 16000
+max_rounds = 6              # 질문 하나에 도구를 부르는 최대 횟수
+fallbacks = "default"       # 모델이 거절하면 서버가 다른 모델로 다시 돌림. 끄려면 ""
