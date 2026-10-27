@@ -130,11 +130,15 @@ class LuinfoParse(unittest.TestCase):
             return f"<actRegList><ACT_NM>건축</ACT_NM><REG_NM>{reg}</REG_NM>{''.join(lu(r) for r in refs)}</actRegList>"
         data = ("<response><header><resultCode>0</resultCode></header><body><items><item><UNAME>제2종일반주거지역</UNAME>"
                 "<UCODE>UQA122</UCODE>" + act("가능", "제13호가목", "제13호나목") + act("금지", "제13호다목") +
+                act("조건부 가능", "제13호다목") +
                 "</item></items><totalCount>1</totalCount></body></response>").encode()
         got = {r["act_name"]: r for r in luinfo.parse_rules(datagokr.parse(data))}
         self.assertEqual(got["체육관(운동시설)"]["allowed"], "가능")
-        self.assertEqual(len(got["체육관(운동시설)"]["law_refs"]), 2)
+        self.assertEqual(got["체육관(운동시설)"]["law_refs"],
+                         ["건축법 시행령 별표 1 제13호가목", "건축법 시행령 별표 1 제13호나목"])
         self.assertEqual(got["체육관(운동시설) 제13호다목"]["allowed"], "불가")
+        self.assertEqual(got["체육관(운동시설) 제13호다목 (2)"]["allowed"], "조건부", "붙인 이름이 겹쳐도 합치지 않음")
+        self.assertEqual(len(got), 3)
 
     def test_unknown_reg(self):
         self.assertIsNone(luinfo.allowed_value("???"))
@@ -192,8 +196,9 @@ class Stage1Pipeline(unittest.TestCase):
         self.assertEqual(rtms.main(["--config", self.cfg], fetch=fixture_fetch), 0)  # 혼자 돌려도 되게(멱등)
         rows = self.q("SELECT * FROM mart.q_complex_price('11680', '세곡 푸르지오', 85, 600)")
         self.assertEqual(len(rows), 1)
-        self.assertEqual(len(self.q("SELECT * FROM mart.q_complex_price('11680', '세곡푸르지오(아파트)', 85, 600)")), 1,
-                         "끝 괄호만 다른 이름으로도 찾음")
+        self.assertEqual([x[0] for x in self.q("SELECT * FROM mart.q_complex_price('11680', '세곡푸르지오(아파트)', 85, 600)")],
+                         ["세곡푸르지오"], "끝 괄호만 다른 이름으로도 찾음")
+        self.assertEqual(self.q("SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 85, 600)"), [])
         r = rows[0]
         self.assertEqual(r[0], "세곡푸르지오")
         self.assertEqual(r[3], 3, "해제된 거래(74㎡)는 뺌")

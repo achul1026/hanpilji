@@ -103,10 +103,12 @@ def parse_rules(obj):
                 }
                 prev = out.get(r["act_name"])
                 if prev and prev["allowed"] != r["allowed"]:
-                    # 같은 이름 · 시설군인데 가능 여부가 다름: 합치지 않고 근거 목을 붙여 따로 둠
-                    m = re.search(r"제\s*\d+\s*호\S*", law_ref)
-                    r["act_name"] = f"{r['act_name']} {m.group(0) if m else law_ref or reg_nm}"
-                    prev = out.get(r["act_name"])
+                    # 같은 이름 · 시설군인데 가능 여부가 다름: 합치지 않고 근거를 붙여 따로 둠.
+                    # 붙인 이름도 가능 여부가 다른 줄과 겹치면 번호를 더 붙임(서로 다른 결과는 절대 합치지 않음)
+                    base = f"{r['act_name']} {law_ref.replace('건축법 시행령 별표 1 ', '') or reg_nm}"
+                    r["act_name"], n = base, 2
+                    while (prev := out.get(r["act_name"])) and prev["allowed"] != r["allowed"]:
+                        r["act_name"], n = f"{base} ({n})", n + 1
                 if prev:  # 같은 시설 · 같은 가능 여부가 두 번(근거 목이 다름): 조건과 근거를 합침
                     prev["conditions"] += [c for c in r["conditions"] if c not in prev["conditions"]]
                     prev["law_refs"] += [x for x in r["law_refs"] if x not in prev["law_refs"]]
@@ -178,7 +180,8 @@ def main(argv=None, fetch=datagokr.fetch):
                     ingest.save_raw(cfg["storage"]["raw_dir"], "luinfo", f"{sgg}_{z}_{act}.xml", data)
                     n, r = load(conn, run_id, sgg, z, act, obj, today)
                     ingest.end_task(conn, task, "done")
-                    ingest.set_cursor(conn, SOURCE, key, today.isoformat())
+                    if not r:  # 적재 제외가 있으면 커서를 남기지 않아 다음 실행이 다시 받음
+                        ingest.set_cursor(conn, SOURCE, key, today.isoformat())
                     conn.commit()
                     loaded, rejected = loaded + n, rejected + r
                     print(f"{sgg} {z} {act:12} {n}건 제외 {r}")
