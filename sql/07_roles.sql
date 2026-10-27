@@ -21,3 +21,5 @@ ALTER FUNCTION mart.q_building_filter(text, int, boolean, boolean, text, int) SE
 ALTER FUNCTION mart.q_zoning_check(text, text, text) SET search_path = pg_catalog, public;
 ALTER FUNCTION mart.q_law_search(text, text) SET search_path = pg_catalog, public;
 ALTER FUNCTION mart.q_building_filter(text, int, boolean, boolean, text, int) SET search_path = pg_catalog, public;
+ALTER FUNCTION mart.q_complex_price(text, text, numeric, int, numeric) SECURITY DEFINER;
+ALTER FUNCTION mart.q_complex_price(text, text, numeric, int, numeric) SET search_path = pg_catalog, public;

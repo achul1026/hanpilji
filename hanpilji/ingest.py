@@ -96,6 +96,10 @@ def http_get(url, tries=4, timeout=30):
             req = urllib.request.Request(url, headers={"User-Agent": "hanpilji-collector/0.1"})
             with urllib.request.urlopen(req, timeout=timeout) as r:
                 return r.read()
+        except urllib.error.HTTPError as e:
+            if e.code < 500 or i == tries - 1:  # 4xx(키 · 요청 오류)는 다시 해도 같으므로 바로 올림
+                raise
+            time.sleep(2 ** (i + 1))
         except (urllib.error.URLError, TimeoutError):
             if i == tries - 1:
                 raise
