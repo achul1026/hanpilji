@@ -9,7 +9,7 @@
 
 ![stage](https://img.shields.io/badge/stage-4%20%EB%8D%B0%EB%AA%A8-f6d365?style=for-the-badge)
 ![laws](https://img.shields.io/badge/%EB%B2%95%EB%A0%B9-17%EA%B0%9C%20%C2%B7%201%2C542%EC%A1%B0-81c995?style=for-the-badge)
-![tests](https://img.shields.io/badge/tests-68%20passed-4fc3f7?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-76%20passed-4fc3f7?style=for-the-badge)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Claude](https://img.shields.io/badge/LLM-Claude%20API-d97757?logo=anthropic&logoColor=white)
