@@ -80,7 +80,7 @@ for(const t of EX){const c=document.createElement("button");c.type="button";c.te
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
 function won(v){if(v==null)return"-";const eok=Math.floor(v/1e8),man=Math.round(v%1e8/1e4);
  return (eok?eok.toLocaleString()+"억 ":"")+(man?man.toLocaleString()+"만 ":"")+"원"}
-// 답변의 마크다운(제목 · 목록 · 표 · 굵게 · 코드)을 DOM으로 그림. innerHTML을 쓰지 않아 답 속 HTML은 글자로만 보임
+// 답변의 마크다운(제목 · 목록 · 표 · 굵게 · 코드)을 요소를 하나씩 만들어 그림. 글자는 textContent로만 넣어 답 속 HTML은 글자로만 보임
 function inline(parent,text){const re=/\*\*(.+?)\*\*|`([^`]+)`/g;let i=0,m;
  while((m=re.exec(text))){if(m.index>i)parent.append(text.slice(i,m.index));parent.append(m[1]!=null?el("strong",null,m[1]):el("code",null,m[2]));i=re.lastIndex}
  if(i<text.length)parent.append(text.slice(i));return parent}
