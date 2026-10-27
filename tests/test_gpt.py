@@ -372,6 +372,11 @@ class Web(unittest.TestCase):
         self.assertEqual(run.call_args.args[1:], ("q_property_card", {"query": "도곡"}))
         self.assertEqual(got["rows"], card["rows"])
 
+    def test_page_never_uses_innerhtml(self):
+        from hanpilji.gpt import web
+        self.assertNotIn("innerHTML", web.PAGE, "답 속 HTML이 실행되지 않게 DOM으로만 그림")
+        self.assertIn("function md(", web.PAGE)
+
     def test_token_and_rate_limit(self):
         self.serve(token="s3cret", per_hour=2)
         self.assertEqual(self.post({"q": "a"})[0], 403)

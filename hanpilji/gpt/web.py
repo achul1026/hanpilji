@@ -28,7 +28,7 @@ MAX_BODY = 16 * 1024          # 질문 1,000자면 넉넉함. 넘으면 읽지 �
 PER_HOUR = 30                 # 접속 주소마다 시간당 질문 수
 TOKEN_ENV = "HANPILJI_WEB_TOKEN"
 
-PAGE = """<!doctype html>
+PAGE = r"""<!doctype html>
 <html lang="ko"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
 <title>한필지 부동산 GPT</title>
 <style>
@@ -41,6 +41,9 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}.sub{color
 .chips button{border:1px solid var(--line);background:var(--card);color:var(--ink);border-radius:999px;padding:6px 12px;font-size:14px;cursor:pointer}
 .msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:12px 0;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
 .me{background:var(--me);margin-left:15%}
+.md{white-space:normal}.md>*{margin:0 0 8px}.md>*:last-child{margin-bottom:0}
+.md h3,.md h4{font-size:16px;margin-top:12px}.md ul,.md ol{padding-left:20px}
+.md .tw{overflow-x:auto}.md table{width:auto;min-width:60%}.md td,.md th{white-space:nowrap}.md code{font-size:.92em;background:var(--soft);border-radius:4px;padding:0 4px}
 .src{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);color:var(--muted);font-size:13px}
 .look{display:flex;gap:8px}.look input{flex:1}
 .pc{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin:12px 0}
@@ -77,7 +80,27 @@ for(const t of EX){const c=document.createElement("button");c.type="button";c.te
 function el(tag,cls,text){const e=document.createElement(tag);if(cls)e.className=cls;if(text!=null)e.textContent=text;return e}
 function won(v){if(v==null)return"-";const eok=Math.floor(v/1e8),man=Math.round(v%1e8/1e4);
  return (eok?eok.toLocaleString()+"억 ":"")+(man?man.toLocaleString()+"만 ":"")+"원"}
-function add(text,cls,src){const d=el("div","msg "+(cls||""),text);if(src)d.append(el("div","src",src));log.append(d);d.scrollIntoView({behavior:"smooth"});return d}
+// 답변의 마크다운(제목 · 목록 · 표 · 굵게 · 코드)을 DOM으로 그림. innerHTML을 쓰지 않아 답 속 HTML은 글자로만 보임
+function inline(parent,text){const re=/\*\*(.+?)\*\*|`([^`]+)`/g;let i=0,m;
+ while((m=re.exec(text))){if(m.index>i)parent.append(text.slice(i,m.index));parent.append(m[1]!=null?el("strong",null,m[1]):el("code",null,m[2]));i=re.lastIndex}
+ if(i<text.length)parent.append(text.slice(i));return parent}
+function cells(line){return line.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(c=>c.trim())}
+function md(text){const box=el("div","md"),lines=text.replace(/\r/g,"").split("\n");let i=0;
+ while(i<lines.length){const l=lines[i];
+  if(!l.trim()){i++;continue}
+  let h=l.match(/^(#{1,4})\s+(.*)$/);if(h){box.append(inline(el(h[1].length<3?"h3":"h4"),h[2]));i++;continue}
+  if(/^\s*\|.*\|\s*$/.test(l)&&i+1<lines.length&&/^\s*\|?\s*:?-{2,}/.test(lines[i+1])){
+   const t=el("table"),hr=el("tr"),head=cells(l),num=[];cells(lines[i+1]).forEach((c,k)=>num[k]=/-:$/.test(c));
+   head.forEach((c,k)=>hr.append(inline(el("th",num[k]?"n":null),c)));t.append(hr);i+=2;
+   while(i<lines.length&&/^\s*\|.*\|\s*$/.test(lines[i])){const tr=el("tr");cells(lines[i]).forEach((c,k)=>tr.append(inline(el("td",num[k]?"n":null),c)));t.append(tr);i++}
+   const w=el("div","tw");w.append(t);box.append(w);continue}
+  const li=/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/;let m=l.match(li);
+  if(m){const list=el(m[1]?"ol":"ul");if(m[1])list.start=+m[1];while(i<lines.length&&(m=lines[i].match(li))){list.append(inline(el("li"),m[2]));i++}box.append(list);continue}
+  const para=[];while(i<lines.length&&lines[i].trim()&&!li.test(lines[i])&&!/^#{1,4}\s/.test(lines[i])&&!/^\s*\|.*\|\s*$/.test(lines[i]))para.push(lines[i++]);
+  if(!para.length)para.push(lines[i++]);
+  const p=el("p");para.forEach((x,k)=>{if(k)p.append(el("br"));inline(p,x)});box.append(p)}
+ return box}
+function add(text,cls,src,rich){const d=el("div","msg "+(cls||""),rich?null:text);if(rich)d.append(md(text));if(src)d.append(el("div","src",src));log.append(d);d.scrollIntoView({behavior:"smooth"});return d}
 function sec(title,lines,todo){const s=el("div","sec");s.append(el("b",null,title));
  if(todo){s.append(el("div","todo","데이터 수집 전"))}else for(const[l,c]of lines)s.append(el("div",c||null,l));return s}
 function card(r,deals){const c=el("div","pc");c.append(el("h3",null,r.complex_name));
@@ -107,7 +130,7 @@ async function look(){const t=$("cq").value.trim();if(!t)return;const box=$("car
 $("cb").onclick=look;$("cq").onkeydown=e=>{if(e.key==="Enter")look()};
 async function send(){const t=q.value.trim();if(!t)return;q.value="";add(t,"me");b.disabled=true;const w=add("찾는 중…");
  try{const r=await fetch("/api/ask",{method:"POST",headers:{"Content-Type":"application/json","X-Token":token},body:JSON.stringify({q:t,sid})});
-  const j=await r.json();w.remove();if(j.sid)sid=j.sid;add(j.answer||j.error,"",j.footer)}catch(e){w.textContent="연결 오류: "+e}
+  const j=await r.json();w.remove();if(j.sid)sid=j.sid;add(j.answer||j.error,"",j.footer,!!j.answer)}catch(e){w.textContent="연결 오류: "+e}
  b.disabled=false;q.focus()}
 $("f").onsubmit=e=>{e.preventDefault();send()};
 </script></body></html>"""
