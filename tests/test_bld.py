@@ -84,6 +84,11 @@ class Parse(unittest.TestCase):
         got = [z[1] for z in bld.pick_zones(items("bld_jijigu_uq_real.xml"))]
         self.assertEqual(got, ["제3종일반주거지역", "과밀억제지역", "대공방어협조구역"], "UQA 코드로 온 응답")
         self.assertEqual([z[1] for z in bld.pick_zones([{"jijiguCdNm": "도시지역"}])], ["도시지역"], "하나뿐이면 남김")
+        same_code = [{"jijiguGbCd": "2", "jijiguCd": "980", "jijiguCdNm": "용도지구미지정"},
+                     {"jijiguGbCd": "3", "jijiguCd": "990", "jijiguCdNm": "기타구역"},
+                     {"jijiguGbCd": "2", "jijiguCd": "990", "jijiguCdNm": "기타지구"}]
+        self.assertEqual([z[:2] for z in bld.pick_zones(same_code)], [("3-990", "기타구역"), ("2-990", "기타지구")],
+                         "구분이 다르면 같은 코드도 따로, 「미지정」은 뺌")
 
 
 @unittest.skipUnless(DSN, "HANPILJI_TEST_DSN 없음")

@@ -145,12 +145,15 @@ def zone_name(row):
 
 def pick_zones(rows):
     """지역지구 item → [(코드, 이름, 구분)]. 같은 이름은 한 번만, 더 구체적인 이름이 있으면 상위 이름(도시지역 ·
-    일반주거지역 등)은 뺌. 예: [도시지역, 일반주거지역, 제3종일반주거지역] → [제3종일반주거지역]."""
+    일반주거지역 등)은 뺌. 예: [도시지역, 일반주거지역, 제3종일반주거지역] → [제3종일반주거지역].
+    코드는 구분마다 따로 매겨져 겹치므로(「980」 = 용도지구미지정 · 용도구역미지정) 「구분-코드」로 만듦.
+    「용도지구미지정」처럼 없다는 뜻의 이름은 뺌."""
     out = {}
     for r in rows:
         name = zone_name(r)
-        if name and name not in out:
-            out[name] = (_s(r, "jijiguCd"), name, _s(r, "jijiguGbCdNm"))
+        if name and not name.endswith("미지정") and name not in out:
+            code = _s(r, "jijiguCd")
+            out[name] = (f"{_s(r, 'jijiguGbCd')}-{code}" if code else "", name, _s(r, "jijiguGbCdNm"))
     names = set(out)
     broad = {"도시지역", "관리지역"} if len(names) > 1 else set()
     broad |= {n for n in names if any(o != n and o.endswith(n) for o in names)}   # 일반주거지역 ⊂ 제3종일반주거지역
@@ -289,7 +292,7 @@ def load(conn, run_id, pnu, got, asof):
         for code, name, kind in pick_zones(got.get("getBrJijiguInfo", [])):
             hit = cur.execute("SELECT zone_cd FROM core.dim_zone WHERE code_system = 'uq' AND zone_name = %s",
                               (name,)).fetchone()
-            zone_cd = hit[0] if hit else f"BLD{code or name}"
+            zone_cd = hit[0] if hit else f"BLD{code or '-' + name}"
             if not hit:
                 cur.execute(
                     """INSERT INTO core.dim_zone (zone_cd, code_system, zone_name, law_basis, source, asof)
@@ -310,6 +313,8 @@ def main(argv=None, fetch=datagokr.fetch):
     ap.add_argument("--pnu", action="append", help="이 필지만(기본: 단지 PNU 전부)")
     ap.add_argument("--max-calls", type=int, help="이번 실행의 최대 호출 수(하루 한도를 나눠 쓸 때)")
     ap.add_argument("--refresh", action="store_true", help="최근에 받은 필지도 다시 받음")
+    ap.add_argument("--from-stg", action="store_true",
+                    help="API를 부르지 않고 저장해 둔 응답(stg.bld_raw)으로 core만 다시 만듦(정리 규칙을 바꿨을 때)")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     bcfg = cfg.get("bld", {})
@@ -327,6 +332,14 @@ def main(argv=None, fetch=datagokr.fetch):
         note, finished = None, False
         try:
             for pnu in pnus:
+                if args.from_stg:
+                    got = {op: rows for op, rows in conn.execute(
+                        "SELECT op, row_data FROM stg.bld_raw WHERE pnu = %s", (pnu,)).fetchall()}
+                    if got:
+                        n, r = load(conn, run_id, pnu, got, today)
+                        conn.commit()
+                        loaded, rejected, done = loaded + n, rejected + r, done + 1
+                    continue
                 last = ingest.get_cursor(conn, SOURCE, pnu)
                 if not args.refresh and last and (today - datetime.date.fromisoformat(last)).days < refresh_days:
                     skipped += 1
@@ -358,6 +371,10 @@ def main(argv=None, fetch=datagokr.fetch):
                     if datagokr.is_fatal(e):  # 키 · 하루 한도 문제는 다음 호출도 똑같이 실패하므로 멈춤
                         note = f"멈춤: {e}"[:500]
                         break
+            # 더는 어느 필지에도 걸리지 않은 건축물대장 지역지구 코드는 지움(정리 규칙이 바뀌었을 때 남는 것)
+            conn.execute("""DELETE FROM core.dim_zone z WHERE z.code_system = 'bld_jijigu'
+                            AND NOT EXISTS (SELECT 1 FROM core.bridge_parcel_zone b WHERE b.zone_cd = z.zone_cd)""")
+            conn.commit()
             left = len(pnus) - done - skipped
             print(f"필지 {len(pnus)}개 중 이번에 {done}개 · 이미 받음 {skipped}개 · 남음 {left}개 · 호출 {caller.calls}회")
             ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, rejected, note)
