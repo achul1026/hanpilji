@@ -72,6 +72,11 @@ def get_cursor(conn, source_id, key):
     return row[0] if row else None
 
 
+def clear_cursor(conn, source_id, key):
+    """다음 실행이 그 자리를 다시 받게 커서를 지움."""
+    conn.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s AND cursor_key = %s", (source_id, key))
+
+
 def set_cursor(conn, source_id, key, value):
     """성공했을 때만 부름. 실패하면 커서가 그대로 남아 다음 실행이 같은 자리에서 다시 시작함."""
     conn.execute(

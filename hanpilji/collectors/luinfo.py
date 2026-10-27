@@ -180,7 +180,9 @@ def main(argv=None, fetch=datagokr.fetch):
                     ingest.save_raw(cfg["storage"]["raw_dir"], "luinfo", f"{sgg}_{z}_{act}.xml", data)
                     n, r = load(conn, run_id, sgg, z, act, obj, today)
                     ingest.end_task(conn, task, "done")
-                    if not r:  # 적재 제외가 있으면 커서를 남기지 않아 다음 실행이 다시 받음
+                    if r:  # 적재 제외가 있으면 예전 커서까지 지워 다음 실행이 다시 받음(--refresh 때도)
+                        ingest.clear_cursor(conn, SOURCE, key)
+                    else:
                         ingest.set_cursor(conn, SOURCE, key, today.isoformat())
                     conn.commit()
                     loaded, rejected = loaded + n, rejected + r
