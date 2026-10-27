@@ -109,7 +109,7 @@ class LuinfoParse(unittest.TestCase):
             "학원(제2종근린생활시설)": "가능", "학원(교육연구시설)": "가능",
             "무도학원(위락시설)": "불가", "운전학원(자동차관련시설)": "불가", "정비학원(자동차관련시설)": "불가",
         })
-        self.assertEqual(got["무도학원(위락시설)"]["law_ref"], "건축법 시행령 별표 1 제16호마목")
+        self.assertEqual(got["무도학원(위락시설)"]["law_refs"], ["건축법 시행령 별표 1 제16호마목"])
 
     def test_conditions_real(self):
         got = self.rules("luinfo_real_snackbar.xml")
@@ -121,6 +121,20 @@ class LuinfoParse(unittest.TestCase):
                 '<UCODE>UQA122</UCODE><actRegList><luInfoList><NODE_DESC>관련내용 없음</NODE_DESC></luInfoList>'
                 '</actRegList></item></items><totalCount>1</totalCount></body></response>').encode("cp949")
         self.assertEqual(luinfo.parse_rules(datagokr.parse(data)), [])
+
+    def test_same_name_merge_and_conflict(self):
+        """같은 이름 · 시설군: 가능 여부가 같으면 근거를 합치고, 다르면 근거 목을 붙여 따로 둠."""
+        def lu(ref):
+            return f"<luInfoList><NODE_DESC>체육관</NODE_DESC><LU_REF_LAW_NM1>건축법 시행령 별표 1 {ref}</LU_REF_LAW_NM1></luInfoList>"
+        def act(reg, *refs):
+            return f"<actRegList><ACT_NM>건축</ACT_NM><REG_NM>{reg}</REG_NM>{''.join(lu(r) for r in refs)}</actRegList>"
+        data = ("<response><header><resultCode>0</resultCode></header><body><items><item><UNAME>제2종일반주거지역</UNAME>"
+                "<UCODE>UQA122</UCODE>" + act("가능", "제13호가목", "제13호나목") + act("금지", "제13호다목") +
+                "</item></items><totalCount>1</totalCount></body></response>").encode()
+        got = {r["act_name"]: r for r in luinfo.parse_rules(datagokr.parse(data))}
+        self.assertEqual(got["체육관(운동시설)"]["allowed"], "가능")
+        self.assertEqual(len(got["체육관(운동시설)"]["law_refs"]), 2)
+        self.assertEqual(got["체육관(운동시설) 제13호다목"]["allowed"], "불가")
 
     def test_unknown_reg(self):
         self.assertIsNone(luinfo.allowed_value("???"))
@@ -178,6 +192,8 @@ class Stage1Pipeline(unittest.TestCase):
         self.assertEqual(rtms.main(["--config", self.cfg], fetch=fixture_fetch), 0)  # 혼자 돌려도 되게(멱등)
         rows = self.q("SELECT * FROM mart.q_complex_price('11680', '세곡 푸르지오', 85, 600)")
         self.assertEqual(len(rows), 1)
+        self.assertEqual(len(self.q("SELECT * FROM mart.q_complex_price('11680', '세곡푸르지오(아파트)', 85, 600)")), 1,
+                         "끝 괄호만 다른 이름으로도 찾음")
         r = rows[0]
         self.assertEqual(r[0], "세곡푸르지오")
         self.assertEqual(r[3], 3, "해제된 거래(74㎡)는 뺌")
@@ -197,6 +213,14 @@ class Stage1Pipeline(unittest.TestCase):
                                                  ("휴게음식점(제2종근린생활시설)", "가능", "조례(11680)")])
         self.assertTrue(rows[0][3].endswith("근거: 건축법 시행령 별표 1 제3호나목"))
         self.assertEqual(self.q("SELECT count(*) FROM ops.reject_estate WHERE source_id = 'dg_luinfo'")[0][0], 0)
+        calls = []
+        def counting(path, params):
+            calls.append(params)
+            return fixture_fetch(path, params)
+        self.assertEqual(luinfo.main(["--config", self.cfg, "--zone", "UQA122"], fetch=counting), 0)
+        self.assertEqual(calls, [], "최근에 받은 조합은 건너뜀")
+        self.assertEqual(luinfo.main(["--config", self.cfg, "--zone", "UQA122", "--refresh"], fetch=counting), 0)
+        self.assertEqual(len(calls), 1)
 
     def test_4_no_key_fails_cleanly(self):
         os.environ.pop("DATA_GO_KR_KEY", None)

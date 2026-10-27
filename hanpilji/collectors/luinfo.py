@@ -68,7 +68,7 @@ def act_label(node_desc, law_ref, act_nm):
 
 
 def parse_rules(obj):
-    """응답 → [{zone_name, ucode, act_name, reg_nm, allowed, conditions, law_ref}]
+    """응답 → [{zone_name, ucode, act_name, reg_nm, allowed, conditions, law_refs}]
 
     실제 응답(2026-10-27): item마다 actRegList 여러 개(ACT_NM=「건축」, REG_NM=가능 · 금지, QNODE_CONDS/RNUM),
     그 안에 luInfoList 여러 개(NODE_DESC=시설 이름, LU_REF_LAW_NM1=건축법 시행령 별표 1 근거).
@@ -99,13 +99,17 @@ def parse_rules(obj):
                     "reg_nm": reg_nm,
                     "allowed": allowed_value(reg_nm),
                     "conditions": [cond.get(n, f"조건 {n}") for n in nums],
-                    "law_ref": law_ref,
+                    "law_refs": [law_ref] if law_ref else [],
                 }
                 prev = out.get(r["act_name"])
-                if prev:  # 같은 시설이 두 번(근거 목이 다름): 조건은 합치고, 가능 여부가 다르면 조건부로
+                if prev and prev["allowed"] != r["allowed"]:
+                    # 같은 이름 · 시설군인데 가능 여부가 다름: 합치지 않고 근거 목을 붙여 따로 둠
+                    m = re.search(r"제\s*\d+\s*호\S*", law_ref)
+                    r["act_name"] = f"{r['act_name']} {m.group(0) if m else law_ref or reg_nm}"
+                    prev = out.get(r["act_name"])
+                if prev:  # 같은 시설 · 같은 가능 여부가 두 번(근거 목이 다름): 조건과 근거를 합침
                     prev["conditions"] += [c for c in r["conditions"] if c not in prev["conditions"]]
-                    if prev["allowed"] != r["allowed"]:
-                        prev["allowed"] = "조건부"
+                    prev["law_refs"] += [x for x in r["law_refs"] if x not in prev["law_refs"]]
                     continue
                 out[r["act_name"]] = r
     return list(out.values())
@@ -135,7 +139,7 @@ def load(conn, run_id, sigungu, ucode, act_query, obj, asof):
                DO UPDATE SET allowed = excluded.allowed, condition_text = excluded.condition_text,
                              source = excluded.source, asof = excluded.asof""",
             (zone_cd, sigungu, r["act_name"], r["allowed"],
-             "\n".join(r["conditions"] + ([f"근거: {r['law_ref']}"] if r["law_ref"] else [])) or None,
+             "\n".join(r["conditions"] + ([f"근거: {' · '.join(r['law_refs'])}"] if r["law_refs"] else [])) or None,
              "국토교통부 토지이용규제정보서비스(행위제한)", asof),
         )
         loaded += 1
@@ -148,10 +152,12 @@ def main(argv=None, fetch=datagokr.fetch):
     ap.add_argument("--sigungu", action="append")
     ap.add_argument("--zone", action="append", help="UQ 코드(기본: dim_zone의 uq 코드 전부)")
     ap.add_argument("--act", action="append", help="행위 이름(기본: config [luinfo] acts)")
+    ap.add_argument("--refresh", action="store_true", help="최근에 받은 조합도 다시 받음")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     acts = args.act or cfg.get("luinfo", {}).get("acts", [])
+    refresh_days = cfg.get("luinfo", {}).get("refresh_days", 30)
     today = datetime.date.today()
     with psycopg.connect(cfg["db"]["dsn"]) as conn:
         zones = args.zone or [r[0] for r in conn.execute(
@@ -163,12 +169,16 @@ def main(argv=None, fetch=datagokr.fetch):
         try:
             for sgg, z, act in combos:
                 key = f"{sgg}:{z}:{act}"
+                done = ingest.get_cursor(conn, SOURCE, key)  # 마지막으로 받은 날. 중단돼도 받은 조합은 건너뜀
+                if not args.refresh and done and (today - datetime.date.fromisoformat(done)).days < refresh_days:
+                    continue
                 task = ingest.add_task(conn, run_id, SOURCE, key)
                 try:
                     data, obj = fetch(PATH, {"areaCd": sgg, "ucodeList": z, "landUseNm": act, "type": "xml"})
                     ingest.save_raw(cfg["storage"]["raw_dir"], "luinfo", f"{sgg}_{z}_{act}.xml", data)
                     n, r = load(conn, run_id, sgg, z, act, obj, today)
                     ingest.end_task(conn, task, "done")
+                    ingest.set_cursor(conn, SOURCE, key, today.isoformat())
                     conn.commit()
                     loaded, rejected = loaded + n, rejected + r
                     print(f"{sgg} {z} {act:12} {n}건 제외 {r}")
