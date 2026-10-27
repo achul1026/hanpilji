@@ -176,7 +176,10 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 채팅 →
 남에게 열 때(`--host 0.0.0.0`)는 질문마다 API 요금이 나가므로 `HANPILJI_WEB_TOKEN`을 정해야만 켜지고, 주소는 `http://서버:8000/?token=정한값`입니다. 접속 주소마다 시간당 30개까지 받습니다.
 
 > [!IMPORTANT]
-> 클라우드 환경의 DB는 세션마다 새로 뜨는 로컬 PostgreSQL이라 데이터가 남지 않습니다. 새 세션에서는 [빠른 시작](#-빠른-시작)대로 `init_db.sh` → `law` → `rtms` → `luinfo`를 먼저 돌리세요(강남구 기준 실거래가만 10분쯤 걸림).
+> 데이터가 남는 DB는 **Supabase**(무료, 서울 리전)입니다. 클라우드 환경 변수 `HANPILJI_DSN`에 Session pooler 주소가 들어 있어 따로 수집할 필요가 없습니다. 클라우드 세션 안의 로컬 PostgreSQL은 세션이 끝나면 사라지므로 시험용으로만 씁니다.
+>
+> - 덤프 복원: `bash scripts/restore_db.sh 덤프파일 [--clean]` (덤프는 `pg_dump -Fc`, 끝에 표별 건수를 보여 줌)
+> - 무료 플랜은 7일 동안 접속이 없으면 멈춥니다. 대시보드에서 **Restore**를 누르면 다시 켜집니다.
 
 ### 모델과 제공자
 
@@ -305,7 +308,8 @@ hanpilji/
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
 ├── sql/00~10_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
-├── scripts/init_db.sh
+├── scripts/init_db.sh       # 빈 DB에 스키마 올리기
+├── scripts/restore_db.sh    # 덤프 → DB(Supabase) 복원 · 건수 확인
 ├── tests/                   # fixtures/*_real.xml 은 법제처 실제 응답
 └── docs/assets/             # README 도트 그림 (make_banner.py로 다시 만듦)
 ```
