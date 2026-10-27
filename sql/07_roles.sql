@@ -23,3 +23,12 @@ ALTER FUNCTION mart.q_law_search(text, text) SET search_path = pg_catalog, publi
 ALTER FUNCTION mart.q_building_filter(text, int, boolean, boolean, text, int) SET search_path = pg_catalog, public;
 ALTER FUNCTION mart.q_complex_price(text, text, numeric, int, numeric) SECURITY DEFINER;
 ALTER FUNCTION mart.q_complex_price(text, text, numeric, int, numeric) SET search_path = pg_catalog, public;
+ALTER FUNCTION mart.q_deal_list(text, text, text, numeric, int, text, numeric) SECURITY DEFINER;
+ALTER FUNCTION mart.q_deal_list(text, text, text, numeric, int, text, numeric) SET search_path = pg_catalog, public;
+ALTER FUNCTION mart.q_complex_rank(text, text, int, numeric, int, int, text, int, numeric) SECURITY DEFINER;
+ALTER FUNCTION mart.q_complex_rank(text, text, int, numeric, int, int, text, int, numeric) SET search_path = pg_catalog, public;
+
+-- SECURITY DEFINER 함수는 PUBLIC 기본 실행 권한을 빼고 GPT 계정에만 줌
+REVOKE EXECUTE ON ALL FUNCTIONS IN SCHEMA mart FROM PUBLIC;
+GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA mart TO hanpilji_gpt;
+ALTER DEFAULT PRIVILEGES IN SCHEMA mart REVOKE EXECUTE ON FUNCTIONS FROM PUBLIC;

@@ -1,4 +1,4 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 4개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수 6개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
@@ -24,6 +24,10 @@ def _sigungu(v):
     return SIGUNGU.get(v, v)
 
 
+def _months(a):
+    return max(1, min(int(a.get("months") or 12), 36))
+
+
 TOOLS = [
     {
         "name": "q_complex_price",
@@ -43,8 +47,61 @@ TOOLS = [
             "additionalProperties": False,
         },
         "sql": "SELECT * FROM mart.q_complex_price(%s::text, %s::text, %s::numeric, %s::int)",
-        "args": lambda a: (_sigungu(a.get("sigungu")), a["name"], a.get("area_m2"),
-                           max(1, min(int(a.get("months") or 12), 36))),
+        "args": lambda a: (_sigungu(a.get("sigungu")), a["name"], a.get("area_m2"), _months(a)),
+    },
+    {
+        "name": "q_deal_list",
+        "description": (
+            "아파트 단지 한 곳의 실거래를 한 건씩(계약일 · 전용면적 · 층 · 금액). 최고가 · 최저가 · 최근 거래 · 층별 가격을 볼 때. "
+            "kind: 매매 · 전세 · 월세 · 전월세. amount는 매매가 또는 보증금(원), 월세는 monthly_rent(원). "
+            "order: recent(최근순, 기본) · price_desc(비싼 순, 최고가는 첫 줄) · price_asc(싼 순). "
+            "최대 30줄이고 row_total이 전체 건수. 해제된 매매는 뺌. 월세를 값 순으로 보면 월세액 순. 단지명은 일부만 써도 되지만 "
+            "여러 단지에 걸리고 이름이 똑같은 단지가 없으면 그 단지들이 섞여 나오니 줄마다 complex_name을 확인할 것. "
+            "지금 데이터는 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "단지명 또는 그 일부. 예: 은마"},
+                "kind": {"type": "string", "enum": ["매매", "전세", "월세", "전월세"], "description": "기본 매매"},
+                "area_m2": {"type": "number", "description": "전용면적 ㎡. ±3㎡ 안을 같은 타입으로 봄. 없으면 모든 면적"},
+                "months": {"type": "integer", "description": "오늘부터 거꾸로 몇 개월. 기본 12, 최대 36"},
+                "order": {"type": "string", "enum": ["recent", "price_desc", "price_asc"], "description": "기본 recent"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["name"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_deal_list(%s::text, %s::text, %s::text, %s::numeric, %s::int, %s::text)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a["name"], a.get("kind") or "매매", a.get("area_m2"),
+                           _months(a), a.get("order") or "recent"),
+    },
+    {
+        "name": "q_complex_rank",
+        "description": (
+            "시군구 안 아파트 단지 순위(단지 이름 없이). metric: trade_count(매매 건수) · jeonse_count(전세 건수) · "
+            "wolse_count(월세 건수) · trade_per_m2(매매 ㎡당 단가) · jeonse_per_m2(전세 ㎡당 단가) · jeonse_ratio(전세가율). "
+            "단가 · 전세가율 순위는 그 거래가 3건 이상인 단지만. order: desc(큰 값부터, 기본) · asc(작은 값부터). min_build_year로 신축만 고를 수 있음"
+            "(건축년도는 매매 신고 값이라 기간 안에 매매가 없던 단지는 빠질 수 있음). 최대 20줄, row_total은 순위에 든 단지 수. "
+            "지금 데이터는 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "metric": {"type": "string", "enum": ["trade_count", "jeonse_count", "wolse_count",
+                                                      "trade_per_m2", "jeonse_per_m2", "jeonse_ratio"]},
+                "months": {"type": "integer", "description": "오늘부터 거꾸로 몇 개월. 기본 12, 최대 36"},
+                "area_m2": {"type": "number", "description": "전용면적 ㎡(±3㎡)만 셀 때"},
+                "min_build_year": {"type": "integer", "description": "이 해 이후 준공 단지만. 예: 2020"},
+                "limit": {"type": "integer", "description": "몇 곳. 기본 10, 최대 20"},
+                "order": {"type": "string", "enum": ["desc", "asc"], "description": "기본 desc"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["metric"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_complex_rank(%s::text, %s::text, %s::int, %s::numeric, %s::int, %s::int, %s::text)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a["metric"], _months(a), a.get("area_m2"),
+                           a.get("min_build_year"), max(1, min(int(a.get("limit") or 10), 20)),
+                           a.get("order") or "desc"),
     },
     {
         "name": "q_law_search",
@@ -138,6 +195,8 @@ def check_args(name, args):
         want = kinds[props[k]["type"]]
         if v is not None and (not isinstance(v, want) or (want is not bool and isinstance(v, bool))):
             raise ToolError(f"{k}의 형식이 {props[k]['type']}가 아님")
+        if v is not None and "enum" in props[k] and v not in props[k]["enum"]:
+            raise ToolError(f"{k}는 {' · '.join(props[k]['enum'])} 중 하나")
     return tool
 
 
