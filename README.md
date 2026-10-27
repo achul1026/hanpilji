@@ -18,7 +18,7 @@
 ![pgvector](https://img.shields.io/badge/pgvector-optional-8a63d2)
 ![Data](https://img.shields.io/badge/data-%EB%B2%95%EC%A0%9C%EC%B2%98%20%C2%B7%20%ED%86%A0%EC%A7%80%EC%9D%B4%EC%9D%8C%20%C2%B7%20%EA%B3%B5%EA%B3%B5%EB%8D%B0%EC%9D%B4%ED%84%B0%ED%8F%AC%ED%84%B8-f28b82)
 
-[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
+[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [Supabase](#️-supabase-영구-db) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
 
 </div>
 
@@ -176,7 +176,7 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 채팅 →
 남에게 열 때(`--host 0.0.0.0`)는 질문마다 API 요금이 나가므로 `HANPILJI_WEB_TOKEN`을 정해야만 켜지고, 주소는 `http://서버:8000/?token=정한값`입니다. 접속 주소마다 시간당 30개까지 받습니다.
 
 > [!IMPORTANT]
-> 클라우드 환경의 DB는 세션마다 새로 뜨는 로컬 PostgreSQL이라 데이터가 남지 않습니다. 새 세션에서는 [빠른 시작](#-빠른-시작)대로 `init_db.sh` → `law` → `rtms` → `luinfo`를 먼저 돌리세요(강남구 기준 실거래가만 10분쯤 걸림).
+> 클라우드 환경의 로컬 PostgreSQL은 세션마다 새로 떠서 데이터가 남지 않습니다. 오래 남길 데이터는 [Supabase](#️-supabase-영구-db)에 있고, 클라우드 세션에서는 `HANPILJI_DB_VIA=supabase-api`를 주면 GPT · 웹 카드가 거기서 읽습니다.
 
 ### 모델과 제공자
 
@@ -200,6 +200,32 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 채팅 →
 `ANTHROPIC_API_KEY`라는 이름을 쓰지 않는 까닭: 클라우드 환경에 그 이름으로 넣으면 Claude Code 세션 자체가 그 키로 돌아 요금이 섞일 수 있습니다.
 
 </details>
+
+## 🗄️ Supabase (영구 DB)
+
+데이터를 오래 두는 곳은 Supabase(무료 플랜, 서울 리전)입니다. 클라우드 작업 환경은 프록시가 웹(HTTPS)만 통과시켜 DB 직접 연결(5432)이 막히므로, Supabase **Management API**의 SQL 실행 주소로 넣고 읽습니다. 웹사이트를 올릴 서버처럼 직접 연결이 되는 곳에서는 `HANPILJI_DSN`(Session pooler 주소)으로 평소대로 씁니다.
+
+| 환경변수 | 쓰임 |
+|---|---|
+| `HANPILJI_DSN` | Supabase Session pooler 주소. 사용자명 `postgres.<ref>`에서 프로젝트를 알아냄 |
+| `SUPABASE_ACCESS_TOKEN` | 개인 액세스 토큰(`sbp_…`, 계정 전체 권한이라 만료를 짧게). 파일 · 채팅에 쓰지 않음 |
+| `HANPILJI_DB_VIA=supabase-api` | GPT · 웹 카드가 DB 직접 연결 대신 HTTPS로 읽음 |
+
+```bash
+# 백업(pg_dump)을 Supabase에 덮어쓰기 복원 → 테이블별 건수 비교. 파일을 안 주면 공유 폴더의 가장 최근 백업
+python -m hanpilji.supabase restore /mnt/project-files/hanpilji-data/hanpilji_YYYYMMDD.dump
+python -m hanpilji.supabase counts            # 건수만 다시 비교
+
+HANPILJI_DB_VIA=supabase-api python -m hanpilji.gpt "도곡렉슬 84㎡ 최근 1년 매매가랑 전세가"
+HANPILJI_DB_VIA=supabase-api python -m hanpilji.gpt.web --port 8000
+```
+
+복원은 백업을 로컬 임시 DB(`hanpilji_restore`)에 푼 뒤 스키마 → 데이터(테이블마다 약 1MB씩 JSON 묶음) → 제약 · 색인 · 시퀀스 → 권한 순으로 보냅니다. `ops` · `stg` · `core` · `mart` 네 스키마를 지우고 다시 만들므로 여러 번 돌려도 됩니다. 기본 권한(DEFAULT ACL)은 백업에 원래 소유자 이름이 박혀 있어 빼고, `hanpilji_gpt`에 다시 줍니다.
+
+HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용 · 5초 제한 · `SET ROLE hanpilji_gpt`(mart만 보임)으로 돌리고, 도구 인자는 따옴표를 풀어 쓴 리터럴로만 넣습니다. 요청 한 번에 1~3초가 더 걸립니다.
+
+> [!NOTE]
+> 무료 플랜은 7일 동안 쓰지 않으면 멈춥니다. 대시보드에서 **Restore**를 누르면 돌아옵니다. 액세스 토큰은 만료일이 지나면 새로 만들어 환경변수를 바꿔야 합니다.
 
 ## 📊 진행 상황
 
@@ -261,7 +287,7 @@ SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 84, 12);
 
 | 항목 | 기본값 | 바꾸는 곳 |
 |---|---|---|
-| DB | PostgreSQL 16, DB 하나에 스키마 4개 (+ raw 폴더) | `HANPILJI_DSN` |
+| DB | PostgreSQL 16, DB 하나에 스키마 4개 (+ raw 폴더). 영구 DB는 Supabase(서울) | `HANPILJI_DSN` |
 | 공간 · 의미 검색 | 없이도 동작 | `scripts/init_db.sh --postgis --pgvector` |
 | 시범 구 | 서울 강남구 (11680) | `config.toml` `[pilot]` |
 | GPT 엔진 | Anthropic Claude `claude-opus-5-5`. 마트 함수는 엔진과 무관 | `config.toml` `[gpt]` |
@@ -282,6 +308,7 @@ SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 84, 12);
 - [x] Anthropic API 키 등록 → 실제 질문으로 답 품질 확인(모른다 · 투자 질문 포함) (2026-10-27)
 - [x] 거래 목록 · 단지 순위 도구 (2026-10-27)
 - [ ] 단지명 · 동 이름으로 시군구를 찾는 도구(시범 구가 늘어나면)
+- [x] Supabase(서울)에 백업 복원 · 클라우드에서 HTTPS로 GPT · 카드 읽기 (2026-10-27)
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더
@@ -303,6 +330,7 @@ hanpilji/
 │   │   ├── __main__.py      # 터미널 대화
 │   │   └── web.py           # 웹 채팅
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
+│   ├── supabase.py          # Supabase를 HTTPS로: 백업 복원 · GPT용 읽기 연결
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
 ├── sql/00~10_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
 ├── scripts/init_db.sh
