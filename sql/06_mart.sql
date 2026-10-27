@@ -117,7 +117,9 @@ LANGUAGE sql STABLE AS $$
         FROM core.dim_complex x
         LEFT JOIN core.dim_region r ON r.lawd_cd = x.lawd_cd
         WHERE left(x.lawd_cd, 5) = p_sigungu
-          AND replace(x.name, ' ', '') LIKE '%' || replace(p_name, ' ', '') || '%'
+          -- 끝 괄호는 빼고 비교(매매 「강남브리즈힐(토지임대부아파트)」 · 전월세 「강남브리즈힐」이 같은 단지)
+          AND regexp_replace(replace(x.name, ' ', ''), '\([^()]*\)$', '')
+              LIKE '%' || regexp_replace(replace(p_name, ' ', ''), '\([^()]*\)$', '') || '%'
     ), win AS (
         SELECT (current_date - make_interval(months => p_months))::date AS d_from, current_date AS d_to
     ), t AS (

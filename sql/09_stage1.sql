@@ -1,10 +1,10 @@
 -- 1~2단계: 공공데이터포털 API(인증키 필요) — 행위제한 API · 아파트 매매 · 전월세 실거래가
 
 INSERT INTO ops.ingest_source (source_id, name, operator, method, daily_limit, encoding, cycle, license, url) VALUES
- ('dg_luinfo',     '토지이용규제정보서비스(행위제한)',  '국토교통부', 'api', 1000,  'UTF-8', '매월',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15058410/openapi.do'),
+ ('dg_luinfo',     '토지이용규제정보서비스(행위제한)',  '국토교통부', 'api', 1000,  'EUC-KR', '매월',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15058410/openapi.do'),
  ('dg_apt_trade',  '아파트 매매 실거래가 공개 자료',     '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126469/openapi.do'),
  ('dg_apt_rent',   '아파트 전월세 실거래가 공개 자료',   '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126474/openapi.do')
-ON CONFLICT (source_id) DO NOTHING;
+ON CONFLICT (source_id) DO UPDATE SET encoding = excluded.encoding;
 
 -- 실거래가 응답 한 건 = 한 줄. 원본 모양 그대로(jsonb) 받고 core로 옮길 때 풂
 CREATE TABLE IF NOT EXISTS stg.rtms_raw (
@@ -49,4 +49,4 @@ INSERT INTO core.dim_zone (zone_cd, code_system, zone_name, law_basis, source, a
  ('UQA410','uq','보전녹지지역','국토의 계획 및 이용에 관한 법률','토지이용규제 지역지구 코드(API로 확인)','2026-10-27'),
  ('UQA420','uq','생산녹지지역','국토의 계획 및 이용에 관한 법률','토지이용규제 지역지구 코드(API로 확인)','2026-10-27'),
  ('UQA430','uq','자연녹지지역','국토의 계획 및 이용에 관한 법률','토지이용규제 지역지구 코드(API로 확인)','2026-10-27')
-ON CONFLICT (zone_cd) DO NOTHING;
+ON CONFLICT (zone_cd) DO UPDATE SET source = excluded.source, asof = excluded.asof;

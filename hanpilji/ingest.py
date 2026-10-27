@@ -1,6 +1,7 @@
 """수집 공통 모듈 — 실행 기록 · 원본 보관(해시 중복 차단) · 커서 · 적재 제외."""
 import datetime
 import hashlib
+import http.client
 import json
 import time
 import urllib.error
@@ -100,7 +101,7 @@ def http_get(url, tries=4, timeout=30):
             if e.code < 500 or i == tries - 1:  # 4xx(키 · 요청 오류)는 다시 해도 같으므로 바로 올림
                 raise
             time.sleep(2 ** (i + 1))
-        except OSError:  # URLError · 시간 초과 · 읽는 중 연결 끊김(ConnectionResetError, 2026-10-27 실측)
+        except (OSError, http.client.IncompleteRead):  # URLError · 시간 초과 · 읽는 중 연결 끊김 · 잘린 응답
             if i == tries - 1:
                 raise
             time.sleep(2 ** (i + 1))
