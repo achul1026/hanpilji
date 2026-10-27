@@ -42,7 +42,7 @@ h1{font-size:22px;margin:0 0 4px}h2{font-size:17px;margin:28px 0 10px}.sub{color
 .msg{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:12px 16px;margin:12px 0;white-space:pre-wrap;word-break:keep-all;overflow-wrap:anywhere}
 .me{background:var(--me);margin-left:15%}
 .md{white-space:normal}.md>*{margin:0 0 8px}.md>*:last-child{margin-bottom:0}
-.md h3,.md h4{font-size:16px;margin-top:12px}.md ul,.md ol{padding-left:20px}
+.md h3,.md h4,.md h5,.md h6{font-size:16px;margin-top:12px}.md h5,.md h6{font-size:15px}.md ul,.md ol{padding-left:20px}
 .md .tw{overflow-x:auto}.md table{width:auto;min-width:60%}.md td,.md th{white-space:nowrap}.md code{font-size:.92em;background:var(--soft);border-radius:4px;padding:0 4px}
 .src{margin-top:10px;padding-top:8px;border-top:1px dashed var(--line);color:var(--muted);font-size:13px}
 .look{display:flex;gap:8px}.look input{flex:1}
@@ -84,19 +84,31 @@ function won(v){if(v==null)return"-";const eok=Math.floor(v/1e8),man=Math.round(
 function inline(parent,text){const re=/\*\*(.+?)\*\*|`([^`]+)`/g;let i=0,m;
  while((m=re.exec(text))){if(m.index>i)parent.append(text.slice(i,m.index));parent.append(m[1]!=null?el("strong",null,m[1]):el("code",null,m[2]));i=re.lastIndex}
  if(i<text.length)parent.append(text.slice(i));return parent}
-function cells(line){return line.trim().replace(/^\|/,"").replace(/\|$/,"").split("|").map(c=>c.trim())}
+function cells(line){return line.trim().replace(/^\|/,"").replace(/(^|[^\\])\|$/,"$1").split(/(?<!\\)\|/).map(c=>c.trim().replace(/\\\|/g,"|"))}
+const HD=/^(#{1,6})\s+(.*)$/,LI=/^(\s*)(?:[-*+•]|(\d+)[.)])\s+(.*)$/,SEP=/^\s*\|?\s*:?-{2,}:?\s*(\|\s*:?-{2,}:?\s*)*\|?\s*$/,ROW=/(^|[^\\])\|/;
+const isTable=(lines,i)=>ROW.test(lines[i])&&i+1<lines.length&&ROW.test(lines[i+1])&&SEP.test(lines[i+1]);
+const depth=s=>s.replace(/\t/g,"    ").length;
+// 들여쓴 항목은 안쪽 목록으로, 번호 · 글머리 표시가 바뀌면 새 목록으로
+function list(lines,i,ind){let m=lines[i].match(LI);const ord=!!m[2],L=el(ord?"ol":"ul");if(ord)L.start=+m[2];let last=null;
+ while(i<lines.length&&(m=lines[i].match(LI))){const d=depth(m[1]);
+  if(d<ind)break;
+  if(d>ind&&last){const r=list(lines,i,d);last.append(r[0]);i=r[1];continue}
+  if(!!m[2]!==ord)break;
+  last=inline(el("li"),m[3]);L.append(last);i++}
+ return [L,i]}
 function md(text){const box=el("div","md"),lines=text.replace(/\r/g,"").split("\n");let i=0;
  while(i<lines.length){const l=lines[i];
   if(!l.trim()){i++;continue}
-  let h=l.match(/^(#{1,4})\s+(.*)$/);if(h){box.append(inline(el(h[1].length<3?"h3":"h4"),h[2]));i++;continue}
-  if(/^\s*\|.*\|\s*$/.test(l)&&i+1<lines.length&&/^\s*\|?\s*:?-{2,}/.test(lines[i+1])){
+  // 페이지 제목이 h1 · h2라서 답의 #~###### 는 h3~h6 으로 한 단계씩 내려 붙임
+  let h=l.match(HD);if(h){box.append(inline(el("h"+Math.min(h[1].length+2,6)),h[2]));i++;continue}
+  if(isTable(lines,i)){
    const t=el("table"),hr=el("tr"),head=cells(l),num=[];cells(lines[i+1]).forEach((c,k)=>num[k]=/-:$/.test(c));
    head.forEach((c,k)=>hr.append(inline(el("th",num[k]?"n":null),c)));t.append(hr);i+=2;
-   while(i<lines.length&&/^\s*\|.*\|\s*$/.test(lines[i])){const tr=el("tr");cells(lines[i]).forEach((c,k)=>tr.append(inline(el("td",num[k]?"n":null),c)));t.append(tr);i++}
+   while(i<lines.length&&lines[i].trim()&&ROW.test(lines[i])){const tr=el("tr");cells(lines[i]).forEach((c,k)=>tr.append(inline(el("td",num[k]?"n":null),c)));t.append(tr);i++}
    const w=el("div","tw");w.append(t);box.append(w);continue}
-  const li=/^\s*(?:[-*•]|(\d+)[.)])\s+(.*)$/;let m=l.match(li);
-  if(m){const list=el(m[1]?"ol":"ul");if(m[1])list.start=+m[1];while(i<lines.length&&(m=lines[i].match(li))){list.append(inline(el("li"),m[2]));i++}box.append(list);continue}
-  const para=[];while(i<lines.length&&lines[i].trim()&&!li.test(lines[i])&&!/^#{1,4}\s/.test(lines[i])&&!/^\s*\|.*\|\s*$/.test(lines[i]))para.push(lines[i++]);
+  let m=l.match(LI);
+  if(m){const r=list(lines,i,depth(m[1]));box.append(r[0]);i=r[1];continue}
+  const para=[];while(i<lines.length&&lines[i].trim()&&!LI.test(lines[i])&&!HD.test(lines[i])&&!isTable(lines,i))para.push(lines[i++]);
   if(!para.length)para.push(lines[i++]);
   const p=el("p");para.forEach((x,k)=>{if(k)p.append(el("br"));inline(p,x)});box.append(p)}
  return box}
