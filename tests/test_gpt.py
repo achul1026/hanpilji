@@ -31,7 +31,7 @@ def call(name, args, id="t1"):
 class Tools(unittest.TestCase):
     def test_specs_are_mart_functions(self):
         self.assertEqual({t["name"] for t in tools.specs()},
-                         {"q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
+                         {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
                           "q_building_filter"})
         for t in tools.TOOLS:
             self.assertTrue(t["sql"].startswith("SELECT * FROM mart."), "도구는 mart 함수만 부름")
@@ -258,6 +258,53 @@ class WithDb(unittest.TestCase):
             self.assertEqual(tools.run(conn, "q_complex_rank", {"metric": "trade_count", "min_build_year": 2100})
                              ["row_total"], 0)
 
+    def test_property_card(self):
+        with engine.connect(self.cfg) as conn:
+            card = tools.run(conn, "q_property_card", {"query": "세곡 푸르지오"})
+            self.assertEqual(card["shown"], 1)
+            row = card["rows"][0]
+            self.assertTrue(row["address"].startswith("서울특별시 강남구 세곡동"), row["address"])
+            self.assertTrue(row["pnu"].startswith("11680111001"), "세곡동 법정동 코드 + 일반 지번")
+            self.assertGreater(row["trade_count"], 0)
+            self.assertIn("건축물대장(용도 · 층수 · 주차 · 위반)", row["missing"])
+            self.assertLessEqual(len(row["recent_deals"]), 5)
+            self.assertTrue(row["recent_deals"], "최근 매매가 카드에 같이 들어 있음")
+            json.dumps(card, ensure_ascii=False)   # 배열(전용면적 타입)도 JSON으로 바뀜
+            by_addr = tools.run(conn, "q_property_card", {"query": row["address"].split(" ", 2)[2] + "번지"})
+            self.assertEqual(by_addr["rows"][0]["complex_name"], row["complex_name"], "동 지번으로도 찾음")
+            self.assertEqual(tools.run(conn, "q_property_card", {"query": "없는단지"})["row_total"], 0)
+
+    def test_property_card_joins_all_parcels(self):
+        """단지 건물이 선 필지까지 모으고, 「접함」 용도지역은 빼고, 개별공시지가를 먼저 씀(넣은 값은 되돌림)."""
+        with psycopg.connect(DSN) as conn:
+            cid, pnu = conn.execute("SELECT complex_id, pnu FROM core.dim_complex WHERE pnu IS NOT NULL LIMIT 1").fetchone()
+            other = pnu[:11] + "9999" + pnu[15:]
+            conn.execute("INSERT INTO core.dim_parcel (pnu, land_category, area_m2, source, asof) VALUES "
+                         "(%s, '대', 1000, 't', '2026-10-01'), (%s, '대', 500, 't', '2026-10-01')", (pnu, other))
+            conn.execute("INSERT INTO core.fact_land_price (pnu, base_year, is_standard, price_per_m2, source, asof) "
+                         "VALUES (%s, 2026, false, 300, 't', '2026-10-01'), (%s, 2026, true, 290, 't', '2026-10-01')",
+                         (pnu, pnu))
+            conn.execute("INSERT INTO core.bridge_parcel_zone (pnu, zone_cd, overlap, source, asof) VALUES "
+                         "(%s, 'UQA123', '포함', 't', '2026-10-01'), (%s, 'UQA130', '접함', 't', '2026-10-01')",
+                         (pnu, other))
+            conn.execute("INSERT INTO core.dim_building (bld_pk, pnu, main_use, floors_above, total_area, source, asof) "
+                         "VALUES ('t1', %s, '공동주택', 35, 2, 't', '2026-10-01'), "
+                         "('t2', %s, '공동주택', 30, 1, 't', '2026-10-01')", (pnu, other))
+            conn.execute("INSERT INTO core.bridge_complex_building (complex_id, bld_pk, source, asof) "
+                         "VALUES (%s, 't2', 't', '2026-10-01')", (cid,))
+            row = conn.execute("SELECT land_parcel_count, land_area_m2, land_price_per_m2, zones, bld_count, missing "
+                               "FROM mart.q_property_card('11680', (SELECT name FROM core.dim_complex "
+                               "WHERE complex_id = %s))", (cid,)).fetchone()
+            conn.rollback()
+        self.assertEqual(row, (2, 1500, 300, "제3종일반주거지역", 2, []))
+
+    def test_make_pnu(self):
+        with engine.connect(self.cfg) as conn:
+            got = conn.execute("SELECT core.make_pnu('1168011800', '527'), core.make_pnu('1168011800', '12-3'), "
+                               "core.make_pnu('1168011800', '산 4-1'), core.make_pnu('1168011800', 'BL'), "
+                               "core.make_pnu('1168000000', '527')").fetchone()
+            self.assertEqual(got, ("1168011800105270000", "1168011800100120003", "1168011800200040001", None, None))
+
     def test_every_tool_runs(self):
         with engine.connect(self.cfg) as conn:
             for name, args in [("q_law_search", {"query": "차임 증액"}),
@@ -312,6 +359,18 @@ class Web(unittest.TestCase):
         self.assertEqual(self.post(b"not json")[0], 400)
         self.assertEqual(self.post({"q": " "})[0], 400)
         self.assertEqual(self.post({"q": "x" * 20000})[0], 413)
+
+    def test_card(self):
+        self.serve()
+        import urllib.request
+        card = {"tool": "q_property_card", "rows": [{"complex_name": "도곡렉슬", "recent_deals": []}], "sources": [],
+                "asof": None, "shown": 1, "row_total": 1}
+        with mock.patch.object(tools, "run", return_value=card) as run:
+            with urllib.request.urlopen(self.base + "/api/card?q=%EB%8F%84%EA%B3%A1") as r:
+                got = json.loads(r.read())
+        run.assert_called_once()   # 카드와 최근 거래를 한 함수(한 스냅숏)에서 읽음
+        self.assertEqual(run.call_args.args[1:], ("q_property_card", {"query": "도곡"}))
+        self.assertEqual(got["rows"], card["rows"])
 
     def test_token_and_rate_limit(self):
         self.serve(token="s3cret", per_hour=2)

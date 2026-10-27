@@ -160,9 +160,11 @@ class Stage1Pipeline(unittest.TestCase):
         cls.cfg = str(cfg)
         os.environ.pop("HANPILJI_DSN", None)
         with psycopg.connect(DSN) as c:
-            c.execute("TRUNCATE core.fact_deal, core.fact_rent, core.dim_complex, core.dim_region, core.reg_rule,"
+            c.execute("TRUNCATE core.fact_deal, core.fact_rent, core.dim_complex, core.reg_rule,"
                       " stg.rtms_raw, stg.luinfo_raw, ops.reject_estate, ops.ingest_cursor, ops.ingest_task,"
                       " ops.ingest_run RESTART IDENTITY CASCADE")
+            # 법정동 코드표(10_property.sql 기준값)는 남기고 수집기가 만든 줄만 지움
+            c.execute("DELETE FROM core.dim_region WHERE source <> '행정표준코드 법정동코드'")
 
     def q(self, sql, *args):
         with psycopg.connect(DSN) as c:

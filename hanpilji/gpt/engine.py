@@ -24,7 +24,8 @@ SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어�
    그런 질문에는 판단은 하지 않는다고 말하고, 데이터로 확인할 수 있는 사실(최근 거래 · 전세가율 등)만 준다.
 6. 법령은 조문 번호와 법령명을 밝히고, 법률 자문이 아니라 조문 안내라고 한 줄 덧붙인다.
 7. 지금 데이터 범위: 실거래가와 행위제한 조례는 서울 강남구(11680)만, 실거래가는 아파트 매매 · 전월세 최근 36개월.
-   법령은 부동산 법령 17개. 건축물대장은 아직 없다. 범위 밖이면 그렇다고 말한다.
+   법령은 부동산 법령 17개. 토지 · 필지별 용도지역 · 건축물대장은 아직 수집 전이다. 범위 밖이면 그렇다고 말한다.
+   한 단지 · 한 주소를 종합해서 물으면 q_property_card를 먼저 부르고, 필요하면 다른 도구로 더 찾는다.
    최고가 · 최저가 · 층별 가격은 q_deal_list로, 「가장 많은 · 가장 비싼 단지」 같은 순위는 q_complex_rank로 찾는다.
 8. 근거 목록(함수 · 건수 · 출처)은 시스템이 답 끝에 자동으로 붙이니 따로 길게 적지 않는다.
 
@@ -133,6 +134,6 @@ def connect(cfg):
     """GPT용 읽기 전용 접속. HANPILJI_GPT_DSN(hanpilji_gpt 계정)을 권장, 없으면 HANPILJI_DSN."""
     import psycopg
     dsn = os.environ.get("HANPILJI_GPT_DSN") or cfg["db"]["dsn"]
-    conn = psycopg.connect(dsn, autocommit=True,
+    conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5,
                            options="-c default_transaction_read_only=on -c statement_timeout=5000")
     return conn
