@@ -11,7 +11,7 @@ for a in "$@"; do
     --pgvector) files+=(04_core_pgvector.sql) ;;
   esac
 done
-files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql)
+files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql 11_building.sql)
 for f in "${files[@]}"; do
   echo "== $f"
   PGOPTIONS="--client-min-messages=warning" psql "$DSN" -v ON_ERROR_STOP=1 -q -f "$f"
