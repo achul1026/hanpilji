@@ -131,7 +131,11 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None):
 
 
 def connect(cfg):
-    """GPT용 읽기 전용 접속. HANPILJI_GPT_DSN(hanpilji_gpt 계정)을 권장, 없으면 HANPILJI_DSN."""
+    """GPT용 읽기 전용 접속. HANPILJI_GPT_DSN(hanpilji_gpt 계정)을 권장, 없으면 HANPILJI_DSN.
+    HANPILJI_DB_VIA=supabase-api면 Supabase를 HTTPS로 읽음(DB 직접 연결이 막힌 클라우드 작업 환경용)."""
+    if os.environ.get("HANPILJI_DB_VIA") == "supabase-api":
+        from hanpilji import supabase
+        return supabase.SupabaseConn()
     import psycopg
     dsn = os.environ.get("HANPILJI_GPT_DSN") or cfg["db"]["dsn"]
     conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5,
