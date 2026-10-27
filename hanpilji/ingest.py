@@ -100,7 +100,7 @@ def http_get(url, tries=4, timeout=30):
             if e.code < 500 or i == tries - 1:  # 4xx(키 · 요청 오류)는 다시 해도 같으므로 바로 올림
                 raise
             time.sleep(2 ** (i + 1))
-        except (urllib.error.URLError, TimeoutError):
+        except OSError:  # URLError · 시간 초과 · 읽는 중 연결 끊김(ConnectionResetError, 2026-10-27 실측)
             if i == tries - 1:
                 raise
             time.sleep(2 ** (i + 1))

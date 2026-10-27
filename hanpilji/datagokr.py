@@ -6,6 +6,7 @@
 """
 import json
 import os
+import re
 import urllib.error
 import urllib.parse
 import xml.etree.ElementTree as ET
@@ -60,12 +61,15 @@ def _xml_to_obj(el):
 
 def parse(data: bytes):
     """응답 → {'header': {...}, 'body': {...}}. 오류 응답이면 ApiError."""
-    text = data.decode("utf-8-sig").strip()
+    try:
+        text = data.decode("utf-8-sig").strip()
+    except UnicodeDecodeError:  # 행위제한 API는 EUC-KR로 옴(선언이 없을 때도 있음, 2026-10-27 실측)
+        text = data.decode("cp949").strip()
     if text.startswith("{"):
         obj = json.loads(text)
         obj = obj.get("response", obj)
     else:
-        root = ET.fromstring(text)
+        root = ET.fromstring(re.sub(r"^<\?xml[^>]*\?>", "", text))  # 이미 str이라 인코딩 선언은 뺌
         obj = _xml_to_obj(root)
         if root.tag == "OpenAPI_ServiceResponse":  # 게이트웨이 오류(키 미등록 · 한도 초과 등)
             h = obj.get("cmmMsgHeader", {}) if isinstance(obj, dict) else {}

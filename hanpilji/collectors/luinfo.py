@@ -1,14 +1,17 @@
 """국토교통부 토지이용규제정보서비스(행위제한) API → stg.luinfo_raw → core.reg_rule.
 
-    DATA_GO_KR_KEY=... python -m hanpilji.collectors.luinfo [--sigungu 11680] [--zone UQA122] [--act 공동주택]
+    DATA_GO_KR_KEY=... python -m hanpilji.collectors.luinfo [--sigungu 11680] [--zone UQA122] [--act 아파트]
 
 토지이음 행위제한 CSV 대신 쓸 수 있는 길. 시군구 x 용도지역 x 행위마다 한 번 호출하고,
 조례까지 반영된 결과라서 core.reg_rule에는 시군구 코드를 붙여 넣음(조례 기준).
-응답 항목 이름은 포털 명세(swagger, 2026-10-23 확인) 기준. 실제 응답으로는 아직 확인 못 함(미확인).
+응답 모양 · UQ 코드 16개는 실제 응답으로 확인함(2026-10-27). 요청에 type이 없으면 HTTP_ERROR(04)가 옴.
+행위 이름은 건물 종류의 세부 이름(아파트 · 휴게음식점 …)으로 물어야 함. 「공동주택」 「근린생활시설」 같은
+시설군 이름은 「관련내용 없음」만 옴.
 """
 import argparse
 import datetime
 import json
+import re
 import sys
 
 import psycopg
@@ -20,8 +23,21 @@ SOURCE = "dg_luinfo"
 PATH = "arLandUseInfoService/DTarLandUseInfo"
 
 
+# 건축법 시행령 별표 1의 호 번호 → 시설군 이름. 응답의 근거(LU_REF_LAW_NM1)에서 뽑아 행위 이름 뒤에 붙임
+BYEOLPYO1 = {
+    1: "단독주택", 2: "공동주택", 3: "제1종근린생활시설", 4: "제2종근린생활시설", 5: "문화및집회시설",
+    6: "종교시설", 7: "판매시설", 8: "운수시설", 9: "의료시설", 10: "교육연구시설", 11: "노유자시설",
+    12: "수련시설", 13: "운동시설", 14: "업무시설", 15: "숙박시설", 16: "위락시설", 17: "공장",
+    18: "창고시설", 19: "위험물저장및처리시설", 20: "자동차관련시설", 21: "동물및식물관련시설",
+    22: "자원순환관련시설", 23: "교정시설", 24: "국방·군사시설", 25: "방송통신시설", 26: "발전시설",
+    27: "묘지관련시설", 28: "관광휴게시설", 29: "장례시설", 30: "야영장시설",
+}
+NO_HIT = "관련내용 없음"   # 물어본 이름이 시설 목록에 없을 때 오는 문구
+
+
 def allowed_value(reg_nm):
-    """원본 가능 여부 문구 → 가능 · 조건부 · 불가. 모르는 문구면 None(적재 제외로 남김)."""
+    """원본 가능 여부 문구 → 가능 · 조건부 · 불가. 모르는 문구면 None(적재 제외로 남김).
+    실제 응답은 「가능」 · 「금지」 두 가지였음(2026-10-27). 조건은 condition_text로 따로 담음."""
     v = (reg_nm or "").replace(" ", "")
     if not v:
         return None
@@ -38,29 +54,61 @@ def _texts(v):
     return [t for t in (x.strip() if isinstance(x, str) else "" for x in datagokr.as_list(v)) if t]
 
 
+def _dicts(v):
+    return [x for x in datagokr.as_list(v) if isinstance(x, dict)]
+
+
+def act_label(node_desc, law_ref, act_nm):
+    """「휴게음식점」 + 「건축법 시행령 별표 1 제4호아목」 → 「휴게음식점(제2종근린생활시설)」.
+    같은 이름이 시설군마다 따로 오므로(1종 · 2종 근생 등) 시설군을 붙여 구분함. 행위가 건축이 아니면 뒤에 붙임."""
+    m = re.search(r"별표\s*1\s*제\s*(\d+)\s*호", law_ref or "")
+    group = BYEOLPYO1.get(int(m.group(1))) if m else None
+    name = node_desc if not group or group == node_desc else f"{node_desc}({group})"
+    return name if act_nm in ("", "건축") else f"{name} {act_nm}"
+
+
 def parse_rules(obj):
-    """응답 → [{zone_name, ucode, act_name, reg_nm, allowed, conditions}]"""
+    """응답 → [{zone_name, ucode, act_name, reg_nm, allowed, conditions, law_ref}]
+
+    실제 응답(2026-10-27): item마다 actRegList 여러 개(ACT_NM=「건축」, REG_NM=가능 · 금지, QNODE_CONDS/RNUM),
+    그 안에 luInfoList 여러 개(NODE_DESC=시설 이름, LU_REF_LAW_NM1=건축법 시행령 별표 1 근거).
+    조건 문구(QnodeCond)는 items 아래 item과 나란히 옴. 물어본 이름은 부분 일치로 찾음(「학원」 → 무도학원 · 운전학원 …).
+    """
     body = obj.get("body") or {}
     its = body.get("items") or {}
-    # 조건 · 예외 문구: 번호 → 내용
     cond = {}
-    for q in datagokr.as_list(its.get("QnodeCond") if isinstance(its, dict) else None):
-        nums, descs = _texts(q.get("RNUM")), _texts(q.get("QNODE_DESC"))
-        for n, d in zip(nums, descs):
+    for q in _dicts(its.get("QnodeCond") if isinstance(its, dict) else None):
+        for n, d in zip(_texts(q.get("RNUM")), _texts(q.get("QNODE_DESC"))):
             cond[n] = d
-    out = []
+    out = {}
     for it in datagokr.items(obj):
-        for act in datagokr.as_list(it.get("actRegList")):
-            nums = _texts((act.get("QNODE_CONDS") or {}).get("RNUM") if isinstance(act.get("QNODE_CONDS"), dict) else None)
-            out.append({
-                "zone_name": (it.get("UNAME") or "").strip(),
-                "ucode": (it.get("UCODE") or "").strip(),
-                "act_name": (act.get("ACT_NM") or "").strip(),
-                "reg_nm": (act.get("REG_NM") or "").strip(),
-                "allowed": allowed_value(act.get("REG_NM")),
-                "conditions": [cond.get(n, f"조건 {n}") for n in nums],
-            })
-    return out
+        for act in _dicts(it.get("actRegList")):
+            qc = act.get("QNODE_CONDS")
+            nums = _texts(qc.get("RNUM")) if isinstance(qc, dict) else []
+            act_nm = (act.get("ACT_NM") or "").strip()
+            reg_nm = (act.get("REG_NM") or "").strip()
+            for lu in _dicts(act.get("luInfoList")):
+                node = (lu.get("NODE_DESC") or "").strip()
+                if not node or node == NO_HIT:
+                    continue
+                law_ref = " ".join((lu.get("LU_REF_LAW_NM1") or "").split())
+                r = {
+                    "zone_name": (it.get("UNAME") or "").strip(),
+                    "ucode": (it.get("UCODE") or "").strip(),
+                    "act_name": act_label(node, law_ref, act_nm),
+                    "reg_nm": reg_nm,
+                    "allowed": allowed_value(reg_nm),
+                    "conditions": [cond.get(n, f"조건 {n}") for n in nums],
+                    "law_ref": law_ref,
+                }
+                prev = out.get(r["act_name"])
+                if prev:  # 같은 시설이 두 번(근거 목이 다름): 조건은 합치고, 가능 여부가 다르면 조건부로
+                    prev["conditions"] += [c for c in r["conditions"] if c not in prev["conditions"]]
+                    if prev["allowed"] != r["allowed"]:
+                        prev["allowed"] = "조건부"
+                    continue
+                out[r["act_name"]] = r
+    return list(out.values())
 
 
 def load(conn, run_id, sigungu, ucode, act_query, obj, asof):
@@ -86,7 +134,8 @@ def load(conn, run_id, sigungu, ucode, act_query, obj, asof):
                ON CONFLICT (zone_cd, coalesce(sigungu_cd, ''), act_name)
                DO UPDATE SET allowed = excluded.allowed, condition_text = excluded.condition_text,
                              source = excluded.source, asof = excluded.asof""",
-            (zone_cd, sigungu, r["act_name"], r["allowed"], "\n".join(r["conditions"]) or None,
+            (zone_cd, sigungu, r["act_name"], r["allowed"],
+             "\n".join(r["conditions"] + ([f"근거: {r['law_ref']}"] if r["law_ref"] else [])) or None,
              "국토교통부 토지이용규제정보서비스(행위제한)", asof),
         )
         loaded += 1
@@ -116,7 +165,7 @@ def main(argv=None, fetch=datagokr.fetch):
                 key = f"{sgg}:{z}:{act}"
                 task = ingest.add_task(conn, run_id, SOURCE, key)
                 try:
-                    data, obj = fetch(PATH, {"areaCd": sgg, "ucodeList": z, "landUseNm": act})
+                    data, obj = fetch(PATH, {"areaCd": sgg, "ucodeList": z, "landUseNm": act, "type": "xml"})
                     ingest.save_raw(cfg["storage"]["raw_dir"], "luinfo", f"{sgg}_{z}_{act}.xml", data)
                     n, r = load(conn, run_id, sgg, z, act, obj, today)
                     ingest.end_task(conn, task, "done")
