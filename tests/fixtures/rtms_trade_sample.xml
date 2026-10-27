@@ -1,9 +1,0 @@
-<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
-<!-- 손으로 만든 샘플: 포털 명세(swagger) 항목 이름 기준. 실제 응답이 오면 바꿀 것 -->
-<response><header><resultCode>000</resultCode><resultMsg>OK</resultMsg></header>
-<body><items>
-<item><sggCd>11680</sggCd><umdCd>10300</umdCd><umdNm>개포동</umdNm><aptNm>시험아파트</aptNm><jibun>12</jibun><excluUseAr>84.97</excluUseAr><dealYear>2026</dealYear><dealMonth>9</dealMonth><dealDay>3</dealDay><dealAmount>250,000</dealAmount><floor>10</floor><buildYear>2005</buildYear><cdealType></cdealType><cdealDay></cdealDay><dealingGbn>중개거래</dealingGbn><aptDong>101</aptDong></item>
-<item><sggCd>11680</sggCd><umdCd>10300</umdCd><umdNm>개포동</umdNm><aptNm>시험아파트</aptNm><jibun>12</jibun><excluUseAr>84.95</excluUseAr><dealYear>2026</dealYear><dealMonth>9</dealMonth><dealDay>20</dealDay><dealAmount>260,000</dealAmount><floor>3</floor><buildYear>2005</buildYear><cdealType></cdealType><cdealDay></cdealDay><dealingGbn>중개거래</dealingGbn><aptDong>102</aptDong></item>
-<item><sggCd>11680</sggCd><umdCd>10300</umdCd><umdNm>개포동</umdNm><aptNm>시험아파트</aptNm><jibun>12</jibun><excluUseAr>84.97</excluUseAr><dealYear>2026</dealYear><dealMonth>9</dealMonth><dealDay>25</dealDay><dealAmount>400,000</dealAmount><floor>7</floor><buildYear>2005</buildYear><cdealType>O</cdealType><cdealDay>26.10.01</cdealDay><dealingGbn>직거래</dealingGbn><aptDong>101</aptDong></item>
-<item><sggCd>11680</sggCd><umdCd>10300</umdCd><umdNm>개포동</umdNm><aptNm>시험아파트</aptNm><jibun>12</jibun><excluUseAr></excluUseAr><dealYear>2026</dealYear><dealMonth>9</dealMonth><dealDay>26</dealDay><dealAmount>100,000</dealAmount><floor>1</floor><buildYear>2005</buildYear><cdealType></cdealType><aptDong>103</aptDong></item>
-</items><numOfRows>1000</numOfRows><pageNo>1</pageNo><totalCount>4</totalCount></body></response>

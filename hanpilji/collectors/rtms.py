@@ -4,12 +4,15 @@
 
 시군구 x 계약월 x 종류마다 한 트랜잭션. 끝난 달은 커서에 남겨 다시 받지 않되,
 최근 몇 달(config [rtms] refetch_months)은 신고 · 해제가 늦게 붙으므로 매번 다시 받음.
-응답 항목 이름은 포털 명세(swagger, 2026-10-23 확인) 기준. 실제 응답으로는 아직 확인 못 함(미확인).
+응답 항목 이름은 실제 응답으로 확인함(강남구 36개월, 2026-10-27). 알아 둘 것:
+- 매매(기본 자료)에는 단지 일련번호(aptSeq) · 법정동 코드(umdCd)가 없음. 전월세에는 aptSeq가 있음.
+- 전월세에는 해제 여부 항목이 없음(매매에만 cdealType=「O」). 빈 값은 공백 한 칸으로 옴.
 """
 import argparse
 import datetime
 import hashlib
 import json
+import re
 import sys
 
 import psycopg
@@ -49,9 +52,19 @@ def contract_date(row):
     return datetime.date(int(_s(row, "dealYear")), int(_s(row, "dealMonth")), int(_s(row, "dealDay")))
 
 
+def complex_name_key(name):
+    """단지명 비교용: 띄어쓰기와 끝 괄호를 뺌."""
+    return re.sub(r"\([^()]*\)$", "", name.replace(" ", ""))
+
+
 def complex_key(row):
-    """같은 단지면 매매 · 전월세가 같은 값이 되도록 시군구 · 법정동 · 지번 · 단지명으로 만듦."""
-    parts = [_s(row, "sggCd"), _s(row, "umdNm"), _s(row, "jibun"), _s(row, "aptNm").replace(" ", "")]
+    """같은 단지면 매매 · 전월세가 같은 값이 되도록 시군구 · 법정동 · 지번 · 단지명으로 만듦.
+
+    매매 응답에 aptSeq가 없어서 이렇게 묶음. 강남구 36개월 전월세로 보면 aptSeq와 (동, 지번, 단지명)이
+    정확히 1:1이라(700개 단지, 한 단지가 지번으로 갈리거나 두 단지가 합쳐진 경우 0건) 같은 묶음이 됨.
+    단, 매매와 전월세가 이름 끝 괄호만 다르게 줄 때가 있어(「강남브리즈힐(토지임대부아파트)」 · 「강남브리즈힐」)
+    끝 괄호는 빼고 비교함. 빼도 다른 단지끼리 합쳐지는 경우는 0건이었음."""
+    parts = [_s(row, "sggCd"), _s(row, "umdNm"), _s(row, "jibun"), complex_name_key(_s(row, "aptNm"))]
     return "rtms:" + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
