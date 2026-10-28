@@ -75,6 +75,11 @@ python -m hanpilji.collectors.vworld                  # 필지마다 V-World →
 python -m hanpilji.collectors.vworld --export-pnus pnus.txt                    # 받을 필지 목록
 python -m hanpilji.collectors.vworld --fetch-only pnus.txt --out vworld_raw    # 국내 PC, DB 없이 (표준 라이브러리만)
 python -m hanpilji.collectors.vworld --from-dir vworld_raw                     # 받은 파일 적재
+
+# 시장 · 거시 지표 (키: ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀) → core.fact_market
+python -m hanpilji.collectors.market                  # 금리 · 물가(ECOS) · 아파트 가격지수(R-ONE) · 인구 · 세대(KOSIS) 10년
+python -m hanpilji.collectors.market --find rone 매매가격지수   # 표 번호 확인
+python -m hanpilji.collectors.market --items ecos 121Y006       # ECOS 항목 코드 확인
 ```
 
 시험:
@@ -105,10 +110,16 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 | `mart.q_property_card(시군구, 단지명 또는 동 지번, 개월?)` | 「도곡렉슬 종합해서 알려줘」 「대치동 316 어떤 곳이야?」 | 5 |
 | `mart.q_deal_list(시군구, 단지명, 매매·전세·월세?, 전용면적?, 개월?, 정렬?)` | 「은마 76㎡ 최근 6개월 최고가」 「최근 전세 거래를 층과 함께」 | 30 |
 | `mart.q_complex_rank(시군구, 지표, 개월?, 전용면적?, 준공연도?, 몇 곳?, 정렬?)` | 「전세 거래가 가장 많은 단지 3곳」 「2020년 이후 준공 평당가 상위 5곳」 「전세가율 낮은 곳」 | 20 |
+| `mart.q_price_trend(시군구, 개월?, 동?, 단지?, 전용면적?)` | 「요즘 강남 집값 추세」 「대치동 시세 추이」 | 36 |
+| `mart.q_land_price_trend(시군구, 동 · 단지?, 시작 연도?)` | 「도곡렉슬 공시지가 5년간 얼마나 올랐어?」 | 14 |
+| `mart.q_price_vs_official(시군구, 단지?, 개월?, 몇 곳?, 정렬?)` | 「공시지가 대비 실거래가가 높은 단지」 | 20 |
+| `mart.q_market_series(지표?, 지역?, 개월?)` | 「요즘 기준금리랑 주담대 금리」 「강남구 매매가격지수」 | 120 |
 
 `q_complex_price`는 단지 x 전용면적마다 거래단가 · 거래가격 · 전세단가 · 전세시세를 한 줄로 돌려줍니다. 해제된 거래와 월세는 빼고, ㎡당 · 평당 단가와 전세가율도 같이 줍니다.
 
 `q_deal_list`는 거래를 한 건씩(계약일 · 면적 · 층 · 금액 · 신규/갱신) 돌려주고, `price_desc`로 정렬하면 첫 줄이 최고가입니다. `q_complex_rank`는 단지 이름 없이 매매 · 전세 · 월세 건수, ㎡당 단가, 전세가율로 줄을 세웁니다. 단가 · 전세가율 순위는 거래가 3건 이상인 단지만 넣고, 준공연도는 매매 신고의 건축년도를 씁니다.
+
+`q_price_trend`는 달마다 매매 · 전세 ㎡당 **중위** 단가와 전월 · 전년 같은 달 대비를 줍니다. 신고 기한(계약 후 30일)이 안 지난 달은 `partial`로 표시합니다. `q_land_price_trend`의 상승률은 두 해 모두 값이 있는 같은 필지끼리 비교한 값의 중위값입니다. `q_price_vs_official`의 배수(거래 단가 ÷ 공시지가)는 땅 ㎡당과 집 전용 ㎡당을 나눈 비교 지표라 시세 반영률이 아니고, 용적률이 높을수록 작게 나옵니다. `q_market_series`는 지표를 비우면 지표마다 최근 값 한 줄씩 돌려줍니다.
 
 모든 함수가 `row_total`(전체 건수)을 함께 돌려줘서, GPT가 「10건만 보여드렸고 전체는 39건」처럼 말할 수 있습니다.
 
@@ -356,6 +367,8 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [x] 거래 목록 · 단지 순위 도구 (2026-10-27)
 - [ ] 단지명 · 동 이름으로 시군구를 찾는 도구(시범 구가 늘어나면)
 - [x] Supabase(서울)에 백업 복원 · 클라우드에서 HTTPS로 GPT · 카드 읽기 (2026-10-27)
+- [x] 지표 분석: 실거래 월별 추세 · 공시지가 연도별 추세 · 공시지가 대비 실거래가, 지표 수집기(ECOS · R-ONE · KOSIS) (2026-10-28)
+- [ ] ECOS · R-ONE · KOSIS 키 발급 · 클라우드 허용 도메인 추가 → 첫 실제 응답으로 표 번호 · 항목 코드 확인
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더

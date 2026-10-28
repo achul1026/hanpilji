@@ -1,0 +1,6 @@
+{"SttsApiTblData":[{"head":[{"list_total_count":5},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[
+{"STATBL_ID":"T_SALE_MM","DTACYCLE_CD":"MM","WRTTIME_IDTFR_ID":"202609","CLS_NM":"전국","CLS_FULLNM":"전국","ITM_NM":"지수","DTA_VAL":"95.1","UI_NM":"지수"},
+{"STATBL_ID":"T_SALE_MM","DTACYCLE_CD":"MM","WRTTIME_IDTFR_ID":"202609","CLS_NM":"강남구","CLS_FULLNM":"서울>동남권>강남구","ITM_NM":"지수","DTA_VAL":"104.2","UI_NM":"지수"},
+{"STATBL_ID":"T_SALE_MM","DTACYCLE_CD":"MM","WRTTIME_IDTFR_ID":"202609","CLS_NM":"서초구","CLS_FULLNM":"서울>동남권>서초구","ITM_NM":"지수","DTA_VAL":"103.0","UI_NM":"지수"},
+{"STATBL_ID":"T_SALE_MM","DTACYCLE_CD":"MM","WRTTIME_IDTFR_ID":"202608","CLS_NM":"강남구","CLS_FULLNM":"서울>동남권>강남구","ITM_NM":"지수","DTA_VAL":"103.5","UI_NM":"지수"},
+{"STATBL_ID":"T_SALE_MM","DTACYCLE_CD":"MM","WRTTIME_IDTFR_ID":"200301","CLS_NM":"강남구","CLS_FULLNM":"서울>동남권>강남구","ITM_NM":"지수","DTA_VAL":"40.0","UI_NM":"지수"}]}]}

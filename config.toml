@@ -77,3 +77,11 @@ refresh_days = 30
 refresh_days = 30
 # 한 번 실행에 쓸 최대 호출 수. 비우면 키 · 한도 오류가 날 때까지. --max-calls가 우선
 # max_calls = 9000
+
+[market]
+# 시장 · 거시 지표(hanpilji/collectors/market.py). 키는 환경변수 ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀
+months = 120   # 이번 달부터 거꾸로 몇 개월
+# R-ONE 표 번호를 이름으로 못 고를 때 정함(python -m hanpilji.collectors.market --find rone 매매가격지수 로 찾음)
+[market.rone]
+# apt_sale_idx = "A_2024_00000"
+# apt_jeonse_idx = "A_2024_00000"

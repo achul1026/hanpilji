@@ -1,0 +1,4 @@
+{"SttsApiTbl":[{"head":[{"list_total_count":3},{"RESULT":{"CODE":"INFO-000","MESSAGE":"정상 처리되었습니다."}}]},{"row":[
+{"STATBL_ID":"T_SALE_MM","STATBL_NM":"(월) 매매가격지수_아파트","DTACYCLE_CD":"MM"},
+{"STATBL_ID":"T_SALE_WK","STATBL_NM":"(주) 매매가격지수_아파트","DTACYCLE_CD":"WK"},
+{"STATBL_ID":"T_JEONSE_MM","STATBL_NM":"(월) 전세가격지수_아파트","DTACYCLE_CD":"MM"}]}]}

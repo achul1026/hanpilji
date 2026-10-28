@@ -32,7 +32,7 @@ class Tools(unittest.TestCase):
     def test_specs_are_mart_functions(self):
         self.assertEqual({t["name"] for t in tools.specs()},
                          {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
-                          "q_building_filter"})
+                          "q_building_filter", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_market_series"})
         for t in tools.TOOLS:
             self.assertTrue(t["sql"].startswith("SELECT * FROM mart."), "도구는 mart 함수만 부름")
 
@@ -58,6 +58,11 @@ class Tools(unittest.TestCase):
         self.assertEqual(tools.BY_NAME["q_deal_list"]["args"]({"name": "a"}), ("11680", "a", "매매", None, 12, "recent"))
         self.assertEqual(tools.BY_NAME["q_complex_rank"]["args"]({"metric": "jeonse_count", "limit": 99}),
                          ("11680", "jeonse_count", 12, None, None, 20, "desc"))
+        self.assertEqual(tools.BY_NAME["q_price_trend"]["args"]({"emd": "대치동", "months": 99}),
+                         ("11680", 36, "대치동", None, None))
+        self.assertEqual(tools.BY_NAME["q_land_price_trend"]["args"]({}), ("11680", None, None))
+        self.assertEqual(tools.BY_NAME["q_price_vs_official"]["args"]({"order": "asc"}), ("11680", None, 12, 10, "asc"))
+        self.assertEqual(tools.BY_NAME["q_market_series"]["args"]({"stat": "base_rate"}), ("base_rate", None, 24))
 
 
 class Engine(unittest.TestCase):

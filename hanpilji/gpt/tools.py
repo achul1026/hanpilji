@@ -1,10 +1,12 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 7개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수 11개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
 """
 import datetime
 import decimal
+
+from hanpilji.collectors.market import SERIES
 
 # 시범 구가 아직 하나라 기본값으로 씀. 시군구 이름을 코드로 바꾸는 표(데이터가 있는 곳만)
 SIGUNGU = {"강남구": "11680", "서울 강남구": "11680", "서울특별시 강남구": "11680"}
@@ -185,6 +187,96 @@ TOOLS = [
         "sql": "SELECT * FROM mart.q_building_filter(%s::text, %s::int, %s::boolean, %s::boolean, %s::text, %s::int)",
         "args": lambda a: (a["lawd_prefix"], a.get("min_age"), a.get("elevator"), a.get("violation"),
                            a.get("use"), a.get("min_parking")),
+    },
+    {
+        "name": "q_price_trend",
+        "description": (
+            "실거래가로 만든 월별 시세 추세(구 전체 · 동 · 단지). 달마다 매매 건수 · 매매 ㎡당 중위 단가(전용면적) · 평당 중위 단가 · "
+            "전월 대비(trade_mom_pct) · 전년 같은 달 대비(trade_yoy_pct) %, 전세 건수 · 전세 ㎡당 중위 단가 · 전년 같은 달 대비 %. "
+            "중위값이라 비싼 단지가 몰린 달에도 덜 튐. 그래도 건수가 적은 달(특히 단지 하나)은 값이 크게 흔들리니 건수와 함께 말할 것. "
+            "partial=true인 달은 신고 기한(계약 후 30일)이 안 지나 거래가 덜 들어온 달이라 「잠정」이라고 밝힐 것. "
+            "「요즘 강남 집값 어때」 「대치동 시세 추이」 「○○ 단지 가격 변화」에 씀. 최대 36개월. 강남구(11680) 아파트만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "months": {"type": "integer", "description": "이번 달까지 몇 개월. 기본 24, 최대 36"},
+                "emd": {"type": "string", "description": "법정동 이름. 예: 대치동. 없으면 구 전체"},
+                "name": {"type": "string", "description": "단지명 일부 또는 「동 지번」. 주면 그 단지 하나(거래가 가장 많은 곳)"},
+                "area_m2": {"type": "number", "description": "전용면적 ㎡(±3㎡)만 셀 때"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_price_trend(%s::text, %s::int, %s::text, %s::text, %s::numeric)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), max(1, min(int(a.get("months") or 24), 36)),
+                           a.get("emd") or None, a.get("name") or None, a.get("area_m2")),
+    },
+    {
+        "name": "q_land_price_trend",
+        "description": (
+            "개별공시지가(원/㎡) 연도별 추세. 해마다 필지 수 · 중위 공시지가 · 면적 가중 평균 · 전년 대비 상승률(yoy_pct, 두 해 모두 값이 있는 "
+            "같은 필지끼리 비교한 상승률의 중위값) · 첫 해를 100으로 둔 누적 지수(index_100). 2013년부터. "
+            "query가 동 이름(예: 대치동)이면 그 동, 단지명 · 「동 지번」이면 그 단지 필지, 비우면 구 전체. "
+            "주의: 지금 가진 필지는 아파트 단지가 선 필지(강남구 1,168개)뿐이라 「구 전체」도 아파트 단지 필지의 공시지가임. 그렇게 밝힐 것. "
+            "공시지가는 매년 1월 1일 기준, 5월 말쯤 공시. 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "동 이름 · 단지명 일부 · 「동 지번」. 비우면 구 전체"},
+                "from_year": {"type": "integer", "description": "이 해부터. 예: 2020. 없으면 2013년부터"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_land_price_trend(%s::text, %s::text, %s::int)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a.get("query") or None, a.get("from_year")),
+    },
+    {
+        "name": "q_price_vs_official",
+        "description": (
+            "공시지가 대비 실거래가. 단지마다 매매 ㎡당 중위 단가(전용면적, 최근 months개월) · 단지 필지의 최신 개별공시지가(토지 ㎡당, 면적 가중) · "
+            "배수(price_multiple = 거래 단가 ÷ 공시지가) · 공시지가 전년 대비(land_yoy_pct) · 매매 단가 최근 12개월 대 그 앞 12개월(trade_yoy_pct) · 용적률. "
+            "배수는 시세 반영률(현실화율)이 아님: 공시지가는 땅 ㎡당이고 거래 단가는 집 전용면적 ㎡당이라 면적 기준이 다르고, "
+            "용적률이 높은 단지(한 필지에 집이 많음)일수록 배수가 작게 나옴. 답할 때 이 점을 한 줄 밝힐 것. "
+            "query가 있으면 그 단지(최대 5), 없으면 매매 3건 이상 단지의 배수 순위(order desc 큰 순 · asc 작은 순, 최대 20). 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "단지명 일부 또는 「동 지번」. 없으면 순위"},
+                "months": {"type": "integer", "description": "매매 단가 기간(개월). 기본 12, 최대 36"},
+                "limit": {"type": "integer", "description": "순위 몇 곳. 기본 10, 최대 20"},
+                "order": {"type": "string", "enum": ["desc", "asc"], "description": "기본 desc"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_price_vs_official(%s::text, %s::text, %s::int, %s::int, %s::text)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a.get("query") or None, _months(a),
+                           max(1, min(int(a.get("limit") or 10), 20)), a.get("order") or "desc"),
+    },
+    {
+        "name": "q_market_series",
+        "description": (
+            "시장 · 거시 지표의 월별 값. 지표: " + " · ".join(f"{s['id']}({s['name']})" for s in SERIES) + ". "
+            "stat을 비우면 지표마다 가장 최근 값 한 줄씩(무엇이 있는지 볼 때). change는 전월 대비 차이, change_pct는 변화율, "
+            "yoy_change · yoy_pct는 전년 같은 달 대비. 금리(%)는 차이를 %p로 말하고, 지수 · 인구는 변화율로 말할 것. "
+            "출처는 한국은행 ECOS · 한국부동산원 R-ONE · KOSIS. 0건이면 그 지표는 아직 수집 전이니 「데이터 수집 전」이라고 말할 것. "
+            "금리와 집값을 함께 물으면 이 도구와 q_price_trend를 같이 부름(두 값의 인과는 말하지 않음)."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "stat": {"type": "string", "enum": [s["id"] for s in SERIES], "description": "지표. 없으면 전체 목록"},
+                "region": {"type": "string", "description": "전국 · 서울 · 강남구. 금리 · 물가는 전국만. 없으면 그 지표의 모든 지역"},
+                "months": {"type": "integer", "description": "최근 몇 개월. 기본 24, 최대 120"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_market_series(%s::text, %s::text, %s::int)",
+        "args": lambda a: (a.get("stat") or None, a.get("region") or None, max(1, min(int(a.get("months") or 24), 120))),
     },
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}
