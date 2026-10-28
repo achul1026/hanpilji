@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>한필지 · 필지로 묻고 근거로 답하는 부동산 AI</title>
+<meta name="description" content="번지 하나를 물으면 실거래가 · 토지 · 용도지역 · 건축물대장 · 법령 원문을 이어 근거와 함께 답합니다.">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600;700&family=Nanum+Myeongjo:wght@700;800&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <nav class="side" id="side" aria-label="대화 목록">
+    <a class="brand" href="/" aria-label="한필지 처음 화면">
+      <svg width="28" height="28" viewBox="0 0 34 34" aria-hidden="true"><rect x="1.5" y="1.5" width="31" height="31" rx="3" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M1.5 20 L14 13 L22 22 L32.5 17 M14 13 L14 1.5 M22 22 L22 32.5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="14.6" y="14.2" width="6.6" height="6.6" fill="var(--seal)" transform="rotate(8 18 17.5)"/></svg>
+      <span>한필지</span>
+    </a>
+    <button class="new" id="newChat" type="button"><span aria-hidden="true">＋</span> 새 질문</button>
+    <div class="convs" id="convs"></div>
+    <div class="scope">
+      <b>지금 가진 데이터</b>
+      서울 강남구 아파트 721단지<br>실거래 36개월 · 법령 17개 1,542조<br>토지 · 공시지가 · 용도지역 · 건축물대장<br>금리 · 가격지수 · 물가 · 인구
+    </div>
+  </nav>
+
+  <main class="main" id="main">
+    <header class="top">
+      <button class="iconbtn" id="menuBtn" type="button" aria-label="대화 목록 열기"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="1.6"/></svg></button>
+      <span class="toptitle" id="topTitle">한필지</span>
+      <button class="iconbtn" id="drawerBtn" type="button" aria-label="근거 서랍 열기"><svg width="20" height="20" viewBox="0 0 20 20" aria-hidden="true"><rect x="3" y="3" width="14" height="14" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.6"/><path d="M12 3v14" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    </header>
+
+    <div class="scroll" id="scroll">
+      <section class="welcome" id="welcome">
+        <div class="eyebrow">필지로 묻고 근거로 답하는 부동산 AI</div>
+        <h1>번지 하나를 물으면,<br>그 땅의 <em>공공기록</em>이 근거와 함께 답합니다</h1>
+        <p class="lede">실거래가, 토지, 공시지가, 용도지역, 건축물대장, 법령 원문을 필지 번호(PNU) 하나로 이어 봅니다. 모든 숫자 옆에 어디서 몇 건을 보고 말했는지 남깁니다.</p>
+        <div class="examples" id="examples"></div>
+        <ul class="strengths">
+          <li><b>필지 하나로 다 이어 봄</b>실거래 · 토지 · 공시지가 · 용도지역 · 건축물대장 · 행위제한</li>
+          <li><b>모든 숫자에 근거 도장</b>기관 · 건수 · 기준일을 조회 기록에서 자동으로</li>
+          <li><b>법 조문은 원문 그대로</b>법제처 현행 조문, 해당 낱말 표시</li>
+          <li><b>권유하지 않고, 모르면 모른다</b>매물을 팔지 않고 사라고 하지 않습니다</li>
+        </ul>
+      </section>
+      <div class="log" id="log" aria-live="polite"></div>
+    </div>
+
+    <form class="composer" id="form">
+      <div class="box">
+        <textarea id="q" rows="1" maxlength="1000" placeholder="단지, 주소, 법 조문, 무엇이든 물어보세요" aria-label="질문"></textarea>
+        <button class="go" id="go" type="submit" aria-label="묻기"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M9 15V3M4 8l5-5 5 5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg></button>
+      </div>
+      <p class="fine">공공데이터로만 답하며 투자 · 법률 자문이 아닙니다. 지금은 서울 강남구 아파트 데이터만 있습니다.</p>
+    </form>
+  </main>
+
+  <aside class="drawer" id="drawer" aria-label="근거 서랍">
+    <div class="dhead">
+      <div class="grab" aria-hidden="true"></div>
+      <div class="eyebrow">근거 서랍</div>
+      <button class="iconbtn" id="drawerClose" type="button" aria-label="근거 서랍 닫기"><svg width="18" height="18" viewBox="0 0 18 18" aria-hidden="true"><path d="M4 4l10 10M14 4L4 14" stroke="currentColor" stroke-width="1.6"/></svg></button>
+    </div>
+    <div class="tabs" id="tabs" role="tablist"></div>
+    <div class="dbody" id="dbody">
+      <div class="dempty">
+        <svg width="120" height="80" viewBox="0 0 120 80" aria-hidden="true"><g fill="none" stroke="var(--line)" stroke-width="1.2"><path d="M0 20H120M0 40H120M0 60H120M30 0V80M60 0V80M90 0V80"/></g><path d="M18 64 L30 18 L70 10 L100 26 L108 58 L70 70 Z" fill="var(--survey-soft)" stroke="var(--survey)" stroke-width="1.6"/></svg>
+        <p>답 속의 <span class="cite">1</span> 번호를 누르면<br>그 숫자가 나온 표 · 그래프 · 조문 원문이 여기 열립니다.</p>
+      </div>
+    </div>
+  </aside>
+  <div class="scrim" id="scrim" hidden></div>
+</div>
+<script src="/app.js"></script>
+</body>
+</html>

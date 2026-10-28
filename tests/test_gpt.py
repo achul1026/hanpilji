@@ -85,6 +85,23 @@ class Engine(unittest.TestCase):
         self.assertEqual(json.loads(sent["results"][0]["content"])["row_total"], 1, "모델은 row_total을 봄")
         self.assertIn("투자 조언은 하지 않는다", bot.seen[0]["system"])
 
+    def test_refs_events_and_results(self):
+        events = []
+        bot = llm.Scripted([Reply(calls=[call("q_complex_price", {"name": "도곡렉슬"}), call("q_complex_price", {}, id="t2"),
+                                         call("q_law_search", {"query": "증액"}, id="t3")], stop="tool"),
+                            Reply(text="21건 [1], 조문 [2]", stop="end")])
+        with mock.patch.object(tools, "run", side_effect=[dict(PRICE_OUT), tools.ToolError("필수 인자 없음: name"),
+                                                         {**PRICE_OUT, "tool": "q_law_search"}]):
+            ans = engine.ask("x", bot, conn=None, on_event=events.append, screen=True)
+        self.assertEqual([r["ref"] for r in ans.results], [1, 2], "오류 난 호출은 번호를 받지 않음")
+        self.assertEqual([e["type"] for e in events], ["tool", "result", "tool", "tool", "result"])
+        sent = bot.seen[1]["messages"][-1]["results"]
+        self.assertEqual([json.loads(r["content"]).get("ref") for r in sent if not r.get("is_error")], [1, 2])
+        self.assertIn("- [1] q_complex_price(name=도곡렉슬, area_m2=84) → 1건", ans.footer)
+        self.assertIn("- [2] q_law_search", ans.footer)
+        self.assertIn("화면 안내", bot.seen[0]["system"])
+        self.assertNotIn("화면 안내", engine.SYSTEM)
+
     def test_partial_rows_in_footer(self):
         out = {**PRICE_OUT, "tool": "q_law_search", "args": {"query": "5% 증액"}, "shown": 10, "row_total": 39}
         ans, _ = self.run_with([Reply(calls=[call("q_law_search", {"query": "5% 증액"})], stop="tool"),
@@ -323,6 +340,35 @@ class WithDb(unittest.TestCase):
                 conn.execute("CREATE TABLE mart.x (a int)")
 
 
+class Blocks(unittest.TestCase):
+    def test_shapes(self):
+        from hanpilji.gpt import blocks
+        b = blocks.block({**PRICE_OUT, "ref": 1})
+        self.assertEqual((b["kind"], b["title"], b["source"]["row_total"]), ("table", "도곡렉슬 84㎡ 면적별 시세", 1))
+        self.assertEqual([c["key"] for c in b["columns"]], ["complex_name", "trade_count", "trade_avg"], "값 있는 열만")
+        self.assertEqual(b["requery"], {"param": "months", "label": "기간", "choices": [6, 12, 36], "current": 12})
+        law = blocks.block({"tool": "q_law_search", "args": {"query": "차임 증액"}, "ref": 2, "shown": 1, "row_total": 1,
+                            "sources": [], "asof": None,
+                            "rows": [{"law_name": "주택임대차보호법", "article_no": "제7조", "article_title": "차임 등의 증감청구권",
+                                      "body": "…", "effective_date": "2026-01-02"}]})
+        self.assertEqual(law["kind"], "document")
+        self.assertEqual(law["items"][0]["url"], "https://www.law.go.kr/법령/" + "%EC%A3%BC%ED%83%9D%EC%9E%84%EB%8C%80%EC%B0%A8"
+                         "%EB%B3%B4%ED%98%B8%EB%B2%95/%EC%A0%9C7%EC%A1%B0")
+        self.assertEqual(law["highlight"], ["차임", "증액"])
+        trend = blocks.block({"tool": "q_price_trend", "args": {"emd": "대치동"}, "ref": 3, "shown": 1, "row_total": 1,
+                              "sources": [], "asof": None, "rows": [{"month": "2026-09", "trade_count": 3, "partial": True,
+                                                                     "trade_median_per_pyeong": 1, "scope": "강남구 대치동"}]})
+        self.assertEqual((trend["kind"], trend["x"], trend["requery"]["current"]), ("chart", "month", 24))
+        series = [{"stat_id": "base_rate", "region": "전국", "period": p, "value": v, "unit": "연%", "note": "월말"}
+                  for p, v in [("202607", 2.75), ("202608", 3), ("202609", 3)]]
+        m = blocks.block({"tool": "q_market_series", "args": {"stat": "base_rate"}, "ref": 4, "shown": 3, "row_total": 3,
+                          "sources": [], "asof": None, "rows": series})
+        self.assertEqual((m["kind"], m["series"][0]["label"], len(m["rows"])), ("chart", "전국 (연%)", 3))
+        latest = blocks.block({"tool": "q_market_series", "args": {}, "ref": 5, "shown": 1, "row_total": 1,
+                               "sources": [], "asof": None, "rows": series[:1]})
+        self.assertEqual(latest["kind"], "table", "지표 목록(stat 없음)은 표")
+
+
 class Web(unittest.TestCase):
     """웹 채팅 서버를 실제 포트로 띄워 요청 처리(키 · DB 없이: 엔진을 가짜로 바꿈)."""
 
@@ -379,8 +425,64 @@ class Web(unittest.TestCase):
 
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
-        self.assertNotIn("innerHTML", web.PAGE, "답 속 HTML이 실행되지 않게 DOM으로만 그림")
-        self.assertIn("function md(", web.PAGE)
+        js = web.page("app.js")
+        self.assertNotIn("innerHTML", js, "답 속 HTML이 실행되지 않게 DOM으로만 그림")
+        self.assertNotIn("insertAdjacentHTML", js)
+        self.assertIn("function md(", js)
+
+    def test_static_files_need_no_token(self):
+        self.serve(token="s3cret")
+        import urllib.request
+        for path, ctype in [("/", "text/html"), ("/app.js", "text/javascript"), ("/app.css", "text/css"),
+                            ("/favicon.svg", "image/svg+xml")]:
+            with urllib.request.urlopen(self.base + path) as r:
+                self.assertTrue(r.headers["Content-Type"].startswith(ctype), path)
+        self.assertEqual(self.post({"q": "a"})[0], 403, "질문(요금 나감)은 여전히 토큰이 필요")
+
+    def test_stream_sends_progress_blocks_and_answer(self):
+        self.serve()
+        import urllib.request
+
+        def fake_ask(q, *a, on_event=None, screen=False, **k):
+            self.assertTrue(screen, "웹은 화면 블록이 보인다고 모델에게 알림")
+            on_event = on_event or (lambda e: None)
+            on_event({"type": "tool", "tool": "q_complex_price", "args": {"name": "도곡렉슬"}})
+            on_event({"type": "result", "result": {**PRICE_OUT, "ref": 1}})
+            return engine.Answer("답 [1]", footer="근거", messages=[{"role": "user", "text": q}],
+                                 results=[{**PRICE_OUT, "ref": 1}])
+        engine.ask.side_effect = fake_ask
+        req = urllib.request.Request(self.base + "/api/ask/stream", data=json.dumps({"q": "시세"}).encode(),
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req) as r:
+            self.assertTrue(r.headers["Content-Type"].startswith("text/event-stream"))
+            events = [json.loads(line[6:]) for line in r.read().decode().split("\n\n") if line.startswith("data: ")]
+        self.assertEqual([e["type"] for e in events], ["start", "tool", "block", "answer"])
+        self.assertEqual(events[1]["label"], "실거래가에서 시세를 셈하는 중")
+        self.assertEqual((events[2]["block"]["ref"], events[2]["block"]["kind"]), (1, "table"))
+        self.assertEqual(events[3]["answer"], "답 [1]")
+        code, got = self.post({"q": "또"})
+        self.assertEqual(got["blocks"][0]["title"], "도곡렉슬 84㎡ 면적별 시세")
+
+    def test_tool_requery(self):
+        self.serve()
+        import urllib.error
+        import urllib.request
+
+        def tool(body):
+            req = urllib.request.Request(self.base + "/api/tool", data=json.dumps(body).encode(),
+                                         headers={"Content-Type": "application/json"})
+            try:
+                with urllib.request.urlopen(req) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        with mock.patch.object(tools, "run", return_value=dict(PRICE_OUT)) as run:
+            code, got = tool({"tool": "q_complex_price", "args": {"name": "도곡렉슬", "months": 36}, "ref": 2})
+        self.assertEqual(code, 200)
+        self.assertEqual(run.call_args.args[1:], ("q_complex_price", {"name": "도곡렉슬", "months": 36}))
+        self.assertEqual(got["block"]["ref"], 2)
+        self.assertEqual(tool({"tool": "q_law_search", "args": {"query": "x"}})[0], 400, "기간 없는 도구는 다시 조회 안 함")
+        self.assertEqual(tool({"tool": "q_complex_price", "args": {"name": "a", "sql": "x"}})[0], 400, "인자 확인")
 
     def test_token_and_rate_limit(self):
         self.serve(token="s3cret", per_hour=2)

@@ -30,8 +30,18 @@ SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어�
    한 단지 · 한 주소를 종합해서 물으면 q_property_card를 먼저 부르고, 필요하면 다른 도구로 더 찾는다.
    최고가 · 최저가 · 층별 가격은 q_deal_list로, 「가장 많은 · 가장 비싼 단지」 같은 순위는 q_complex_rank로 찾는다.
 8. 근거 목록(함수 · 건수 · 출처)은 시스템이 답 끝에 자동으로 붙이니 따로 길게 적지 않는다.
+   도구 결과마다 ref 번호가 있다. 숫자 · 조문 · 가능 여부를 말한 문장 끝에 그 값이 나온 결과의 번호를 [1]처럼 붙인다.
+   화면에서 이 번호를 누르면 원본 표 · 그래프 · 조문이 열리므로, 긴 표를 답에 다시 옮겨 적지 않고 요점만 쓴다.
 
 오늘: {today}"""
+
+# 웹 화면에서는 도구 결과가 표 · 그래프 · 조문 원문 블록으로 답 옆에 그대로 보임
+SCREEN = """
+
+화면 안내: 이 답은 웹 화면에 나간다. 도구 결과는 답 아래와 옆 「근거 서랍」에 표 · 그래프 · 조문 원문으로 그대로 보인다.
+- 그래서 월별 값 · 거래 목록 · 조문 전문을 답에 표나 긴 목록으로 다시 옮겨 적지 않는다.
+- 답은 결론부터, 요점 3~8문장(또는 짧은 목록)으로 쓴다. 꼭 짚을 숫자(최고 · 최저 · 최근 · 평균 · 건수)만 말하고 [번호]를 붙인다.
+- 큰 제목(#)은 쓰지 않는다. 나눌 게 있으면 굵은 글씨 한 줄로 나눈다."""
 
 FALLBACK_REFUSAL = "이 질문에는 답을 드리기 어렵습니다. 부동산 데이터(시세 · 법령 · 용도지역)에 관한 질문으로 다시 물어 주세요."
 
@@ -44,6 +54,7 @@ class Answer:
     stop: str = ""
     model: str = ""
     messages: list = field(default_factory=list)   # 다음 질문에 이어 쓸 대화
+    results: list = field(default_factory=list)   # 성공한 tools.run 결과 전체(rows 포함, ref 붙음). 화면 블록용
 
     def full(self):
         return self.text.rstrip() + ("\n\n" + self.footer if self.footer else "")
@@ -59,10 +70,11 @@ def footer(calls):
         if c.get("error"):
             lines.append(f"- {c['tool']}({args}) → 오류: {c['error']}")
             continue
+        ref = f"[{c['ref']}] " if c.get("ref") else ""
         n = f"{c['row_total']:,}건" if c["shown"] == c["row_total"] else f"{c['row_total']:,}건 중 {c['shown']}건 표시"
         src = " · ".join(c["sources"]) if c["sources"] else ""
         tail = " · ".join(x for x in (src, c["asof"] and f"기준 {c['asof']}") if x)
-        lines.append(f"- {c['tool']}({args}) → {n}" + (f" ({tail})" if tail else ""))
+        lines.append(f"- {ref}{c['tool']}({args}) → {n}" + (f" ({tail})" if tail else ""))
     return "\n".join(lines)
 
 
@@ -78,10 +90,10 @@ def trim(history, keep=KEEP_TURNS):
     return history[starts[-keep]:] if len(starts) > keep else history
 
 
-def _ended(messages, text, calls, stop, model):
+def _ended(messages, text, calls, stop, model, results=None):
     """엔진이 만든 답(거절 · 한도)도 대화에 남겨서 이어 묻기 때 모델이 사용자가 본 답을 알게 함."""
     messages.append({"role": "assistant", "text": text, "calls": [], "raw": None, "provider": ""})
-    return Answer(text, calls, footer(calls), stop, model, messages)
+    return Answer(text, calls, footer(calls), stop, model, messages, results or [])
 
 
 def rounds_from(cfg):
@@ -92,33 +104,39 @@ def rounds_from(cfg):
     return n
 
 
-def ask(question, llm, conn, history=None, max_rounds=6, today=None):
+def ask(question, llm, conn, history=None, max_rounds=6, today=None, on_event=None, screen=False):
     """질문 하나에 답함. history는 앞선 Answer.messages(이어 묻기).
-    도구는 최대 max_rounds번 주고받고, 마지막 결과를 정리할 기회를 한 번 더 줌."""
+    도구는 최대 max_rounds번 주고받고, 마지막 결과를 정리할 기회를 한 번 더 줌.
+    on_event(dict)를 주면 도구를 부르기 전({"type": "tool"})과 결과가 나온 뒤({"type": "result"})에 알림(웹 진행 표시용).
+    screen=True면 결과가 화면 블록으로 함께 보인다고 모델에게 알려 답을 짧게 쓰게 함."""
+    emit = on_event or (lambda e: None)
     rounds_from({"gpt": {"max_rounds": max_rounds}})
-    system = SYSTEM.format(today=(today or datetime.date.today()).isoformat())
+    system = SYSTEM.format(today=(today or datetime.date.today()).isoformat()) + (SCREEN if screen else "")
     specs = tools_mod.specs()
     messages = trim(history) + [{"role": "user", "text": question}]
-    calls = []
+    calls, results_full = [], []
     for round_no in range(max_rounds + 1):
         r = llm.chat(system, messages, specs)
         if r.stop == "refusal":
-            return _ended(messages, FALLBACK_REFUSAL, calls, r.stop, r.model)
+            return _ended(messages, FALLBACK_REFUSAL, calls, r.stop, r.model, results_full)
         messages.append({"role": "assistant", "text": r.text, "calls": r.calls, "raw": r.raw,
                          "provider": getattr(llm, "name", "")})
         if not r.calls:
             text = r.text if r.stop != "max_tokens" else r.text + "\n\n(답이 길어 중간에 끊겼습니다)"
-            return Answer(text, calls, footer(calls), r.stop, r.model, messages)
+            return Answer(text, calls, footer(calls), r.stop, r.model, messages, results_full)
         last = round_no == max_rounds
         results = []
         for c in r.calls:
             if last or len(calls) >= MAX_CALLS:   # 실행하지 않고 짝만 맞춰 둠(도구 호출엔 결과가 꼭 따라야 함)
                 results.append({"id": c["id"], "content": "호출 한도를 넘어 실행하지 않음", "is_error": True})
                 continue
+            emit({"type": "tool", "tool": c["name"], "args": c["input"]})
             try:
-                out = tools_mod.run(conn, c["name"], c["input"])
+                out = dict(tools_mod.run(conn, c["name"], c["input"]), ref=len(results_full) + 1)
                 results.append({"id": c["id"], "content": json.dumps(out, ensure_ascii=False)})
                 calls.append({k: v for k, v in out.items() if k != "rows"})
+                results_full.append(out)
+                emit({"type": "result", "result": out})
             except tools_mod.ToolError as e:
                 results.append({"id": c["id"], "content": f"인자 오류: {e}", "is_error": True})
                 calls.append({"tool": c["name"], "args": c["input"] if isinstance(c["input"], dict) else {},
@@ -129,7 +147,7 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None):
                 calls.append({"tool": c["name"], "args": c["input"], "error": type(e).__name__})
         messages.append({"role": "tool", "results": results})
         if last:
-            return _ended(messages, MAX_RESULT, calls, "max_rounds", r.model)
+            return _ended(messages, MAX_RESULT, calls, "max_rounds", r.model, results_full)
 
 
 def connect(cfg):
