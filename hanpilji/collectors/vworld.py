@@ -3,6 +3,12 @@ bridge_parcel_zone(토지이용계획).
 
     VWORLD_KEY=... python -m hanpilji.collectors.vworld [--sigungu 11680] [--pnu 1168011800105270000] [--max-calls 900]
 
+V-World는 해외 IP(클라우드)의 연결을 끊음(2026-10-28 확인). 그럴 때는 받기와 적재를 나눔:
+    python -m hanpilji.collectors.vworld --export-pnus pnus.txt            # 클라우드: 받을 필지 목록
+    VWORLD_KEY=... python -m hanpilji.collectors.vworld --fetch-only pnus.txt --out vworld_raw   # 국내 PC: DB 없이 받기만
+    python -m hanpilji.collectors.vworld --from-dir vworld_raw             # 클라우드: 받은 파일을 적재
+받기만 하는 모드는 표준 라이브러리만 씀(psycopg · config 불필요). 필지마다 {pnu}.json 하나를 쓰고, 이미 있으면 건너뜀.
+
 공공데이터포털의 토지특성 · 개별공시지가 · 토지이용계획 API는 폐기되고 V-World로만 나옴(2026-10-27 확인).
 필지(core.dim_parcel)마다 기능 2개를 부름:
   토지특성(getLandCharacteristics): 해마다 한 줄. 지목 · 토지대장 면적 · 개별공시지가 · 용도지역 · 이용상황 · 지형 · 도로
@@ -19,10 +25,8 @@ import re
 import sys
 import urllib.error
 import urllib.parse
+from pathlib import Path
 
-import psycopg
-
-from hanpilji import config as config_mod
 from hanpilji import ingest
 
 SOURCE = "vworld_ned"
@@ -179,6 +183,59 @@ class Caller:
             page += 1
 
 
+class DirCaller:
+    """--from-dir: 국내 PC에서 받아 둔 {pnu}.json을 읽음. 파일이 없는 필지는 Missing."""
+
+    def __init__(self, folder):
+        self.folder, self.calls = Path(folder), 0
+
+    def get(self, pnu):
+        path = self.folder / f"{pnu}.json"
+        if not path.exists():
+            raise Missing()
+        got = json.loads(path.read_text(encoding="utf-8"))
+        return {op: got.get(op, []) for op in OPS}
+
+
+class Missing(Exception):
+    """--from-dir에 그 필지 파일이 없음."""
+
+
+def fetch_only(pnu_file, out, fetch=fetch, max_calls=None):
+    """DB 없이 받기만: 필지마다 out/{pnu}.json = {기능: 줄 목록}. 이미 있으면 건너뜀(다시 돌리면 이어 받음).
+    원본 응답은 out/raw/에 페이지마다 남김. 반환: 실패한 필지 수."""
+    out = Path(out)
+    out.mkdir(parents=True, exist_ok=True)
+    pnus = [p.strip() for p in Path(pnu_file).read_text(encoding="utf-8").split() if p.strip()]
+    caller = Caller(fetch, str(out / "raw"), max_calls)
+    done = skipped = failed = 0
+    for pnu in pnus:
+        path = out / f"{pnu}.json"
+        if path.exists():
+            skipped += 1
+            continue
+        try:
+            got = {op: caller.all_rows(op, pnu) for op in OPS}
+        except Budget:
+            print(f"호출 한도 {max_calls}회에 닿아 멈춤 — 다시 돌리면 이어 받음", file=sys.stderr)
+            break
+        except Exception as e:
+            failed += 1
+            print(f"failed {pnu}: {e}", file=sys.stderr)
+            if is_fatal(e):
+                print(f"멈춤: {e}", file=sys.stderr)
+                break
+            continue
+        tmp = path.with_suffix(".part")
+        tmp.write_text(json.dumps(got, ensure_ascii=False), encoding="utf-8")
+        tmp.replace(path)
+        done += 1
+        print(f"{pnu}  토지특성 {len(got[OPS[0]])}줄 · 토지이용계획 {len(got[OPS[1]])}줄  (호출 {caller.calls})")
+    left = len(pnus) - done - skipped
+    print(f"필지 {len(pnus)}개 중 이번에 {done}개 · 이미 받음 {skipped}개 · 남음 {left}개 · 실패 {failed}개 · 호출 {caller.calls}회")
+    return 1 if failed else 0
+
+
 # ── 적재 ──
 
 def load(conn, pnu, got, asof):
@@ -243,29 +300,49 @@ def main(argv=None, fetch=fetch):
     ap.add_argument("--pnu", action="append", help="이 필지만(기본: 그 구의 필지 전부)")
     ap.add_argument("--max-calls", type=int, help="이번 실행의 최대 호출 수(하루 한도를 나눠 쓸 때)")
     ap.add_argument("--refresh", action="store_true", help="최근에 받은 필지도 다시 받음")
+    ap.add_argument("--export-pnus", metavar="FILE", help="받을 필지 목록을 파일로 쓰고 끝(--fetch-only용)")
+    ap.add_argument("--fetch-only", metavar="PNU_FILE", help="DB 없이 이 목록의 필지를 받아 --out에 저장")
+    ap.add_argument("--out", default="vworld_raw", help="--fetch-only가 쓸 폴더")
+    ap.add_argument("--from-dir", metavar="DIR", help="부르지 않고 --fetch-only가 받아 둔 폴더에서 적재")
     args = ap.parse_args(argv)
+    if args.fetch_only:
+        return fetch_only(args.fetch_only, args.out, fetch, args.max_calls)
+
+    import psycopg
+    from hanpilji import config as config_mod
     cfg = config_mod.load(args.config)
     vcfg = cfg.get("vworld", {})
     refresh_days = vcfg.get("refresh_days", 30)
     max_calls = args.max_calls if args.max_calls is not None else vcfg.get("max_calls")
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = datetime.date.today()
-    caller = Caller(fetch, cfg["storage"]["raw_dir"], max_calls)
+    caller = DirCaller(args.from_dir) if args.from_dir else Caller(fetch, cfg["storage"]["raw_dir"], max_calls)
     with psycopg.connect(cfg["db"]["dsn"]) as conn:
         pnus = args.pnu or [r[0] for r in conn.execute(
             "SELECT pnu FROM core.dim_parcel WHERE left(pnu, 5) = ANY(%s) ORDER BY pnu", (sigungus,)).fetchall()]
+        if args.export_pnus:
+            Path(args.export_pnus).write_text("\n".join(pnus) + "\n", encoding="utf-8")
+            print(f"필지 {len(pnus)}개 → {args.export_pnus}")
+            return 0
         run_id = ingest.start_run(conn, SOURCE)
-        loaded = failed = done = skipped = 0
+        loaded = failed = done = skipped = missing = 0
         note, finished = None, False
         try:
             for pnu in pnus:
                 last = ingest.get_cursor(conn, SOURCE, pnu)
-                if not args.refresh and last and (today - datetime.date.fromisoformat(last)).days < refresh_days:
+                if not args.refresh and not args.from_dir and last and (today - datetime.date.fromisoformat(last)).days < refresh_days:
                     skipped += 1
                     continue
+                if args.from_dir:
+                    try:
+                        got = caller.get(pnu)
+                    except Missing:
+                        missing += 1
+                        continue
                 task = ingest.add_task(conn, run_id, SOURCE, pnu)
                 try:
-                    got = {op: caller.all_rows(op, pnu) for op in OPS}
+                    if not args.from_dir:
+                        got = {op: caller.all_rows(op, pnu) for op in OPS}
                     n = load(conn, pnu, got, today)
                     ingest.end_task(conn, task, "done")
                     ingest.set_cursor(conn, SOURCE, pnu, today.isoformat())
@@ -288,7 +365,10 @@ def main(argv=None, fetch=fetch):
                         note = f"멈춤: {e}"[:500]
                         break
             left = len(pnus) - done - skipped
-            print(f"필지 {len(pnus)}개 중 이번에 {done}개 · 이미 받음 {skipped}개 · 남음 {left}개 · 호출 {caller.calls}회")
+            if args.from_dir:
+                print(f"필지 {len(pnus)}개 중 적재 {done}개 · 파일 없음 {missing}개 · 실패 {failed}개")
+            else:
+                print(f"필지 {len(pnus)}개 중 이번에 {done}개 · 이미 받음 {skipped}개 · 남음 {left}개 · 호출 {caller.calls}회")
             ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, 0, note)
             finished = True
         finally:

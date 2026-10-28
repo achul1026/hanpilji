@@ -65,6 +65,38 @@ class Parse(unittest.TestCase):
             vworld.api_key()
 
 
+class FetchOnly(unittest.TestCase):
+    def test_writes_one_file_per_parcel_and_resumes(self):
+        with tempfile.TemporaryDirectory() as d:
+            pnus = Path(d) / "pnus.txt"
+            pnus.write_text(f"{PNU}\n1168011800100010000\n", encoding="utf-8")
+            out = Path(d) / "out"
+            self.assertEqual(vworld.main(["--fetch-only", str(pnus), "--out", str(out), "--max-calls", "3"],
+                                         fetch=fixture_fetch), 0)
+            got = json.loads((out / f"{PNU}.json").read_text(encoding="utf-8"))
+            self.assertEqual({k: len(v) for k, v in got.items()}, {"getLandCharacteristics": 2, "getLandUseAttr": 7})
+            self.assertFalse((out / "1168011800100010000.json").exists(), "한도에 닿은 필지는 파일을 남기지 않음")
+            calls = []
+            def counting(op, params):
+                calls.append(params["pnu"])
+                return fixture_fetch(op, params)
+            vworld.main(["--fetch-only", str(pnus), "--out", str(out)], fetch=counting)
+            self.assertEqual(calls, ["1168011800100010000"] * 2, "이미 받은 필지는 건너뜀")
+
+    def test_fatal_error_stops(self):
+        def bad(op, params):
+            raise vworld.ApiError("INCORRECT_KEY 인증키 오류")
+        with tempfile.TemporaryDirectory() as d:
+            pnus = Path(d) / "pnus.txt"
+            pnus.write_text(f"{PNU}\n1168011800100010000\n", encoding="utf-8")
+            calls = []
+            def counting(op, params):
+                calls.append(op)
+                return bad(op, params)
+            self.assertEqual(vworld.main(["--fetch-only", str(pnus), "--out", f"{d}/out"], fetch=counting), 1)
+            self.assertEqual(len(calls), 1)
+
+
 @unittest.skipUnless(DSN, "HANPILJI_TEST_DSN 없음")
 class Load(unittest.TestCase):
     @classmethod
@@ -139,6 +171,22 @@ class Load(unittest.TestCase):
             return fixture_fetch(op, params)
         self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", PNU], fetch=counting), 0)
         self.assertEqual(calls, [], "최근에 받은 필지는 다시 부르지 않음")
+
+    def test_4_export_and_from_dir(self):
+        with tempfile.TemporaryDirectory() as d:
+            pnus = Path(d) / "pnus.txt"
+            self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", PNU, "--export-pnus", str(pnus)]), 0)
+            self.assertEqual(pnus.read_text(encoding="utf-8").split(), [PNU])
+            vworld.main(["--fetch-only", str(pnus), "--out", f"{d}/out"], fetch=fixture_fetch)
+            with psycopg.connect(DSN) as c:
+                c.execute("DELETE FROM core.fact_land_price WHERE pnu = %s", (PNU,))
+            def never(op, params):
+                raise AssertionError("--from-dir는 부르지 않음")
+            self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", PNU, "--from-dir", f"{d}/out"], fetch=never), 0)
+            self.assertEqual(self.q("SELECT count(*) FROM core.fact_land_price WHERE pnu = %s", PNU)[0][0], 2,
+                             "커서가 최근이어도 --from-dir는 다시 적재")
+            self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", "1168011800100010000",
+                                          "--from-dir", f"{d}/out"], fetch=never), 0, "파일 없는 필지는 건너뜀")
 
 
 if __name__ == "__main__":
