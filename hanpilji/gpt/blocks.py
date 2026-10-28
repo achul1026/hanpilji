@@ -79,13 +79,18 @@ def _columns(keys, rows):
 
 
 def _title(out):
-    a = out.get("args") or {}
+    a, tool, rows = out.get("args") or {}, out["tool"], out.get("rows") or []
+    label = TOOL_LABEL.get(tool, tool)
+    if tool == "q_zoning_check":
+        return f"{a.get('zone', '')} · {a.get('act', '')} {label}"
+    if tool == "q_law_search":
+        return " · ".join(x for x in (a.get("law_name") or "법령 조문", a.get("query")) if x)
+    if tool == "q_market_series":
+        names = list(dict.fromkeys(r.get("stat_name") for r in rows if r.get("stat_name")))
+        return names[0] if len(names) == 1 else label
     subject = " ".join(str(x) for x in (a.get("name") or a.get("query") or a.get("emd"),
                                          a.get("area_m2") and f"{a['area_m2']:g}㎡", a.get("kind")) if x)
-    if out["tool"] == "q_zoning_check":
-        subject = f"{a.get('zone', '')} · {a.get('act', '')}"
-    label = TOOL_LABEL.get(out["tool"], out["tool"])
-    return f"{subject} {label}".strip() if subject and out["tool"] != "q_law_search" else label
+    return f"{subject} {label}".strip()
 
 
 def _law(out):
