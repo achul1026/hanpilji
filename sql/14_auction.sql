@@ -26,6 +26,7 @@ CREATE TABLE IF NOT EXISTS core.fact_auction (
     sigungu        text,
     emd            text,                          -- 법정동 · 읍면
     jibun          text,                          -- 주소에서 뽑은 지번. 예) 316, 12-3
+    pnu            varchar(25),                   -- 지번 PNU(온비드 ltnoPnu). 단지를 찾는 첫째 열쇠
     address        text,
     name           text,                          -- 물건명. 예) 서울특별시 강남구 대치동 316 은마아파트 제28동 …
     usage          text,                          -- 용도. 예) 아파트
@@ -38,12 +39,13 @@ CREATE TABLE IF NOT EXISTS core.fact_auction (
     fail_count     integer,                       -- 유찰 횟수
     round_no       integer,                       -- 공매 회차
     status         text,                          -- 입찰준비중 · 입찰진행중 · 낙찰 · 유찰 …
-    bid_begin      timestamp,
+    bid_begin      timestamp,                     -- 한국 시각(KST)
     bid_end        timestamp,
     source         text NOT NULL,
     asof           date NOT NULL,
     PRIMARY KEY (cltr_mng_no, pbct_cdtn_no)
 );
+ALTER TABLE core.fact_auction ADD COLUMN IF NOT EXISTS pnu varchar(25);
 CREATE INDEX IF NOT EXISTS fact_auction_sgg_idx ON core.fact_auction (sigungu_cd, bid_end);
 
 -- 입찰 전 확인 항목. 기사(무드모드 2026-10-27)의 체크리스트를 법령 근거와 함께 정리. 조문은 core.doc_law에 있으면 붙임
@@ -93,8 +95,8 @@ ON CONFLICT (step) DO UPDATE SET item = excluded.item, what_to_check = excluded.
     article_no = excluded.article_no, source = excluded.source, asof = excluded.asof;
 
 -- ── 공매 물건 할인율: 최저입찰가를 같은 단지 · 비슷한 면적의 최근 실거래와 비교 ──
--- 물건마다 현재 회차 하나(입찰이 안 끝난 회차 중 가장 이른 것, 없으면 가장 최근 회차)
--- 단지는 주소의 「동 지번」으로 찾음(core.find_complex). 실거래는 그 단지의 최근 p_months개월 매매 중 면적 ±3㎡의 ㎡당 중위 단가
+-- 물건마다 현재 회차 하나(입찰이 안 끝난 회차 중 가장 이른 것, 없으면 가장 최근 회차). 입찰 시각은 한국 시각이라 DB 시간대와 상관없이 KST로 비교
+-- 단지는 지번 PNU로 단지 필지(core.v_complex_parcel)에서 찾고, 없으면 주소의 「동 지번」으로 찾음(core.find_complex). 실거래는 그 단지의 최근 p_months개월 매매 중 면적 ±3㎡의 ㎡당 중위 단가
 -- est_market_price = ㎡당 중위 단가 x 물건 면적. discount_pct = (1 - 최저입찰가 ÷ est_market_price) x 100
 -- 권리관계는 보지 않음: 할인이 커도 선순위 임차인 · 유치권이 있으면 실제로는 비쌀 수 있음(q_auction_checklist)
 DROP FUNCTION IF EXISTS mart.q_auction_discount(text, text, boolean, numeric, int, int);
@@ -113,15 +115,20 @@ LANGUAGE sql STABLE AS $$
           AND (a.dsps_method IS NULL OR a.dsps_method LIKE '%매각%')
           AND (p_query IS NULL OR replace(concat_ws(' ', a.name, a.address, a.usage), ' ', '')
                                   LIKE '%' || replace(p_query, ' ', '') || '%')
-        ORDER BY a.cltr_mng_no, (a.bid_end >= localtimestamp) DESC NULLS LAST,
-                 CASE WHEN a.bid_end >= localtimestamp THEN a.bid_begin END ASC,
+        ORDER BY a.cltr_mng_no, (a.bid_end >= (now() AT TIME ZONE 'Asia/Seoul')) DESC NULLS LAST,
+                 CASE WHEN a.bid_end >= (now() AT TIME ZONE 'Asia/Seoul') THEN a.bid_begin END ASC,
                  a.bid_begin DESC NULLS LAST
     ), m AS (
         SELECT c.*, cx.complex_id, cx.name AS cx_name, t.n, t.med, round(t.med::numeric * c.area_m2) AS est
         FROM cur c
         LEFT JOIN LATERAL (
-            SELECT f.complex_id, f.name FROM core.find_complex(p_sigungu, c.emd || c.jibun) f
-            WHERE c.emd IS NOT NULL AND c.jibun IS NOT NULL LIMIT 1
+            SELECT * FROM (
+                SELECT 1 AS k, x.complex_id, x.name FROM core.v_complex_parcel v JOIN core.dim_complex x USING (complex_id)
+                WHERE c.pnu IS NOT NULL AND v.pnu = c.pnu
+                UNION ALL
+                SELECT 2, f.complex_id, f.name FROM core.find_complex(p_sigungu, c.emd || c.jibun) f
+                WHERE c.emd IS NOT NULL AND c.jibun IS NOT NULL
+            ) z ORDER BY z.k LIMIT 1
         ) cx ON true
         LEFT JOIN LATERAL (
             SELECT count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY d.amount / d.area) AS med
@@ -130,7 +137,7 @@ LANGUAGE sql STABLE AS $$
               AND abs(d.area - c.area_m2) <= 3
               AND d.contract_date > current_date - make_interval(months => greatest(1, least(p_months, 36)))
         ) t ON true
-        WHERE NOT p_open_only OR c.bid_end >= localtimestamp
+        WHERE NOT p_open_only OR c.bid_end >= (now() AT TIME ZONE 'Asia/Seoul')
     ), r AS (
         SELECT m.*, round((1 - m.min_bid / nullif(m.est, 0)) * 100, 1) AS disc
         FROM m

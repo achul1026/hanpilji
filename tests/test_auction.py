@@ -1,7 +1,8 @@
 """공매 수집기(온비드)와 경매 · 공매 마트 함수 시험.
 
-tests/fixtures/onbid_list_doc.json 은 공개된 활용 예시의 항목 이름으로 만든 모양(2026-10-28 활용신청 전이라 실제 응답은 못 봄).
-첫 실제 수집 뒤 onbid_list_real.json으로 바꿀 것. DB 시험은 HANPILJI_TEST_DSN이 있을 때만 돎.
+tests/fixtures/onbid_list_real.json · onbid_nodata_real.json 은 실제 응답(2026-10-28 강남구 압류재산, 물건 2개 x 10회차).
+onbid_list_doc.json 은 단지 · 실거래와 잇는 DB 시험용으로 실제 응답 항목 이름에 맞춰 만든 자료.
+DB 시험은 HANPILJI_TEST_DSN이 있을 때만 돎.
 """
 import datetime
 import os
@@ -26,8 +27,19 @@ def fixture_get(url):
 
 
 class Parse(unittest.TestCase):
-    def rows(self):
-        return datagokr.items(datagokr.parse((FIX / "onbid_list_doc.json").read_bytes()))
+    def rows(self, name="onbid_list_doc.json"):
+        return datagokr.items(datagokr.parse((FIX / name).read_bytes()))
+
+    def test_real_response(self):
+        rows = [onbid.normalize(r) for r in self.rows("onbid_list_real.json")]
+        self.assertEqual(len(rows), 20)
+        r = next(x for x in rows if x["pbct_cdtn_no"] == "6156035")
+        self.assertEqual((r["cltr_mng_no"], r["round_no"], r["appraisal"], r["min_bid"]),
+                         ("2025-15753-001", 44, 479000000, 479000000), "숫자로 오는 칸도 읽음")
+        self.assertEqual((r["emd"], r["jibun"], r["pnu"], r["usage"]), ("도곡동", "467-6", "1168011800004670006", "업무시설"))
+        self.assertEqual(r["address"], "서울특별시 강남구 도곡동 467-6 대림아크로텔 제17층 제1714호", "주소 칸이 없어 물건명을 씀")
+        self.assertEqual((r["area_m2"], r["status"], r["org"]), (27.93, "입찰준비중", "남동세무서"))
+        self.assertEqual(r["bid_end"], datetime.datetime(2026, 12, 9, 17, 0))
 
     def test_normalize(self):
         rows = [onbid.normalize(r) for r in self.rows()]
@@ -64,9 +76,10 @@ class Parse(unittest.TestCase):
         self.assertTrue(datagokr.is_fatal(cm.exception), "키 오류는 멈춤")
 
     def test_nodata_is_empty(self):
-        f = onbid.Fetcher(lambda url: b'{"header": {"resultCode": "03", "resultMsg": "NODATA_ERROR"}}', tempfile.mkdtemp())
-        with mock.patch.dict(os.environ, {"DATA_GO_KR_KEY": "k"}):
-            self.assertEqual(f.page("서울특별시", "강남구", "0007", 1), (b"", []))
+        for body in ((FIX / "onbid_nodata_real.json").read_bytes(), b'{"header": {"resultCode": "03", "resultMsg": "NODATA_ERROR"}}'):
+            f = onbid.Fetcher(lambda url: body, tempfile.mkdtemp())
+            with mock.patch.dict(os.environ, {"DATA_GO_KR_KEY": "k"}):
+                self.assertEqual(f.page("서울특별시", "강남구", "0010", 1), (b"", []))
 
     def test_budget(self):
         f = onbid.Fetcher(fixture_get, tempfile.mkdtemp(), max_calls=1)
@@ -99,8 +112,9 @@ class WithDb(unittest.TestCase):
             c.execute("INSERT INTO core.dim_region (lawd_cd, sido, sigungu, emd, source, asof) VALUES "
                       "('9998000000', '시험시', '경매구', NULL, 't-au', %s), ('9998010100', '시험시', '경매구', '가동', 't-au', %s)",
                       (d, d))
-            c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, source, asof) VALUES "
-                      "('t-au1', '시험파크', '9998010100', '1', 't-au', %s)", (d,))
+            c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, pnu, source, asof) VALUES "
+                      "('t-au1', '시험파크', '9998010100', '1', NULL, 't-au', %s), "
+                      "('t-au2', '피엔유빌', '9998010100', '500', '9998010100105000000', 't-au', %s)", (d, d))
             # 시험파크 100㎡: ㎡당 300만 · 330만 · 360만(중위 330만 → 추정 시세 3억 3천만), 60㎡ 거래는 면적이 달라 뺌
             for i, (area, unit) in enumerate([(100, 3000000), (101, 3300000), (99, 3600000), (60, 9000000)]):
                 c.execute("INSERT INTO core.fact_deal (deal_id, lawd_cd, complex_id, deal_type, contract_date, amount, area, "
@@ -144,8 +158,8 @@ class WithDb(unittest.TestCase):
         self.assertIn("15% 이상", top[7])
         self.assertEqual(float(top[8]), 62.5)
         self.assertIn("실거래가", top[9])
-        self.assertEqual((rows[1][3], rows[1][6]), (None, None))
-        self.assertIn("단지를 못 찾음", rows[1][7])
+        self.assertEqual((rows[1][3], rows[1][6]), ("피엔유빌", None), "지번(999)이 달라도 PNU로 단지를 찾음")
+        self.assertIn("같은 면적 거래 없음", rows[1][7])
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, false)", self.SGG)[0][0], 3)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, true, 20)", self.SGG)[0][0], 1)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, '다세대')", self.SGG)[0][0], 1)

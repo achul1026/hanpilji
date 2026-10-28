@@ -4,12 +4,14 @@
 
 시범 구(config [pilot] sigungu)의 시도 · 시군구 이름으로 입찰 진행 · 예정인 공매 물건을 재산유형마다 끝 쪽까지 받음.
 응답 한 줄 = 물건의 한 회차(유찰되면 회차가 늘고 최저입찰가가 내려감). 같은 물건 · 회차는 고쳐 씀.
-주소에서 「동 지번」을 뽑아 두면 mart.q_auction_discount가 그것으로 단지를 찾아 실거래와 비교함.
+지번 PNU(ltnoPnu)와 물건명에서 뽑은 「동 지번」을 두면 mart.q_auction_discount가 그것으로 단지를 찾아 실거래와 비교함.
 
 인증키는 공공데이터포털 키(DATA_GO_KR_KEY) 하나지만 이 API를 따로 활용신청해야 함
 (「한국자산관리공사_차세대 온비드 부동산 물건목록 조회서비스」, 자동 승인). 신청 전에는 「등록되지 않은 서비스키」(30).
-주소 · 항목 이름은 공개된 활용 예시 기준이고 아직 실제 응답으로 확인하지 못함(2026-10-28, 활용신청 전).
-첫 실행 뒤 raw/onbid/ 원본으로 항목 이름을 확인하고 FIELDS를 고칠 것. 개발계정 하루 1,000회.
+항목 이름은 실제 응답으로 확인함(2026-10-28 강남구: 압류재산 0007 · 기타일반재산 0005만 있고 나머지 유형은 결과 없음).
+알아 둘 것: 주소 칸이 따로 없어 물건명(「서울특별시 강남구 도곡동 467-6 대림아크로텔 제17층 제1714호」)이 주소임.
+앞으로 열릴 회차까지 한꺼번에 오고(물건 12개에 101줄), 결과 없음은 {"result": {"resultCode": "03"}}로 옴.
+숫자 칸(금액 · 면적 · 공매조건번호)은 숫자로, 최저입찰가는 문자로 옴. 개발계정 하루 1,000회.
 법원경매(courtauction.go.kr)는 공식 API가 없어 받지 않음(크롤링은 하지 않기로 함).
 """
 import argparse
@@ -28,27 +30,28 @@ PATH = "OnbidRlstListSrvc2/getRlstCltrList2"
 PAGE_ROWS = 500
 NODATA = "03"
 
-# 응답 항목 이름 후보(앞에 있는 것부터). 실제 응답을 보면 줄일 것
+# 응답 항목 이름(앞에 있는 것부터, 비어 있으면 다음). 실제 응답 기준
 FIELDS = {
     "cltr_mng_no": ("cltrMngNo",),
     "pbct_cdtn_no": ("pbctCdtnNo",),
-    "name": ("onbidCltrNm", "cltrNm"),
-    "address": ("zadrNm", "cltrAdr", "cltrRadr", "ldnmAdr"),
+    "name": ("onbidCltrNm",),
+    "address": (),                       # 주소 칸이 없음. 물건명을 씀
+    "pnu": ("ltnoPnu",),
     "sido": ("lctnSdnm",),
     "sigungu": ("lctnSggnm",),
     "emd": ("lctnEmdNm",),
-    "usage": ("cltrUsgSclsCtgrNm", "cltrUsgMclsCtgrNm", "ctgrFullNm"),
+    "usage": ("cltrUsgSclsCtgrNm", "cltrUsgMclsCtgrNm"),
     "prpt_div": ("prptDivNm",),
     "dsps_method": ("dspsMthodNm",),
-    "org": ("orgNm", "rqstOrgNm"),
+    "org": ("rqstOrgNm", "orgNm"),       # 체납 세무서 · 기관(orgNm은 늘 한국자산관리공사)
     "area_m2": ("bldSqms", "landSqms"),
-    "appraisal": ("apslEvlAmt", "apslAsesAvgAmt"),
-    "min_bid": ("lowstBidPrcIndctCont", "lowstBidPrc", "minBidPrc"),
+    "appraisal": ("apslEvlAmt",),
+    "min_bid": ("lowstBidPrcIndctCont",),
     "fail_count": ("usbdNft",),
     "round_no": ("pbctNsq",),
-    "status": ("pbctStatNm", "pbctCltrStatNm"),
-    "bid_begin": ("cltrBidBgngDt", "pbctBegnDtm"),
-    "bid_end": ("cltrBidEndDt", "pbctClsDtm"),
+    "status": ("pbctStatNm",),
+    "bid_begin": ("cltrBidBgngDt",),
+    "bid_end": ("cltrBidEndDt",),
 }
 STATUS = {"0001": "입찰준비중", "0002": "입찰진행중", "0003": "입찰마감", "0006": "개찰중", "0009": "수의계약가능",
           "0010": "낙찰", "0011": "유찰", "0012": "취소"}
@@ -115,7 +118,9 @@ def normalize(row):
         out["status"] = STATUS.get(row.get("pbctStatCd") or "")
     out["bid_begin"], out["bid_end"] = _ts(out["bid_begin"]), _ts(out["bid_end"])
     if not out["address"]:
-        out["address"] = " ".join(x for x in (out["sido"], out["sigungu"], out["emd"]) if x) or None
+        out["address"] = out["name"] or " ".join(x for x in (out["sido"], out["sigungu"], out["emd"]) if x) or None
+    if out["pnu"] and not re.fullmatch(r"\d{19}", out["pnu"]):
+        out["pnu"] = None
     emd, jibun = split_jibun(out["address"], out["name"])
     if out["emd"] and emd and emd != out["emd"]:   # 동 항목과 주소가 다르면 지번을 믿지 않음(단지를 잘못 잇지 않게)
         jibun = None
@@ -178,17 +183,17 @@ def load(conn, req_key, rows, today):
             bad += 1
             continue
         conn.execute(
-            """INSERT INTO core.fact_auction (cltr_mng_no, pbct_cdtn_no, kind, sigungu_cd, sido, sigungu, emd, jibun,
+            """INSERT INTO core.fact_auction (cltr_mng_no, pbct_cdtn_no, kind, sigungu_cd, sido, sigungu, emd, jibun, pnu,
                    address, name, usage, prpt_div, dsps_method, org, area_m2, appraisal, min_bid, fail_count,
                    round_no, status, bid_begin, bid_end, source, asof)
                VALUES (%(cltr_mng_no)s, %(pbct_cdtn_no)s, '공매',
                    (SELECT left(lawd_cd, 5) FROM core.dim_region
                      WHERE sigungu = %(sigungu)s AND emd IS NULL AND (%(sido)s::text IS NULL OR sido = %(sido)s) LIMIT 1),
-                   %(sido)s, %(sigungu)s, %(emd)s, %(jibun)s, %(address)s, %(name)s, %(usage)s, %(prpt_div)s,
+                   %(sido)s, %(sigungu)s, %(emd)s, %(jibun)s, %(pnu)s, %(address)s, %(name)s, %(usage)s, %(prpt_div)s,
                    %(dsps_method)s, %(org)s, %(area_m2)s, %(appraisal)s, %(min_bid)s, %(fail_count)s, %(round_no)s,
                    %(status)s, %(bid_begin)s, %(bid_end)s, %(source)s, %(asof)s)
                ON CONFLICT (cltr_mng_no, pbct_cdtn_no) DO UPDATE SET sigungu_cd = excluded.sigungu_cd,
-                   sido = excluded.sido, sigungu = excluded.sigungu, emd = excluded.emd, jibun = excluded.jibun,
+                   sido = excluded.sido, sigungu = excluded.sigungu, emd = excluded.emd, jibun = excluded.jibun, pnu = excluded.pnu,
                    address = excluded.address, name = excluded.name, usage = excluded.usage,
                    prpt_div = excluded.prpt_div, dsps_method = excluded.dsps_method, org = excluded.org,
                    area_m2 = excluded.area_m2, appraisal = excluded.appraisal, min_bid = excluded.min_bid,

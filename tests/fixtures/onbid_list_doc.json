@@ -11,7 +11,7 @@
          "lctnSdnm": "시험시", "lctnSggnm": "경매구", "lctnEmdNm": "가동", "prptDivNm": "압류재산", "dspsMthodNm": "매각",
          "cltrUsgMclsCtgrNm": "주거용건물", "cltrUsgSclsCtgrNm": "아파트", "bldSqms": "100.0", "apslEvlAmt": "400000000",
          "lowstBidPrcIndctCont": "250,000,000", "usbdNft": "1", "pbctStatCd": "0001", "cltrBidBgngDt": "209911091000", "cltrBidEndDt": "209911111700"},
-        {"cltrMngNo": "2026-0001-000002", "pbctCdtnNo": "2001", "pbctNsq": "1", "onbidCltrNm": "시험시 경매구 가동 999 다세대 제2층 제201호",
+        {"cltrMngNo": "2026-0001-000002", "pbctCdtnNo": "2001", "pbctNsq": "1", "onbidCltrNm": "시험시 경매구 가동 999 다세대 제2층 제201호", "ltnoPnu": "9998010100105000000",
          "lctnSdnm": "시험시", "lctnSggnm": "경매구", "lctnEmdNm": "가동", "prptDivNm": "국유재산", "dspsMthodNm": "매각",
          "cltrUsgSclsCtgrNm": "다세대주택", "bldSqms": "45.5", "apslEvlAmt": "300000000",
          "lowstBidPrcIndctCont": "300000000", "usbdNft": "0", "pbctStatNm": "입찰준비중", "cltrBidBgngDt": "209912011000", "cltrBidEndDt": "209912031700"},

@@ -80,6 +80,8 @@ def parse(data: bytes):
         obj = _xml_to_obj(root)
         if root.tag == "OpenAPI_ServiceResponse":  # 게이트웨이 오류(키 미등록 · 한도 초과 등)
             raise _gateway_error(obj.get("cmmMsgHeader", {}) if isinstance(obj, dict) else {}, text)
+    if isinstance(obj, dict) and "header" not in obj and isinstance(obj.get("result"), dict):
+        obj = {"header": obj["result"]}   # 온비드는 결과 없음을 {"result": {"resultCode": "03"}}로 줌(2026-10-28 실측)
     if not isinstance(obj, dict) or "header" not in obj:
         raise ApiError(f"알 수 없는 응답: {text[:200]}")
     code = str(obj["header"].get("resultCode", "")).strip()

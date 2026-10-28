@@ -1,0 +1,85 @@
+# 데이터 자동 최신화. 깃허브 실행기에서 수집기를 돌려 Supabase에 바로 넣음(바뀐 부분만)
+# 2026-10-28 확인: 실행기에서 공공데이터포털 · 법제처 · ECOS · R-ONE · KOSIS · Supabase 접속됨. V-World는 해외 IP를 끊어 제외
+# 필요한 비밀값(Settings → Secrets and variables → Actions):
+#   HANPILJI_DSN(Supabase 세션 풀러 주소, 5432) · DATA_GO_KR_KEY · ECOS_KEY · RONE_KEY · KOSIS_KEY · LAW_OC(없으면 테스트 계정)
+name: 데이터 자동 최신화
+
+on:
+  schedule:
+    - cron: '17 19 * * *'    # 매일 04:17 KST: 실거래 매매 · 전월세(최근 3개월 다시) · 공매 물건(온비드)
+    - cron: '7 20 * * 0'     # 매주 월 05:07 KST: 법령(개정된 것만) · 시장 지표(최근 12개월)
+    - cron: '37 20 1 * *'    # 매월 2일 05:37 KST: 건축물대장 · 행위제한
+  workflow_dispatch:
+    inputs:
+      what:
+        description: 무엇을 받을지
+        type: choice
+        options: [daily, weekly, monthly]
+        default: daily
+
+# 한 번에 하나만 Supabase에 씀(겹치면 앞 실행이 끝날 때까지 기다림)
+concurrency:
+  group: supabase-write
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  refresh:
+    runs-on: ubuntu-latest
+    timeout-minutes: 330
+    env:
+      HANPILJI_DSN: ${{ secrets.HANPILJI_DSN }}
+      DATA_GO_KR_KEY: ${{ secrets.DATA_GO_KR_KEY }}
+      ECOS_KEY: ${{ secrets.ECOS_KEY }}
+      RONE_KEY: ${{ secrets.RONE_KEY }}
+      KOSIS_KEY: ${{ secrets.KOSIS_KEY }}
+      LAW_OC: ${{ secrets.LAW_OC || 'test' }}
+      WHAT: ${{ inputs.what || (github.event.schedule == '7 20 * * 0' && 'weekly') || (github.event.schedule == '37 20 1 * *' && 'monthly') || 'daily' }}
+      PYTHONUNBUFFERED: '1'
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+      - run: pip install -r requirements.txt
+
+      - name: 비밀값 확인
+        run: |
+          test -n "$HANPILJI_DSN" || { echo "::error::HANPILJI_DSN 비밀값이 없음"; exit 1; }
+          echo "이번 실행: $WHAT"
+
+      - name: 실거래 매매 · 전월세
+        if: env.WHAT == 'daily'
+        run: python -m hanpilji.collectors.rtms
+      - name: 공매 물건(온비드)
+        if: ${{ !cancelled() && env.WHAT == 'daily' }}
+        run: python -m hanpilji.collectors.onbid
+
+      - name: 법령
+        if: ${{ !cancelled() && env.WHAT == 'weekly' }}
+        run: python -m hanpilji.collectors.law
+      - name: 시장 지표
+        if: ${{ !cancelled() && env.WHAT == 'weekly' }}
+        run: python -m hanpilji.collectors.market --months 12
+
+      - name: 건축물대장
+        if: ${{ !cancelled() && env.WHAT == 'monthly' }}
+        run: python -m hanpilji.collectors.bld --refresh
+      - name: 행위제한
+        if: ${{ !cancelled() && env.WHAT == 'monthly' }}
+        run: python -m hanpilji.collectors.luinfo --refresh
+
+      - name: 수집처별 마지막 성공
+        if: ${{ !cancelled() }}
+        run: python scripts/freshness.py >> "$GITHUB_STEP_SUMMARY"
+      - name: 원본 보관
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@v4
+        with:
+          name: raw-${{ env.WHAT }}-${{ github.run_id }}
+          path: raw/
+          retention-days: 14
+          if-no-files-found: ignore

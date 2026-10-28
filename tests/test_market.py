@@ -1,7 +1,7 @@
 """지표 수집기(ECOS · R-ONE · KOSIS)와 지표 · 추세 마트 함수 시험.
 
-tests/fixtures/{ecos,rone,kosis}_*_doc.json 은 모두 각 기관 개발 안내서 기준 모양(2026-10-28 클라우드에서 세 곳이 막혀
-실제 응답은 아직 못 봄). 첫 실제 수집 뒤 *_real.json으로 바꿀 것.
+tests/fixtures/{ecos,rone,kosis}_*_real.json 은 2026-10-28 첫 실제 수집의 응답을 줄 몇 개만 남겨 줄인 것
+(오류 응답은 틀린 키로 받은 실제 응답).
 DB 시험은 HANPILJI_TEST_DSN이 있을 때만 돎(scripts/init_db.sh로 만든 시험용 DB).
 """
 import datetime
@@ -23,53 +23,58 @@ KEYS = {"ECOS_KEY": "E", "RONE_KEY": "R", "KOSIS_KEY": "K"}
 
 def fixture_fetch(url):
     if "ecos.bok.or.kr" in url:
-        name = "ecos_doc.json" if "/722Y001/" in url else "ecos_empty_doc.json"
+        name = "ecos_real.json" if "/722Y001/" in url else "ecos_empty_real.json"
     elif "SttsApiTbl.do" in url:
-        name = "rone_tables_doc.json"
+        name = "rone_tables_real.json"
     elif "SttsApiTblData" in url:
-        name = "rone_data_doc.json"
+        name = "rone_data_real.json"
     else:
-        name = "kosis_doc.json"
+        name = "kosis_real.json"
     return (FIX / name).read_bytes()
 
 
 class Parse(unittest.TestCase):
     def test_ecos(self):
-        rows, total = market.ecos_parse((FIX / "ecos_doc.json").read_bytes())
+        rows, total = market.ecos_parse((FIX / "ecos_real.json").read_bytes())
         self.assertEqual((len(rows), total), (3, 3))
         pts = list(market.ecos_points(rows, market.BY_ID["base_rate"]))
-        self.assertEqual(pts[-1], ("전국", "202610", 2.25, "연%"))
-        self.assertEqual(market.ecos_parse((FIX / "ecos_empty_doc.json").read_bytes()), ([], 0), "INFO-200은 빈 결과")
+        self.assertEqual(pts, [("전국", "202607", 2.75, "연%"), ("전국", "202608", 3.0, "연%"), ("전국", "202609", 3.0, "연%")])
+        self.assertEqual(market.ecos_parse((FIX / "ecos_empty_real.json").read_bytes()), ([], 0), "INFO-200은 빈 결과")
         with self.assertRaises(market.Fatal):
-            market.ecos_parse((FIX / "ecos_error_doc.json").read_bytes())
+            market.ecos_parse((FIX / "ecos_error_real.json").read_bytes())
         with self.assertRaises(market.ApiError):
             market.ecos_parse(b"<html>blocked</html>")
 
     def test_rone(self):
-        rows, total = market.rone_parse((FIX / "rone_data_doc.json").read_bytes())
-        self.assertEqual((len(rows), total), (5, 5))
+        rows, total = market.rone_parse((FIX / "rone_data_real.json").read_bytes())
+        self.assertEqual((len(rows), total), (6, 6))
         pts = list(market.rone_points(rows, market.BY_ID["apt_sale_idx"]))
-        self.assertEqual({p[0] for p in pts}, {"전국", "강남구"}, "받을 지역만(서초구는 뺌)")
+        self.assertEqual({p[0] for p in pts}, {"전국", "강남구"}, "받을 지역만(서울 중구는 뺌)")
+        self.assertEqual(pts[-1], ("강남구", "202609", 98.4989097493266, "지수"))
         self.assertEqual(market.rone_parse(b'{"RESULT": {"CODE": "INFO-200", "MESSAGE": "x"}}'), ([], 0))
         with self.assertRaises(market.Fatal):
-            market.rone_parse("{\"RESULT\": {\"CODE\": \"ERROR-290\", \"MESSAGE\": \"인증키 오류\"}}".encode())
+            market.rone_parse((FIX / "rone_error_real.json").read_bytes())
 
     def test_rone_table_by_name(self):
-        f = market.Fetcher(lambda url: (FIX / "rone_tables_doc.json").read_bytes(), tempfile.mkdtemp())
-        self.assertEqual(market.rone_table(f, "R", market.BY_ID["apt_sale_idx"]), "T_SALE_MM", "주간 표는 뺌")
-        self.assertEqual(market.rone_table(f, "R", market.BY_ID["apt_jeonse_idx"]), "T_JEONSE_MM")
+        f = market.Fetcher(lambda url: (FIX / "rone_tables_real.json").read_bytes(), tempfile.mkdtemp())
+        self.assertEqual(market.rone_table(f, "R", market.BY_ID["apt_sale_idx"]), "A_2024_00045",
+                         "주간 · 규모별 · 연령별 · 계절조정 표는 뺌")
+        self.assertEqual(market.rone_table(f, "R", market.BY_ID["apt_jeonse_idx"]), "A_2024_00050")
         self.assertEqual(market.rone_table(f, "R", market.BY_ID["apt_sale_idx"], "X1"), "X1", "config 값이 먼저")
-        s = dict(market.BY_ID["apt_sale_idx"], rone={"table": "가격지수", "cycle": "MM"})
+        s = dict(market.BY_ID["apt_sale_idx"], rone={"table": "매매가격지수_아파트", "cycle": "MM"})
         with self.assertRaises(market.ApiError) as cm:
             market.rone_table(f, "R", s)
-        self.assertIn("2개 맞음", str(cm.exception))
+        self.assertIn("4개 맞음", str(cm.exception))
 
     def test_kosis(self):
-        rows, _ = market.kosis_parse((FIX / "kosis_doc.json").read_bytes())
+        rows, _ = market.kosis_parse((FIX / "kosis_real.json").read_bytes())
         pts = list(market.kosis_points(rows, market.BY_ID["population"]))
-        self.assertEqual(sorted(p[0] for p in pts), ["강남구", "서울특별시"])
+        self.assertEqual(sorted({p[0] for p in pts}), ["강남구", "서울특별시", "전국"])
+        self.assertIn(("강남구", "202609", 551907.0, "명"), pts)
         with self.assertRaises(market.Fatal):
-            market.kosis_parse((FIX / "kosis_error_doc.json").read_bytes())
+            market.kosis_parse((FIX / "kosis_error_real.json").read_bytes())
+        with self.assertRaises(market.ApiError):   # 40,000셀 넘게 물으면 오는 오류(지역을 ALL로 물었을 때)
+            market.kosis_parse("{\"err\":\"31\",\"errMsg\":\" 40,000셀을 초과한 결과값은 요청하실 수 없습니다.\"}".encode())
         self.assertEqual(market.kosis_parse(b'{"err": "30", "errMsg": "no data"}'), ([], 0))
 
     def test_urls_and_months(self):
@@ -77,7 +82,12 @@ class Parse(unittest.TestCase):
         self.assertEqual(market.months_back(12, datetime.date(2026, 1, 5)), ("202502", "202601"))
         url = market.ecos_url("E", market.BY_ID["base_rate"], 1, 1000, "202601", "202610")
         self.assertEqual(url, "https://ecos.bok.or.kr/api/StatisticSearch/E/json/kr/1/1000/722Y001/M/202601/202610/0101000")
-        self.assertIn("orgId=101", market.kosis_url("K", market.BY_ID["population"], "202601", "202610"))
+        url = market.kosis_url("K", market.BY_ID["population"], "202601", "202610")
+        self.assertIn("orgId=101", url)
+        self.assertIn("objL1=00+11+11680+", url, "지역을 정해 40,000셀 제한 안으로")
+        url = market.rone_url("R", "SttsApiTblData", 1, STATBL_ID="A_2024_00045", CLS_ID=530038, START_WRTTIME="202601")
+        self.assertIn("CLS_ID=530038&START_WRTTIME=202601", url)
+        self.assertEqual(set(market.RONE_CLS), set(market.BY_ID["apt_sale_idx"]["regions"]))
         self.assertTrue(all(r in market.REGION for s in market.SERIES for r in s.get("regions", ["전국"])))
 
 
@@ -149,11 +159,11 @@ class WithDb(unittest.TestCase):
             market.main(["--config", self.cfg], fetch=fixture_fetch, today=TODAY)
         self.assertEqual(self.q("SELECT count(*) FROM core.fact_market")[0][0], n1, "다시 돌려도 안 쌓임")
         rows = self.q("SELECT region, period, value, change FROM mart.q_market_series('base_rate', NULL, 24)")
-        self.assertEqual([(r[0], r[1], float(r[2])) for r in rows][-1], ("전국", "202610", 2.25))
-        self.assertEqual(float(rows[-1][3]), -0.25)
+        self.assertEqual([(r[0], r[1], float(r[2])) for r in rows][-1], ("전국", "202609", 3.0))
+        self.assertEqual([float(r[3]) for r in rows if r[3] is not None], [0.25, 0.0], "전월 대비 %p")
         rows = self.q("SELECT region, period, value FROM mart.q_market_series('apt_sale_idx', '강남구', 24)")
         self.assertEqual([(r[0], r[1]) for r in rows], [("강남구", "202608"), ("강남구", "202609")],
-                         "12개월 밖(200301)은 받지 않음")
+                         "12개월 밖(201611)은 받지 않음")
         latest = self.q("SELECT stat_id, region FROM mart.q_market_series()")
         self.assertIn(("population", "강남구"), latest)
         self.assertIn(("apt_sale_idx", "전국"), latest)
