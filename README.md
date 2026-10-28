@@ -18,7 +18,7 @@
 ![pgvector](https://img.shields.io/badge/pgvector-optional-8a63d2)
 ![Data](https://img.shields.io/badge/data-%EB%B2%95%EC%A0%9C%EC%B2%98%20%C2%B7%20%ED%86%A0%EC%A7%80%EC%9D%B4%EC%9D%8C%20%C2%B7%20%EA%B3%B5%EA%B3%B5%EB%8D%B0%EC%9D%B4%ED%84%B0%ED%8F%AC%ED%84%B8-f28b82)
 
-[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [Supabase](#️-supabase-영구-db) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
+[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [Supabase](#️-supabase-영구-db) · [자동 최신화](#-자동-최신화) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
 
 </div>
 
@@ -253,6 +253,22 @@ HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용
 > [!NOTE]
 > 무료 플랜은 7일 동안 쓰지 않으면 멈춥니다. 대시보드에서 **Restore**를 누르면 돌아옵니다. 액세스 토큰은 만료일이 지나면 새로 만들어 환경변수를 바꿔야 합니다.
 
+## 🔄 자동 최신화
+
+[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)이 깃허브 실행기에서 수집기를 정해진 시각에 돌려 Supabase에 바로 넣습니다. 수집기마다 `ops.ingest_cursor`에 어디까지 받았는지 남기므로 매번 전부가 아니라 바뀐 부분만 받습니다. 실행이 겹치면 앞 실행이 끝날 때까지 기다립니다.
+
+| 언제(KST) | 무엇 | 얼마나 |
+|---|---|---|
+| 매일 04:17 | 실거래 매매 · 전월세 | 최근 3개월만 다시(늦은 신고 · 해제 반영). 새 달은 저절로 추가 |
+| 매주 월 05:07 | 법령 17개 | 현행 법령 번호(MST)가 바뀐 것만 본문 받기 |
+| 매주 월 05:07 | 금리 · 물가 · 가격지수 · 인구 | 최근 12개월 덮어쓰기 |
+| 매월 2일 05:37 | 건축물대장 · 행위제한 | 전부 다시(호출 약 2,900 · 576번, 하루 한도 안) |
+| 매년 6월 | 공시지가 · 지목(V-World) | V-World가 해외 IP를 끊어 국내 PC에서 `--fetch-only` → `--from-dir` |
+
+실행 요약에 수집처별 마지막 성공 시각(`ops.v_source_freshness`)이 표로 나오고, 받은 원본은 14일 동안 실행 결과물로 남습니다. 실패하면 깃허브가 메일을 보냅니다. **Actions → 데이터 자동 최신화 → Run workflow**로 아무 때나 돌릴 수 있습니다.
+
+비밀값(Settings → Secrets and variables → Actions): `HANPILJI_DSN`(Session pooler 주소) · `DATA_GO_KR_KEY` · `ECOS_KEY` · `RONE_KEY` · `KOSIS_KEY` · `LAW_OC`(없으면 테스트 계정). 매일 도니 무료 플랜이 7일 쉬어 멈추는 일도 없습니다.
+
 ## 📊 진행 상황
 
 | 단계 | 내용 | 상태 |
@@ -390,6 +406,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [x] Supabase(서울)에 백업 복원 · 클라우드에서 HTTPS로 GPT · 카드 읽기 (2026-10-27)
 - [x] 지표 분석: 실거래 월별 추세 · 공시지가 연도별 추세 · 공시지가 대비 실거래가, 지표 수집기(ECOS · R-ONE · KOSIS) (2026-10-28)
 - [x] ECOS · R-ONE · KOSIS 키 발급 · 클라우드 허용 도메인 추가 → 첫 실제 수집으로 표 번호 · 항목 코드 확인 (2026-10-28)
+- [x] 자동 최신화: 깃허브 실행기에서 매일 · 매주 · 매월 바뀐 부분만 Supabase로 (2026-10-28)
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더
