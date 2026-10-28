@@ -83,5 +83,5 @@ refresh_days = 30
 months = 120   # 이번 달부터 거꾸로 몇 개월
 # R-ONE 표 번호를 이름으로 못 고를 때 정함(python -m hanpilji.collectors.market --find rone 매매가격지수 로 찾음)
 [market.rone]
-# apt_sale_idx = "A_2024_00000"
-# apt_jeonse_idx = "A_2024_00000"
+# apt_sale_idx = "A_2024_00045"     # 2026-10-28 이름으로 찾은 번호
+# apt_jeonse_idx = "A_2024_00050"
