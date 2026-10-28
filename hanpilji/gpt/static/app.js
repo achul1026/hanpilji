@@ -129,7 +129,7 @@ function tableEl(b, limit) {
         const td = el("td"), s = String(v ?? "-");
         td.append(el("span", "pill " + (/불가/.test(s) ? "no" : /가능/.test(s) ? "ok" : "mid"), s)); tr.append(td); continue;
       }
-      tr.append(el("td", NUMERIC.has(c.fmt) ? "n" : (c.key === "condition_text" ? "wrap" : null), fmt(c.fmt, v)));
+      tr.append(el("td", NUMERIC.has(c.fmt) ? "n" : (["condition_text", "what_to_check", "where_to_look", "name"].includes(c.key) ? "wrap" : null), fmt(c.fmt, v)));
     }
     t.append(tr);
   }

@@ -18,7 +18,7 @@ from hanpilji.gpt import tools as tools_mod
 # 도구 → (고를 수 있는 개월 수, 인자를 비웠을 때 도구가 쓰는 기본값)
 MONTHS_CHOICES = {
     "q_price_trend": ([12, 24, 36], 24), "q_deal_list": ([6, 12, 36], 12), "q_complex_rank": ([6, 12, 36], 12),
-    "q_complex_price": ([6, 12, 36], 12), "q_price_vs_official": ([6, 12, 36], 12), "q_market_series": ([24, 60, 120], 24),
+    "q_complex_price": ([6, 12, 36], 12), "q_auction_discount": ([6, 12, 36], 12), "q_price_vs_official": ([6, 12, 36], 12), "q_market_series": ([24, 60, 120], 24),
 }
 
 TOOL_LABEL = {
@@ -26,6 +26,7 @@ TOOL_LABEL = {
     "q_complex_rank": "단지 순위", "q_law_search": "법령 조문", "q_zoning_check": "행위제한(지을 수 있는 건물)",
     "q_building_filter": "건축물대장 검색", "q_price_trend": "월별 시세 추이", "q_land_price_trend": "공시지가 추이",
     "q_price_vs_official": "공시지가 대비 실거래가", "q_market_series": "시장 지표",
+    "q_auction_discount": "공매 물건 · 실거래 대비", "q_auction_checklist": "입찰 전 권리 확인 항목",
 }
 
 # 진행 표시 문구(도구를 부르는 동안 화면에 보임)
@@ -35,7 +36,8 @@ TOOL_DOING = {
     "q_law_search": "법령 조문을 찾는 중", "q_zoning_check": "행위제한 규칙을 찾는 중",
     "q_building_filter": "건축물대장을 찾는 중", "q_price_trend": "월별 시세 추이를 만드는 중",
     "q_land_price_trend": "공시지가 추이를 만드는 중", "q_price_vs_official": "공시지가와 실거래가를 맞대는 중",
-    "q_market_series": "시장 지표를 찾는 중",
+    "q_market_series": "시장 지표를 찾는 중", "q_auction_discount": "공매 물건을 실거래와 맞대는 중",
+    "q_auction_checklist": "입찰 전 확인 항목을 찾는 중",
 }
 
 COL = {   # 열 이름 → (보이는 이름, 형식)
@@ -53,6 +55,11 @@ COL = {   # 열 이름 → (보이는 이름, 형식)
     "condition_text": ("조건", "text"), "scope": ("기준", "text"),
     "stat_name": ("지표", "text"), "region": ("지역", "text"), "period": ("기준월", "ym"), "value": ("값", "num"),
     "unit": ("단위", "text"), "change": ("전월 대비", "num"), "yoy_pct": ("전년비", "pct"),
+    "name": ("물건", "text"), "usage": ("용도", "text"), "appraisal": ("감정가", "won"), "min_bid": ("최저입찰가", "won"),
+    "min_bid_pct_of_appraisal": ("감정가 대비", "pct"), "fail_count": ("유찰", "int"), "bid_end": ("입찰 마감", "text"),
+    "est_market_price": ("실거래 기준 추정", "won"), "discount_pct": ("실거래 대비 할인", "pct"), "label": ("비고", "text"),
+    "step": ("순서", "int"), "item": ("항목", "text"), "what_to_check": ("무엇을", "text"), "where_to_look": ("어디서", "text"),
+    "article_no": ("조문", "text"),
 }
 
 TABLE_COLS = {
@@ -65,6 +72,9 @@ TABLE_COLS = {
     "q_price_vs_official": ["rank", "complex_name", "build_year", "trade_count", "trade_median_per_m2",
                             "land_price_per_m2", "price_multiple", "land_yoy_pct", "trade_yoy_pct"],
     "q_market_series": ["stat_name", "region", "period", "value", "unit", "change", "yoy_pct"],
+    "q_auction_discount": ["rank", "name", "usage", "area_m2", "appraisal", "min_bid", "min_bid_pct_of_appraisal",
+                           "fail_count", "bid_end", "complex_name", "est_market_price", "discount_pct", "label"],
+    "q_auction_checklist": ["step", "item", "what_to_check", "where_to_look", "article_no"],
 }
 
 LAW_URL = "https://www.law.go.kr/법령/{law}/{article}"
