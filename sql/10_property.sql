@@ -158,15 +158,19 @@ LANGUAGE sql STABLE AS $$
         SELECT DISTINCT ON (cp.complex_id) cp.complex_id, lp.price_per_m2 AS price, lp.base_year::int AS yr, lp.asof
         FROM cp JOIN c USING (complex_id) JOIN core.fact_land_price lp ON lp.pnu = cp.pnu
         ORDER BY cp.complex_id, (cp.pnu = c.pnu) DESC, lp.base_year DESC, lp.is_standard, lp.pnu
+    ), pz AS (   -- 필지의 용도지역. V-World 토지이용계획이 있는 필지는 그것만 씀(건축물대장 지역지구는 「일반주거지역」처럼 뭉뚱그려 올 때가 많음)
+        SELECT cp.complex_id, bz.zone_cd, bz.source, bz.asof
+        FROM cp JOIN core.bridge_parcel_zone bz USING (pnu)
+        WHERE bz.overlap <> '접함'
+          AND (bz.source = 'V-World 토지이용계획' OR NOT EXISTS (
+                   SELECT 1 FROM core.bridge_parcel_zone v WHERE v.pnu = bz.pnu AND v.source = 'V-World 토지이용계획'))
     ), zone AS (
-        SELECT cp.complex_id, string_agg(DISTINCT z.zone_name, ', ') AS zones, max(bz.asof) AS asof,
-               string_agg(DISTINCT bz.source, ' · ') AS src,
-               (SELECT count(DISTINCT r.rule_id) FROM core.bridge_parcel_zone bz2 JOIN cp cp2 USING (pnu)
-                JOIN core.reg_rule r USING (zone_cd)
-                WHERE cp2.complex_id = cp.complex_id AND bz2.overlap <> '접함'
+        SELECT pz.complex_id, string_agg(DISTINCT z.zone_name, ', ') AS zones, max(pz.asof) AS asof,
+               string_agg(DISTINCT pz.source, ' · ') AS src,
+               (SELECT count(DISTINCT r.rule_id) FROM pz pz2 JOIN core.reg_rule r USING (zone_cd)
+                WHERE pz2.complex_id = pz.complex_id
                   AND (r.sigungu_cd IS NULL OR r.sigungu_cd = p_sigungu)) AS rules
-        FROM cp JOIN core.bridge_parcel_zone bz USING (pnu) JOIN core.dim_zone z USING (zone_cd)
-        WHERE bz.overlap <> '접함' GROUP BY 1
+        FROM pz JOIN core.dim_zone z USING (zone_cd) GROUP BY 1
     ), bld AS (   -- 동 수 · 용도 · 세대는 주건축물만. 주차는 부속건축물(지하주차장 등)까지 합침
         SELECT complex_id, count(*) FILTER (WHERE is_main IS NOT FALSE) AS n,
                (array_agg(main_use ORDER BY is_main IS NOT FALSE DESC, total_area DESC NULLS LAST))[1] AS main_use,
