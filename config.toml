@@ -70,3 +70,10 @@ fallbacks = "default"       # 모델이 거절하면 서버가 다른 모델로 
 refresh_days = 30
 # 한 번 실행에 쓸 최대 호출 수. 비우면 하루 한도(개발계정 10,000)에 걸릴 때까지. --max-calls가 우선
 # max_calls = 9000
+
+[vworld]
+# V-World 국가중점데이터(토지특성 · 토지이용계획). 키는 환경변수 VWORLD_KEY, 키에 적은 서비스 URL은 VWORLD_DOMAIN
+# 필지 하나에 보통 2번 호출. 이 날수 안에 받은 필지는 다시 받지 않음(중단 뒤 이어 받기). --refresh면 전부 다시
+refresh_days = 30
+# 한 번 실행에 쓸 최대 호출 수. 비우면 키 · 한도 오류가 날 때까지. --max-calls가 우선
+# max_calls = 9000

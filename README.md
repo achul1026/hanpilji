@@ -70,6 +70,7 @@ export DATA_GO_KR_KEY=...
 python -m hanpilji.collectors.luinfo                  # 행위제한 API → core.reg_rule (조례 기준)
 python -m hanpilji.collectors.rtms                    # 아파트 매매 · 전월세 36개월 → core.fact_deal · fact_rent
 python -m hanpilji.collectors.bld                     # 단지 필지마다 건축물대장 → core.dim_building · 용도지역 (강남구 2~3시간)
+python -m hanpilji.collectors.vworld                  # 필지마다 V-World → 지목 · 토지 면적 · 개별공시지가 · 토지이용계획 (키: VWORLD_KEY)
 ```
 
 시험:
@@ -245,7 +246,7 @@ HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용
 | 1 | 공공데이터포털 인증키 · 호출 확인 | 🟢 실제 응답으로 항목 이름 · 코드 확인 (2026-10-27) |
 | 2 | 시세 축: 시범 구(강남구) 3년치 | 🟢 매매 1만 432건 · 전월세 7만 924건 적재 |
 | 3 | GPT 엔진 연결 | 🟢 Claude API 도구 호출 엔진, 실제 질문 15개로 확인 (2026-10-27) |
-| 4 | 데모 | 🟡 단지 카드 · 웹 채팅. 건축물대장으로 건물 · 용도지역 · 대지면적 채움 (2026-10-27). 지목 · 공시지가는 V-World 회신 대기 |
+| 4 | 데모 | 🟡 단지 카드 · 웹 채팅. 건축물대장으로 건물 · 용도지역 · 대지면적 채움 (2026-10-27). 지목 · 공시지가 · 토지이용계획은 V-World 수집기 준비 완료, 키 · 접속 허용 대기 |
 
 **0단계 실측 (2026-10-22)**
 
@@ -345,7 +346,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [x] 강남구 법정동 코드표로 단지마다 동 · 지번 · 도로명 · PNU 채움 (2026-10-27)
 - [x] 단지 카드(`q_property_card`) · 웹 카드 화면 (2026-10-27)
 - [x] 건축물대장 수집기 · 필지별 용도지역(건축물대장 지역지구) · 대지면적 → 카드의 건물 · 규제 칸 (2026-10-27)
-- [ ] 토지 지목 · 공시지가: 공공데이터포털 토지 API가 폐기되어 V-World 키와 클라우드 접속 허용이 있어야 함
+- [ ] 토지 지목 · 공시지가 · 토지이용계획: 수집기(`collectors/vworld.py`)는 준비됨. V-World 키(`VWORLD_KEY`)와 클라우드 접속 허용(`api.vworld.kr`)이 있어야 돌릴 수 있음
 - [x] 부동산 GPT 엔진: 마트 함수 도구 호출 · 근거 자동 첨부 · 터미널 / 웹 채팅 (2026-10-27)
 - [x] Anthropic API 키 등록 → 실제 질문으로 답 품질 확인(모른다 · 투자 질문 포함) (2026-10-27)
 - [x] 거래 목록 · 단지 순위 도구 (2026-10-27)
@@ -364,7 +365,8 @@ hanpilji/
 │   │   ├── eum_rule.py      # 토지이음 CSV → core.reg_rule
 │   │   ├── luinfo.py        # 행위제한 API → core.reg_rule
 │   │   ├── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
-│   │   └── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
+│   │   ├── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
+│   │   └── vworld.py        # V-World 토지특성 · 토지이용계획 → dim_parcel 지목 · fact_land_price · bridge_parcel_zone
 │   ├── datagokr.py          # 공공데이터포털 공통(키 · 호출 · 응답 풀기)
 │   ├── gpt/
 │   │   ├── engine.py        # 질문 → 도구 호출 반복 → 답 + 근거
