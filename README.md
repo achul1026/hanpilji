@@ -452,7 +452,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [ ] V-World 상업 이용 회신
 - [x] 지적도 · 건물 윤곽 적재 코드 · 지도 함수(`q_parcel_map`) · 웹 지도 블록 (2026-10-28)
 - [x] 국내 PC에서 강남구 지적도 받기 → 필지 경계 34,658개(면적 합 39.5㎢) · 건물 윤곽 24,235개, 한필지 필지 1,149/1,168개에 경계 (2026-10-28)
-- [ ] 지적도 Supabase 반영(`python -m hanpilji.supabase push-geo`)
+- [x] 지적도 Supabase 반영(`python -m hanpilji.supabase push-geo`) (2026-10-28)
 - [ ] 경계가 없는 한필지 필지 19개: 본번 0 같은 잘못 만든 PNU · 합병 · 분할로 바뀐 번지 확인
 
 ## 📁 폴더
