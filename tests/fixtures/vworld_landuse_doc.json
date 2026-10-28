@@ -1,9 +1,0 @@
-{"landUses": {"field": [
- {"pnu": "1168011800105270000", "cnflcAt": "1", "cnflcAtNm": "포함", "prposAreaDstrcCode": "UQA100", "prposAreaDstrcCodeNm": "도시지역"},
- {"pnu": "1168011800105270000", "cnflcAt": "1", "cnflcAtNm": "포함", "prposAreaDstrcCode": "UQA120", "prposAreaDstrcCodeNm": "일반주거지역"},
- {"pnu": "1168011800105270000", "cnflcAt": "1", "cnflcAtNm": "포함", "prposAreaDstrcCode": "UQA123", "prposAreaDstrcCodeNm": "제3종일반주거지역"},
- {"pnu": "1168011800105270000", "cnflcAt": "1", "cnflcAtNm": "포함", "prposAreaDstrcCode": "UQQ300", "prposAreaDstrcCodeNm": "지구단위계획구역"},
- {"pnu": "1168011800105270000", "cnflcAt": "3", "cnflcAtNm": "접함", "prposAreaDstrcCode": "UQS112", "prposAreaDstrcCodeNm": "광로1류"},
- {"pnu": "1168011800105270000", "cnflcAt": "2", "cnflcAtNm": "저촉", "prposAreaDstrcCode": "UBA100", "prposAreaDstrcCodeNm": "과밀억제권역"},
- {"pnu": "1168011800105270000", "cnflcAt": "1", "cnflcAtNm": "포함", "prposAreaDstrcCode": "UBA100", "prposAreaDstrcCodeNm": "과밀억제권역"}
-], "totalCount": "7", "numOfRows": "1000", "pageNo": "1", "resultCode": "", "resultMsg": ""}}

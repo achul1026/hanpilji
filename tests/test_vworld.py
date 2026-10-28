@@ -1,7 +1,7 @@
 """V-World 수집기 시험. 인증키 없이 저장해 둔 응답으로 돎.
 
-tests/fixtures/vworld_*_doc.json 은 실제 응답이 아니라 V-World 개발자센터 문서의 항목 이름으로 만든 것
-(클라우드에서 api.vworld.kr이 막혀 아직 실제 응답을 받지 못함, 2026-10-28). 키가 생기면 실제 응답으로 바꿈.
+tests/fixtures/vworld_*_real.json 은 도곡동 527(도곡렉슬)의 실제 응답(2026-10-28, 국내 PC에서 받음).
+vworld_error_doc.json 만 문서 기준 모양(실제 오류 응답은 아직 못 봄).
 DB 시험은 HANPILJI_TEST_DSN이 있을 때만 돎.
 """
 import json
@@ -17,7 +17,7 @@ from hanpilji.collectors import vworld
 DSN = os.environ.get("HANPILJI_TEST_DSN")
 FIX = Path(__file__).parent / "fixtures"
 PNU = "1168011800105270000"   # 도곡동 527
-FILES = {"getLandCharacteristics": "vworld_char_doc.json", "getLandUseAttr": "vworld_landuse_doc.json"}
+FILES = {"getLandCharacteristics": "vworld_char_real.json", "getLandUseAttr": "vworld_landuse_real.json"}
 
 
 def fixture_fetch(op, params):
@@ -27,8 +27,10 @@ def fixture_fetch(op, params):
 
 class Parse(unittest.TestCase):
     def test_parse_and_errors(self):
-        rows, total = vworld.parse((FIX / "vworld_char_doc.json").read_bytes())
-        self.assertEqual((len(rows), total), (2, 2))
+        rows, total = vworld.parse((FIX / "vworld_char_real.json").read_bytes())
+        self.assertEqual((len(rows), total), (18, 18))
+        self.assertEqual(vworld.parse((FIX / "vworld_empty_real.json").read_bytes()), ([], 0),
+                         "없는 필지는 「response」 안에 totalCount 0만 옴")
         rows, total = vworld.parse(b'{"landUses": {"field": {"pnu": "1"}, "totalCount": "1"}}')
         self.assertEqual((rows, total), ([{"pnu": "1"}], 1), "한 줄이면 list가 아니라 dict로 올 수 있음")
         self.assertEqual(vworld.parse(b'{"landUses": {"totalCount": "0"}}'), ([], 0))
@@ -40,18 +42,31 @@ class Parse(unittest.TestCase):
         self.assertFalse(vworld.is_fatal(vworld.ApiError("SYSTEM_ERROR 일시 오류")))
 
     def test_char(self):
-        rows, _ = vworld.parse((FIX / "vworld_char_doc.json").read_bytes())
+        rows, _ = vworld.parse((FIX / "vworld_char_real.json").read_bytes())
         c = vworld.to_char(rows[-1])
-        self.assertEqual((c["year"], c["category"], c["area"], c["price"], c["zone1"]), (2025, "대", 38926.4, 19600000, "15"))
+        self.assertEqual((c["year"], c["category"], c["area"], c["price"], c["zone1"], c["land_use"]),
+                         (2026, "대", 133361.6, 29390000, "15", "아파트"))
         self.assertIsNone(vworld.to_char({"stdrYear": ""}))
         self.assertIsNone(vworld.to_char({"stdrYear": "2025", "pblntfPclnd": "0"})["price"], "0원은 값 없음")
+        jan, jul = (vworld.to_char({"stdrYear": "2023", "stdrMt": m, "lastUpdtDt": "2024-01-23"}) for m in ("01", "07"))
+        self.assertLess(jan["order"], jul["order"], "같은 해면 7월 추가 공시가 나중")
 
     def test_zones(self):
-        rows, _ = vworld.parse((FIX / "vworld_landuse_doc.json").read_bytes())
-        self.assertEqual(vworld.pick_zones(rows), [
-            ("UQA123", "제3종일반주거지역", "포함"), ("UQQ300", "지구단위계획구역", "포함"),
-            ("UQS112", "광로1류", "접함"), ("UBA100", "과밀억제권역", "포함")],
-            "상위 이름(도시지역 · 일반주거지역)은 빼고, 같은 코드는 가장 강한 관계 하나만")
+        rows, _ = vworld.parse((FIX / "vworld_landuse_real.json").read_bytes())
+        zones = vworld.pick_zones(rows)
+        self.assertEqual(len(rows), 28)
+        self.assertEqual(len(zones), 17, "같은 코드(상대보호구역 7줄 등)는 하나만")
+        names = {n: o for _, n, o in zones}
+        self.assertEqual((names["제3종일반주거지역"], names["상대보호구역"], names["도로"], names["학교"]),
+                         ("포함", "저촉", "저촉", "접함"))
+        self.assertNotIn("도시지역", names, "상위 이름은 뺌")
+        self.assertNotIn("공원", names, "「근린공원」이 있으면 「공원」은 뺌")
+        self.assertEqual(vworld.pick_zones([
+            {"prposAreaDstrcCode": "A", "prposAreaDstrcCodeNm": "일반주거지역", "cnflcAt": "1"},
+            {"prposAreaDstrcCode": "B", "prposAreaDstrcCodeNm": "제3종일반주거지역", "cnflcAt": "1"},
+            {"prposAreaDstrcCode": "C", "prposAreaDstrcCodeNm": "광로1류", "cnflcAt": "3"},
+            {"prposAreaDstrcCode": "C", "prposAreaDstrcCodeNm": "광로1류", "cnflcAt": "2"}]),
+            [("B", "제3종일반주거지역", "포함"), ("C", "광로1류", "저촉")], "같은 코드는 가장 강한 관계 하나만")
 
     def test_url_keeps_key_out_of_errors(self):
         os.environ["VWORLD_KEY"] = "K"
@@ -74,7 +89,7 @@ class FetchOnly(unittest.TestCase):
             self.assertEqual(vworld.main(["--fetch-only", str(pnus), "--out", str(out), "--max-calls", "3"],
                                          fetch=fixture_fetch), 0)
             got = json.loads((out / f"{PNU}.json").read_text(encoding="utf-8"))
-            self.assertEqual({k: len(v) for k, v in got.items()}, {"getLandCharacteristics": 2, "getLandUseAttr": 7})
+            self.assertEqual({k: len(v) for k, v in got.items()}, {"getLandCharacteristics": 18, "getLandUseAttr": 28})
             self.assertFalse((out / "1168011800100010000.json").exists(), "한도에 닿은 필지는 파일을 남기지 않음")
             calls = []
             def counting(op, params):
@@ -149,20 +164,21 @@ class Load(unittest.TestCase):
     def test_2_load_and_card(self):
         self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", PNU], fetch=fixture_fetch), 0)
         self.assertEqual(self.q("SELECT land_category, area_m2::float, source FROM core.dim_parcel WHERE pnu = %s", PNU),
-                         [("대", 38926.4, vworld.LAND_LABEL)])
-        self.assertEqual(self.q("SELECT base_year, price_per_m2 FROM core.fact_land_price WHERE pnu = %s ORDER BY 1", PNU),
-                         [(2024, 18500000), (2025, 19600000)])
-        self.assertEqual(self.q("SELECT zone_cd1, zone_cd2 FROM core.fact_land_char WHERE pnu = %s AND base_year = 2025",
+                         [("대", 133361.6, vworld.LAND_LABEL)])
+        self.assertEqual(self.q("SELECT base_year, price_per_m2 FROM core.fact_land_price WHERE pnu = %s AND base_year >= 2025 ORDER BY 1", PNU),
+                         [(2025, 27700000), (2026, 29390000)])
+        self.assertEqual(self.q("SELECT zone_cd1, zone_cd2 FROM core.fact_land_char WHERE pnu = %s AND base_year = 2026",
                                 PNU), [("15", None)], "「00」(지정되지 않음)은 코드표에 없어 비움")
         card = self.q("SELECT land_category, land_price_per_m2, land_price_year, zones, missing "
                       "FROM mart.q_property_card('11680', '시험렉슬')")[0]
-        self.assertEqual(card[:3], ("대", 19600000, 2025))
-        self.assertEqual(card[3], "과밀억제권역, 제3종일반주거지역, 지구단위계획구역",
+        self.assertEqual(card[:3], ("대", 29390000, 2026))
+        self.assertEqual(card[3], "과밀억제권역, 대공방어협조구역, 도로, 상대보호구역, 절대보호구역, 제3종일반주거지역, "
+                                  "지구단위계획구역, 토지거래계약에관한허가구역",
                          "V-World가 있는 필지는 건축물대장의 「일반주거지역」을 쓰지 않고, 「접함」은 뺌")
         self.assertNotIn("공시지가", card[4])
         self.assertNotIn("토지 지목", card[4])
         raw = self.q("SELECT op, jsonb_array_length(row_data) FROM stg.vworld_raw WHERE pnu = %s ORDER BY 1", PNU)
-        self.assertEqual(raw, [("getLandCharacteristics", 2), ("getLandUseAttr", 7)])
+        self.assertEqual(raw, [("getLandCharacteristics", 18), ("getLandUseAttr", 28)])
 
     def test_3_resume_skips_done(self):
         calls = []
@@ -183,7 +199,7 @@ class Load(unittest.TestCase):
             def never(op, params):
                 raise AssertionError("--from-dir는 부르지 않음")
             self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", PNU, "--from-dir", f"{d}/out"], fetch=never), 0)
-            self.assertEqual(self.q("SELECT count(*) FROM core.fact_land_price WHERE pnu = %s", PNU)[0][0], 2,
+            self.assertEqual(self.q("SELECT count(*) FROM core.fact_land_price WHERE pnu = %s", PNU)[0][0], 14,
                              "커서가 최근이어도 --from-dir는 다시 적재")
             self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", "1168011800100010000",
                                           "--from-dir", f"{d}/out"], fetch=never), 0, "파일 없는 필지는 건너뜀")

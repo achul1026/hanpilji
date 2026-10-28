@@ -15,7 +15,7 @@ V-World는 해외 IP(클라우드)의 연결을 끊음(2026-10-28 확인). 그�
   토지이용계획(getLandUseAttr): 그 필지에 걸린 지역 · 지구 · 구역 전부와 포함 · 저촉 · 접함
 필지 하나를 다 받으면 커서에 날짜를 남기고, 다시 돌리면 남은 필지부터 이어 받음(bld와 같은 방식).
 인증키는 환경변수 VWORLD_KEY(파일에 쓰지 않음). 키를 받을 때 적은 서비스 URL은 VWORLD_DOMAIN(기본 http://localhost).
-응답 항목 이름은 V-World 개발자센터 문서 기준이고, 실제 응답으로 아직 확인하지 못함(클라우드에서 api.vworld.kr이 막혀 있음).
+응답 항목 이름은 2026-10-28 국내 PC에서 받은 실제 응답(강남구 1,168필지)으로 확인함.
 """
 import argparse
 import datetime
@@ -131,6 +131,7 @@ def to_char(row):
     price = _num(_s(row, "pblntfPclnd"))
     return {
         "year": int(year),
+        "order": (_s(row, "stdrMt"), _s(row, "lastUpdtDt")),
         "category": _s(row, "lndcgrCodeNm") or None,
         "area": _num(_s(row, "lndpclAr")),
         "price": int(price) if price else None,
@@ -248,8 +249,9 @@ def load(conn, pnu, got, asof):
                    ON CONFLICT (pnu, op) DO UPDATE SET row_data = excluded.row_data, loaded_at = now()""",
                 (pnu, op, json.dumps(rows, ensure_ascii=False)))
 
+        # 한 해에 줄이 여럿일 수 있음(7월 1일 기준 추가 공시 · 다시 올린 줄). 기준월 · 수정일 순으로 넣어 마지막 줄이 남게 함
         chars = sorted((c for c in map(to_char, got.get("getLandCharacteristics", [])) if c),
-                       key=lambda c: c["year"])
+                       key=lambda c: (c["year"], c["order"]))
         zone_codes = {r[0] for r in cur.execute("SELECT zone_cd FROM core.dim_zone WHERE code_system = 'land_char'")}
         for c in chars:
             cur.execute(
