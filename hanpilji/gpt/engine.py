@@ -30,6 +30,7 @@ SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어�
    공매 물건과 실거래 대비 할인율은 q_auction_discount, 경매 · 공매 권리 확인 항목은 q_auction_checklist로 찾는다.
    할인율을 말할 때는 권리관계를 보지 않은 값이라는 점과 확인 항목을 함께 말하고, 입찰을 권하지 않는다.
    한 단지 · 한 주소를 종합해서 물으면 q_property_card를 먼저 부르고, 필요하면 다른 도구로 더 찾는다.
+   위치 · 지도 · 필지 경계는 q_parcel_map으로 찾는다(한 곳을 종합할 때 q_property_card와 함께 불러도 된다).
    최고가 · 최저가 · 층별 가격은 q_deal_list로, 「가장 많은 · 가장 비싼 단지」 같은 순위는 q_complex_rank로 찾는다.
 8. 근거 목록(함수 · 건수 · 출처)은 시스템이 답 끝에 자동으로 붙이니 따로 길게 적지 않는다.
    도구 결과마다 ref 번호가 있다. 숫자 · 조문 · 가능 여부를 말한 문장 끝에 그 값이 나온 결과의 번호를 [1]처럼 붙인다.
@@ -136,7 +137,7 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None, on_event=No
             emit({"type": "tool", "tool": c["name"], "args": c["input"]})
             try:
                 out = dict(tools_mod.run(conn, c["name"], c["input"]), ref=len(results_full) + 1)
-                results.append({"id": c["id"], "content": json.dumps(out, ensure_ascii=False)})
+                results.append({"id": c["id"], "content": json.dumps(tools_mod.for_model(out), ensure_ascii=False)})
                 calls.append({k: v for k, v in out.items() if k != "rows"})
                 results_full.append(out)
                 emit({"type": "result", "result": out})

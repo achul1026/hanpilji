@@ -1,7 +1,8 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 13개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수 14개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
+화면 전용 값(지도 도형 · screen_only 줄)은 웹 블록에만 쓰고 모델에게는 for_model()로 빼고 넘김(토큰 아끼기).
 """
 import datetime
 import decimal
@@ -327,6 +328,26 @@ TOOLS = [
         "sql": "SELECT * FROM mart.q_auction_checklist(%s::text, %s::text)",
         "args": lambda a: (a.get("kind") or None, a.get("query") or None),
     },
+    {
+        "name": "q_parcel_map",
+        "description": (
+            "단지명 · 「동 지번」 · PNU 하나로 그 땅의 지적도(연속지적도 필지 경계)와 건물 윤곽을 지도로 보여 줌. "
+            "결과 줄은 대상 필지마다 번지 · 지목(한 글자) · 도형 면적(㎡) · 중심 경위도. 지도는 화면에 따로 그려지니 좌표를 답에 옮겨 적지 않음. "
+            "「어디야」 「위치」 「지도」 「경계」 「모양」을 묻거나 q_property_card로 한 곳을 종합할 때 함께 부름. "
+            "도형 면적은 연속지적도에서 잰 값이라 토지대장 면적(q_property_card)과 조금 다를 수 있고, "
+            "연속지적도는 참고용 도면이라 측량 · 경계 확정에 쓸 수 없다고 말할 것. 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "단지명 일부, 「동 지번」 또는 PNU 19자리. 예: 도곡렉슬, 대치동 1027"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_parcel_map(%s::text, %s::text)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), str(a["query"]).strip()),
+    },
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}
 
@@ -365,6 +386,18 @@ def check_args(name, args):
     return tool
 
 
+SCREEN_KEYS = ("geojson", "screen_only")   # 화면 전용 열
+
+
+def for_model(out):
+    """모델에게 넘길 모양: screen_only 줄과 화면 전용 열을 뺌. 뺀 줄이 있으면 screen_rows에 수만 남김."""
+    rows = out.get("rows") or []
+    if not any(k in r for r in rows for k in SCREEN_KEYS):
+        return out
+    keep = [{k: v for k, v in r.items() if k not in SCREEN_KEYS} for r in rows if not r.get("screen_only")]
+    return {**out, "rows": keep, "screen_rows": len(rows) - len(keep)}
+
+
 def _plain(v):
     if isinstance(v, (list, tuple)):
         return [_plain(x) for x in v]
@@ -383,7 +416,7 @@ def run(conn, name, args):
     tool = check_args(name, args)
     cur = conn.execute(tool["sql"], tool["args"](args))
     cols = [d.name for d in cur.description]
-    rows = [dict(zip(cols, map(_plain, r))) for r in cur.fetchall()]
+    rows = [{c: v if c in SCREEN_KEYS else _plain(v) for c, v in zip(cols, r)} for r in cur.fetchall()]
     total = rows[0].pop("row_total") if rows else 0
     for r in rows[1:]:
         r.pop("row_total", None)
@@ -392,5 +425,5 @@ def run(conn, name, args):
     for r in rows:   # 출처 · 기준일은 위로 한 번만 올림(줄마다 반복하면 토큰 낭비)
         r.pop("source", None)
         r.pop("asof", None)
-    return {"tool": name, "args": args, "shown": len(rows), "row_total": total,
+    return {"tool": name, "args": args, "shown": sum(1 for r in rows if not r.get("screen_only")), "row_total": total,
             "sources": sources, "asof": asof, "rows": rows}
