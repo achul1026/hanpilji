@@ -80,7 +80,8 @@ class Screen(unittest.TestCase):
     def test_map_config(self):
         self.assertEqual(web.map_config({}), {"tiles": None})
         self.assertEqual(web.map_config({"HANPILJI_MAP_TILES": "vworld"}), {"tiles": None}, "V-World 키가 없으면 배경 없음")
-        t = web.map_config({"HANPILJI_MAP_TILES": "vworld", "HANPILJI_VWORLD_MAP_KEY": "K"})["tiles"]
+        self.assertEqual(web.map_config({"HANPILJI_MAP_TILES": "none", "HANPILJI_VWORLD_MAP_KEY": "K"}), {"tiles": None})
+        t = web.map_config({"HANPILJI_VWORLD_MAP_KEY": "K"})["tiles"]
         self.assertTrue(t["url"].startswith("https://api.vworld.kr/req/wmts/1.0.0/K/{style}/"))
         self.assertEqual(web.map_config({"HANPILJI_MAP_TILES": "OSM"})["tiles"]["max_zoom"], 19)
 

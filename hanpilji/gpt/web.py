@@ -4,8 +4,8 @@
 
 브라우저에서 http://127.0.0.1:8000 을 열면 됨. 대화는 서버 메모리에만 두고(창마다 따로), 껐다 켜면 사라짐.
 
-지도 블록의 배경지도: HANPILJI_MAP_TILES=vworld(+ HANPILJI_VWORLD_MAP_KEY, 키에 적은 서비스 URL에서만 열림) · osm.
-안 정하면 배경 없이 필지 경계 · 건물 윤곽만 도면처럼 그림. 배경지도 키는 브라우저가 타일을 받을 때 쓰므로 화면에 드러남.
+지도 블록의 배경지도: 기본 V-World(HANPILJI_VWORLD_MAP_KEY, 키에 적은 서비스 URL에서만 열림). HANPILJI_MAP_TILES=osm · none으로 바꿈.
+키가 없으면 배경 없이 필지 경계 · 건물 윤곽만 도면처럼 그림. 배경지도 키는 브라우저가 타일을 받을 때 쓰므로 화면에 드러남.
 
 남에게 열 때(--host 0.0.0.0 등): 질문마다 API 요금이 나가므로 HANPILJI_WEB_TOKEN을 정해야만 켜짐.
 그때 주소는 http://서버:8000/?token=정한값 . 토큰이 있어도 접속 주소(IP)마다 시간당 질문 수를 제한함.
@@ -50,7 +50,8 @@ TILES = {
 def map_config(env=None):
     """화면에 줄 지도 설정. 정하지 않았거나 V-World 키가 없으면 배경 없음(tiles: None)."""
     env = os.environ if env is None else env
-    kind = (env.get("HANPILJI_MAP_TILES") or "").strip().lower()
+    # 기본은 V-World(2026-10-28 결정): 배경지도 키만 넣으면 켜지고, 키가 없으면 선만 그림
+    kind = (env.get("HANPILJI_MAP_TILES") or "vworld").strip().lower()
     t = TILES.get(kind)
     if not t:
         return {"tiles": None}
