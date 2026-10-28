@@ -19,8 +19,15 @@ const EXAMPLES = [
 // ------------------------------------------------------------ 저장(이 브라우저에만)
 function load() { try { return JSON.parse(localStorage.getItem(STORE)) || []; } catch (e) { return []; } }
 // 화면 요소(el)는 빼고 저장. 저장 못 해도(사생활 보호 창 등) 화면은 그대로
-function save() { try { localStorage.setItem(STORE, JSON.stringify(convs.slice(0, MAX_CONVS).map(strip))); } catch (e) { /* 무시 */ } }
-function strip(c) { return { ...c, items: c.items.map(({ el: _, ...rest }) => rest) }; }
+function save() {
+  const put = lite => localStorage.setItem(STORE, JSON.stringify(convs.slice(0, MAX_CONVS).map(c => strip(c, lite))));
+  try { put(false); } catch (e) { try { put(true); } catch (e2) { /* 무시 */ } }
+}
+// lite: 저장 공간이 모자라면 지도 블록의 이웃 필지 · 건물 도형은 빼고 대상 필지만 남김
+function strip(c, lite) {
+  const slim = b => b.kind === "map" ? { ...b, features: (b.features || []).filter(f => f.layer === "대상 필지") } : b;
+  return { ...c, items: c.items.map(({ el: _, ...rest }) => lite && rest.blocks ? { ...rest, blocks: rest.blocks.map(slim) } : rest) };
+}
 let convs = load(), cur = null, busy = false;
 const token = (() => {
   const t = new URLSearchParams(location.search).get("token");
@@ -188,6 +195,95 @@ function chartEl(b, which, narrow) {
   return box;
 }
 
+// ------------------------------------------------------------ 지도(지적도 · 건물 윤곽)
+// 배경지도는 /config.json 이 정함(V-World · OSM · 없음). 없으면 도면처럼 선만 그림. 웹 메르카토르로 직접 투영
+let mapCfg = { tiles: null };
+fetch("/config.json").then(r => r.ok ? r.json() : null).then(j => { if (j) mapCfg = j; }).catch(() => {});
+const dark = () => document.documentElement.dataset.theme === "dark" || (document.documentElement.dataset.theme !== "light" && matchMedia("(prefers-color-scheme: dark)").matches);
+const merc = (lon, lat) => { const s = Math.sin(lat * Math.PI / 180); return [(lon + 180) / 360, .5 - Math.log((1 + s) / (1 - s)) / (4 * Math.PI)]; };
+function polys(g) { return !g ? [] : g.type === "Polygon" ? [g.coordinates] : g.type === "MultiPolygon" ? g.coordinates : []; }
+function niceLen(m) { let best = 5; for (const n of [5, 10, 20, 25, 50, 100, 200, 250, 500, 1000]) if (n <= m) best = n; return best; }
+
+function mapEl(b, narrow) {
+  const box = el("div", "map"), feats = b.features || [];
+  const target = feats.filter(f => f.layer === "대상 필지");
+  if (!target.length) { box.append(el("p", "dempty", "이 곳의 지적도가 아직 없습니다. 지금은 서울 강남구만 받아 두었습니다.")); return box; }
+  const W = narrow ? 400 : 680, H = narrow ? 270 : 440, tiles = mapCfg.tiles;
+  // 대상 필지가 화면 가운데 60% 남짓을 차지하게 맞춤(이웃 필지 · 건물은 그 둘레로 보임)
+  let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
+  for (const f of target) for (const p of polys(f.geometry)) for (const [lon, lat] of p[0]) { const [x, y] = merc(lon, lat); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
+  const fit = Math.min(W * .62 / Math.max(x1 - x0, 1e-9), H * .62 / Math.max(y1 - y0, 1e-9)) / 256;
+  let z = Math.min(Math.log2(fit), tiles ? tiles.max_zoom || 19 : 20.5);
+  if (tiles) z = Math.floor(z);
+  const S = 256 * Math.pow(2, z), cx = (x0 + x1) / 2 * S, cy = (y0 + y1) / 2 * S;
+  const px = (lon, lat) => { const [x, y] = merc(lon, lat); return [x * S - cx + W / 2, y * S - cy + H / 2]; };
+  const path = g => polys(g).map(p => p.map(r => r.map(([lon, lat], i) => { const [x, y] = px(lon, lat); return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1); }).join("") + "Z").join("")).join("");
+  const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": b.title + " 지도" });
+  s.append(svg("rect", { x: 0, y: 0, width: W, height: H, fill: "var(--sheet)" }));
+  if (tiles) {
+    const g = svg("g", { class: "tiles" }), n = Math.pow(2, z), url = tiles.url.replace("{style}", (tiles.styles || {})[dark() ? "dark" : "light"] || "");
+    for (let ty = Math.floor((cy - H / 2) / 256); ty <= Math.floor((cy + H / 2) / 256); ty++)
+      for (let tx = Math.floor((cx - W / 2) / 256); tx <= Math.floor((cx + W / 2) / 256); tx++) {
+        if (ty < 0 || ty >= n) continue;
+        const im = svg("image", { x: tx * 256 - cx + W / 2, y: ty * 256 - cy + H / 2, width: 256, height: 256, preserveAspectRatio: "none" });
+        im.setAttribute("href", url.replace("{z}", z).replace("{x}", ((tx % n) + n) % n).replace("{y}", ty));
+        im.addEventListener("error", () => im.remove());
+        g.append(im);
+      }
+    s.append(g);
+  } else {   // 배경이 없으면 모눈종이처럼
+    for (let gx = (W / 2) % 40; gx < W; gx += 40) s.append(svg("line", { x1: gx, x2: gx, y1: 0, y2: H, stroke: "var(--grid)", "stroke-width": 1 }));
+    for (let gy = (H / 2) % 40; gy < H; gy += 40) s.append(svg("line", { x1: 0, x2: W, y1: gy, y2: gy, stroke: "var(--grid)", "stroke-width": 1 }));
+  }
+  const tip = f => [f.label, f.layer === "건물" ? null : [f.jibun, f.jimok && "(" + f.jimok + ")"].filter(Boolean).join(" "),
+    f.floors_above ? f.floors_above + "층" : null, f.area_m2 != null ? nf.format(Math.round(f.area_m2)) + "㎡" : null].filter(Boolean).join(" · ");
+  const shape = (f, attrs) => { const e = svg("path", { d: path(f.geometry), "fill-rule": "evenodd", "vector-effect": "non-scaling-stroke", ...attrs }); e.append(svg("title", {}, tip(f) || f.layer)); return e; };
+  const labels = svg("g", { "font-family": "var(--mono)", "text-anchor": "middle" });
+  const span = f => { const bb = polys(f.geometry).flatMap(p => p[0]).map(([lon, lat]) => px(lon, lat)), xs = bb.map(p => p[0]), ys = bb.map(p => p[1]);
+    return [Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)]; };
+  const placed = target.map(f => f.lon == null ? [-99, -99, 0] : [...px(f.lon, f.lat), 30]);
+  for (const f of feats.filter(f => f.layer === "이웃 필지")) {
+    s.append(shape(f, { class: "m-nb", fill: "transparent", stroke: "var(--muted)", "stroke-width": .8, "stroke-opacity": .55 }));
+    const [w, h] = span(f);
+    if (f.lon != null && w > 34 && h > 16) {
+      const [x, y] = px(f.lon, f.lat), t = f.jibun + (f.jimok || ""), hw = t.length * 3.2 + 2;
+      if (placed.some(([a, b, c]) => Math.abs(a - x) < c + hw && Math.abs(b - y) < 12)) continue;   // 글자끼리 겹치면 뺌
+      placed.push([x, y, hw]); labels.append(svg("text", { x, y: y + 3, "font-size": 9.5, fill: "var(--muted)" }, t));
+    }
+  }
+  for (const f of target) s.append(shape(f, { class: "m-tg", fill: "var(--survey)", "fill-opacity": .14, stroke: "var(--survey)", "stroke-width": 2.2, "stroke-linejoin": "round" }));
+  for (const f of feats.filter(f => f.layer === "건물")) s.append(shape(f, { class: "m-bd", fill: "var(--ink)", "fill-opacity": .16, stroke: "var(--ink)", "stroke-width": .8, "stroke-opacity": .5 }));
+  // 큰 필지부터: 작은 필지는 글자가 겹치니 도장 · 번지를 빼고 마우스를 올리면 보이게(title)
+  for (const f of [...target].sort((a, b) => (b.area_m2 || 0) - (a.area_m2 || 0))) {
+    if (f.lon == null) continue;
+    const [w, h] = span(f), big = w > 46 && h > 26;
+    if (!big && target.length > 1) continue;
+    const [x, y] = px(f.lon, f.lat), t = f.jibun ? f.jibun + (f.jimok || "") : "";
+    s.append(svg("rect", { x: x - 3.5, y: y - 3.5, width: 7, height: 7, fill: "var(--seal)", transform: `rotate(8 ${x} ${y})` }));
+    if (t) { const tx = svg("text", { x, y: y - 9, "font-size": 12, "font-weight": 600, fill: "var(--survey)", stroke: "var(--sheet)", "stroke-width": 3, "paint-order": "stroke" }, t); labels.append(tx); }
+  }
+  s.append(labels);
+  // 축척 막대 · 방위
+  const mpp = 40075016.686 * Math.cos(target[0].lat * Math.PI / 180) / S, len = niceLen(mpp * (narrow ? 110 : 140)), bar = len / mpp;
+  const sc = svg("g", { "font-family": "var(--mono)", "font-size": 10.5, fill: "var(--ink)" });
+  sc.append(svg("rect", { x: 10, y: H - 28, width: bar + 44, height: 20, rx: 3, fill: "var(--sheet)", "fill-opacity": .85 }));
+  sc.append(svg("path", { d: `M16 ${H - 16}v5h${bar.toFixed(1)}v-5`, fill: "none", stroke: "var(--ink)", "stroke-width": 1.4 }));
+  sc.append(svg("text", { x: 22 + bar, y: H - 13 }, len + "m"));
+  sc.append(svg("text", { x: W - 16, y: 22, "text-anchor": "middle", "font-weight": 600 }, "N"));
+  sc.append(svg("path", { d: `M${W - 16} 26l-4 10h8z`, fill: "var(--ink)" }));
+  s.append(sc);
+  box.append(s);
+  const lg = el("div", "legend");
+  const key = (cls, label) => { const sp = el("span"), i = el("i", "mk mk-" + cls); sp.append(i, label); lg.append(sp); };
+  key("tg", "대상 필지 " + target.length + "개");
+  if (feats.some(f => f.layer === "이웃 필지")) key("nb", "이웃 필지");
+  if (feats.some(f => f.layer === "건물")) key("bd", "건물 윤곽");
+  lg.append(el("span", null, b.note || ""));
+  if (tiles && tiles.attr) lg.append(el("span", null, tiles.attr));
+  box.append(lg);
+  return box;
+}
+
 // 묻는 낱말이 가장 많이(2개 이상) 든 문장 하나에 형광 표시. 낱말마다 칠하면 어지러워서 문장으로
 function highlight(parent, text, words) {
   const parts = text.split(/(?<=다\.|\n)/), score = p => (words || []).filter(w => p.includes(w)).length;
@@ -257,6 +353,7 @@ function blockEl(item, idx, inlineMode) {
     else if (b.kind === "chart") { bd.className = "bd"; bd.append(chartEl(b, which, !inlineMode)); }
     else if (b.kind === "document") { bd.className = ""; bd.append(docsEl(b, inlineMode)); }
     else if (b.kind === "card") { bd.className = "bd"; bd.append(cardEl(b, inlineMode)); }
+    else if (b.kind === "map") { bd.className = "bd"; bd.append(mapEl(b, !inlineMode || !wide())); }
   };
   if (which != null) {
     const seg = el("div", "seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "보기");
@@ -335,7 +432,7 @@ function stampEl(item) {
 // 답 안에 바로 보일 블록: 카드 · 그래프 · 표는 앞에서 3개까지, 조문은 2개까지 짧게. 나머지는 근거 도장에서 서랍으로
 function inlinePicks(blocks) {
   const out = [], docs = [];
-  blocks.forEach((b, i) => { if (b.kind === "document") { if (docs.length < 2) docs.push(i); } else if (out.length < 3 && (b.rows || []).length) out.push(i); });
+  blocks.forEach((b, i) => { if (b.kind === "document") { if (docs.length < 2) docs.push(i); } else if (out.length < 3 && (b.rows || b.features || []).length) out.push(i); });
   return [...out, ...docs];
 }
 function renderAnswer(item, box) {

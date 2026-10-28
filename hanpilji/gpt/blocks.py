@@ -8,8 +8,11 @@
   chart    : "x", "series": [{"key", "label", "fmt"}], "count" (점 크기에 쓸 건수 열), "partial" (잠정 표시 열), "rows"
   document : "items": [{"title", "subtitle", "body", "meta", "url"}], "highlight": [낱말]
   card     : "rows" (q_property_card 줄 그대로)
+  map      : "features": [{"layer", "pnu", "label", "jibun", "jimok", "area_m2", "floors_above", "lon", "lat", "geometry"}],
+             "note". layer는 대상 필지 · 이웃 필지 · 건물, geometry는 경위도 GeoJSON
 fmt: won(원 → 억 · 만) · won_m2 · won_py · int · pct · pp · m2 · num · date · ym · text · allowed
 """
+import json
 from urllib.parse import quote
 
 from hanpilji.gpt import tools as tools_mod
@@ -27,6 +30,7 @@ TOOL_LABEL = {
     "q_building_filter": "건축물대장 검색", "q_price_trend": "월별 시세 추이", "q_land_price_trend": "공시지가 추이",
     "q_price_vs_official": "공시지가 대비 실거래가", "q_market_series": "시장 지표",
     "q_auction_discount": "공매 물건 · 실거래 대비", "q_auction_checklist": "입찰 전 권리 확인 항목",
+    "q_parcel_map": "지적도 · 건물 윤곽",
 }
 
 # 진행 표시 문구(도구를 부르는 동안 화면에 보임)
@@ -37,7 +41,7 @@ TOOL_DOING = {
     "q_building_filter": "건축물대장을 찾는 중", "q_price_trend": "월별 시세 추이를 만드는 중",
     "q_land_price_trend": "공시지가 추이를 만드는 중", "q_price_vs_official": "공시지가와 실거래가를 맞대는 중",
     "q_market_series": "시장 지표를 찾는 중", "q_auction_discount": "공매 물건을 실거래와 맞대는 중",
-    "q_auction_checklist": "입찰 전 확인 항목을 찾는 중",
+    "q_auction_checklist": "입찰 전 확인 항목을 찾는 중", "q_parcel_map": "지적도를 펼치는 중",
 }
 
 COL = {   # 열 이름 → (보이는 이름, 형식)
@@ -130,12 +134,29 @@ def _market(out):
             "note": rows[0].get("note") or ""}
 
 
+MAP_NOTE = "연속지적도는 참고용 도면이라 측량 · 경계 확정에 쓸 수 없음"
+
+
+def _map(out):
+    feats = []
+    for r in out["rows"]:
+        g = r.get("geojson")
+        if not g:
+            continue
+        f = {k: r.get(k) for k in ("layer", "pnu", "label", "jibun", "jimok", "area_m2", "floors_above", "lon", "lat")}
+        f["geometry"] = json.loads(g) if isinstance(g, str) else g
+        feats.append(f)
+    return {"kind": "map", "features": feats, "note": MAP_NOTE}
+
+
 def _shape(out):
     tool, rows = out["tool"], out["rows"]
     if tool == "q_law_search":
         return _law(out)
     if tool == "q_property_card":
         return {"kind": "card", "rows": rows}
+    if tool == "q_parcel_map":
+        return _map(out)
     if tool == "q_price_trend" and rows:
         return {"kind": "chart", "x": "month", "x_fmt": "ym", "rows": rows, "count": "trade_count", "partial": "partial",
                 "series": [{"key": "trade_median_per_pyeong", "label": "매매 평당 중위가", "fmt": "won_py"},

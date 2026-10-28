@@ -75,6 +75,9 @@ python -m hanpilji.collectors.vworld                  # 필지마다 V-World →
 python -m hanpilji.collectors.vworld --export-pnus pnus.txt                    # 받을 필지 목록
 python -m hanpilji.collectors.vworld --fetch-only pnus.txt --out vworld_raw    # 국내 PC, DB 없이 (표준 라이브러리만)
 python -m hanpilji.collectors.vworld --from-dir vworld_raw                     # 받은 파일 적재
+# 지적도(연속지적도 필지 경계) · 건물 윤곽 → core.geo_parcel · geo_building (PostGIS: init_db.sh --postgis)
+python scripts/vworld_fetch_geom_gangnam.py                                     # 국내 PC, 강남구를 약 500m 칸으로 → zip
+python -m hanpilji.collectors.vworld_geom --from-zip vworld_geom_11680.zip       # 받은 zip 적재(경위도 → 5186)
 
 # 시장 · 거시 지표 (키: ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀) → core.fact_market
 python -m hanpilji.collectors.market                  # 금리 · 물가(ECOS) · 아파트 가격지수(R-ONE) · 인구 · 세대(KOSIS) 10년
@@ -120,6 +123,7 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 | `mart.q_market_series(지표?, 지역?, 개월?)` | 「요즘 기준금리랑 주담대 금리」 「강남구 매매가격지수」 | 120 |
 | `mart.q_auction_discount(시군구, 검색어?, 진행 중만?, 최소 할인율?, 개월?, 몇 건?)` | 「강남구 공매 아파트 중 실거래보다 싼 것」 | 30 |
 | `mart.q_auction_checklist(경매·공매?, 항목?)` | 「경매 권리분석 뭘 봐야 해?」 「말소기준권리가 뭐야」 | 14 |
+| `mart.q_parcel_map(시군구, 단지명 · 동 지번 · PNU)` | 「도곡렉슬 어디야?」 「대치동 316 필지 경계 보여줘」 | 대상 필지 전부 + 이웃 필지 · 건물 250개씩(화면 전용) |
 
 `q_complex_price`는 단지 x 전용면적마다 거래단가 · 거래가격 · 전세단가 · 전세시세를 한 줄로 돌려줍니다. 해제된 거래와 월세는 빼고, ㎡당 · 평당 단가와 전세가율도 같이 줍니다.
 
@@ -201,7 +205,10 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 - **조문 원문:** 묻는 낱말이 가장 많이 든 문장에 형광 표시를 하고 법제처 원문 링크를 붙입니다.
 - **기간 바꾸기:** 그래프 · 표의 1년 · 2년 · 3년 단추는 모델을 다시 부르지 않고 마트 함수만 다시 부릅니다(요금 없음).
 - **진행 표시:** 답을 만드는 동안 「실거래 목록을 찾는 중」처럼 지금 무엇을 찾는지 보여 줍니다(Server-Sent Events).
+- **지적도:** 단지 · 주소를 물으면 대상 필지 경계(측량 청색), 둘레 이웃 필지와 번지 · 지목, 건물 윤곽, 축척 막대를 그립니다. 도형은 화면에만 가고 모델에게는 번지 · 면적 · 중심 좌표만 넘깁니다(토큰 절약). 배경지도는 V-World(밝은 화면 white · 어두운 화면 midnight)이고 `HANPILJI_VWORLD_MAP_KEY`를 넣으면 켜집니다. 키가 없으면 모눈 위에 선만 그립니다(`HANPILJI_MAP_TILES=osm` · `none`으로 바꿀 수 있음). 연속지적도는 참고용 도면이라 측량 · 경계 확정에 쓸 수 없다고 늘 함께 적습니다.
 - **대화 목록:** 이 브라우저에만 저장합니다. 휴대폰에서는 근거 서랍이 아래에서 올라옵니다.
+
+<p align="center"><img src="docs/assets/web_map.png" width="860" alt="지적도 블록: 도곡렉슬 필지 5개 경계와 이웃 필지 번지 · 지목, 건물 윤곽, 축척 막대"></p>
 
 <p align="center"><img src="docs/assets/web_mobile.png" width="860" alt="휴대폰 화면: 첫 화면, 지표 답, 아래에서 올라온 근거 서랍"></p>
 
@@ -211,6 +218,7 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 | `POST /api/ask` | 같은 일을 한 번에 JSON으로(답 · 근거 · 블록) |
 | `POST /api/tool` | 블록 기간 바꾸기. 기간이 있는 도구만, 인자는 도구 형식대로 확인 |
 | `GET /api/card?q=` | 단지 카드만(LLM 없이) |
+| `GET /config.json` | 지도 배경 타일 설정(토큰 없이. 배경지도 키는 원래 브라우저에 드러남) |
 
 <p align="center"><img src="docs/assets/web_card.png" width="860" alt="단지 종합 질문: 답과 단지 카드(거래 · 토지 · 용도지역 · 건물)"></p>
 
@@ -442,6 +450,10 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [ ] 새 공매 물건 · 유찰로 값이 내려간 물건 알림(매주, 웹사이트가 생기면)
 - [ ] 법원경매 물건: 공식 API가 생기거나 제휴 데이터가 정해지면
 - [ ] V-World 상업 이용 회신
+- [x] 지적도 · 건물 윤곽 적재 코드 · 지도 함수(`q_parcel_map`) · 웹 지도 블록 (2026-10-28)
+- [x] 국내 PC에서 강남구 지적도 받기 → 필지 경계 34,658개(면적 합 39.5㎢) · 건물 윤곽 24,235개, 한필지 필지 1,149/1,168개에 경계 (2026-10-28)
+- [x] 지적도 Supabase 반영(`python -m hanpilji.supabase push-geo`) (2026-10-28)
+- [ ] 경계가 없는 한필지 필지 19개: 본번 0 같은 잘못 만든 PNU · 합병 · 분할로 바뀐 번지 확인
 
 ## 📁 폴더
 
@@ -456,23 +468,25 @@ hanpilji/
 │   │   ├── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
 │   │   ├── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
 │   │   ├── vworld.py        # V-World 토지특성 · 토지이용계획 → dim_parcel 지목 · fact_land_price · bridge_parcel_zone
+│   │   ├── vworld_geom.py   # V-World 연속지적도 · 도로명주소 건물(국내 PC에서 받은 zip) → core.geo_parcel · geo_building
 │   │   ├── market.py        # ECOS · R-ONE · KOSIS → core.fact_market
 │   │   └── onbid.py         # 온비드 공매 물건 → core.fact_auction
 │   ├── datagokr.py          # 공공데이터포털 공통(키 · 호출 · 응답 풀기)
 │   ├── gpt/
 │   │   ├── engine.py        # 질문 → 도구 호출 반복 → 답 + 근거
-│   │   ├── tools.py         # 마트 함수 13개 = 도구 정의 · 인자 확인
+│   │   ├── tools.py         # 마트 함수 14개 = 도구 정의 · 인자 확인
 │   │   ├── llm.py           # 제공자(Anthropic) · 교체 지점
 │   │   ├── __main__.py      # 터미널 대화
-│   │   ├── blocks.py        # 도구 결과 → 화면 블록(표 · 그래프 · 조문 · 카드)
+│   │   ├── blocks.py        # 도구 결과 → 화면 블록(표 · 그래프 · 조문 · 카드 · 지도)
 │   │   ├── web.py           # 웹 서버(질문 흐름 · 블록 다시 조회)
 │   │   └── static/          # 웹 화면(index.html · app.css · app.js)
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
 │   ├── supabase.py          # Supabase를 HTTPS로: 백업 복원 · GPT용 읽기 연결
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
-├── sql/00~14_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
+├── sql/00~15_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값 (15_geo는 PostGIS 있을 때)
 ├── scripts/init_db.sh       # 빈 DB에 스키마 올리기
 ├── scripts/restore_db.sh    # 백업에서 되살리기
+├── scripts/vworld_fetch_geom_gangnam.py  # 국내 PC용: 강남구 지적도 · 건물 윤곽 받기(표준 라이브러리만)
 ├── tests/                   # fixtures/*_real.xml 은 법제처 실제 응답
 └── docs/assets/             # README 도트 그림 (make_banner.py로 다시 만듦)
 ```

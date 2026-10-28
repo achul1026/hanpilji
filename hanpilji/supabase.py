@@ -7,6 +7,7 @@
 
     python -m hanpilji.supabase restore [백업 파일]     # 덮어쓰기 복원 + 건수 비교
     python -m hanpilji.supabase counts                 # 테이블별 건수만 비교
+    python -m hanpilji.supabase push-geo [--local-dsn DSN]   # 지적도 표(core.geo_*)만 로컬 DB에서 덮어쓰기
 """
 import argparse
 import datetime
@@ -187,7 +188,8 @@ def _section(dump, section, listfile=None):
     # 확장은 Supabase가 관리하므로 만들기 · 설명 달기는 따로 함
     keep = [l for l in sql.splitlines() if not l.startswith(("\\", "CREATE EXTENSION", "COMMENT ON EXTENSION"))
             and "pg_catalog.set_config('search_path', '', false)" not in l]
-    return "\n".join(keep)
+    # PostGIS는 로컬에선 public, Supabase에선 extensions 스키마에 있음(지적도 표 core.geo_*)
+    return re.sub(r"\bpublic\.(geometry|geography)\b", r"extensions.\1", "\n".join(keep))
 
 
 def _acl_sql(dump):
@@ -208,11 +210,11 @@ def _tables():
     return rows.split()
 
 
-def _send_table(table, log):
+def _send_table(table, log, dsn=LOCAL_DSN):
     """한 테이블을 JSON 묶음으로 보냄. 요청이 너무 크다고 하면 묶음을 반으로 줄여 다시 보냄."""
     import psycopg
     sent = 0
-    with psycopg.connect(LOCAL_DSN) as conn, conn.cursor(name="dump") as cur:
+    with psycopg.connect(dsn) as conn, conn.cursor(name="dump") as cur:
         cur.itersize = 2000
         cur.execute(f"SELECT row_to_json(t)::text FROM {table} t")
         batch, size = [], 0
@@ -320,6 +322,34 @@ def compare(tables=None, log=print):
     return not bad
 
 
+GEO_TABLES = ("core.geo_parcel", "core.geo_building")
+GEO_SQL = os.path.join(os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "sql", "15_geo.sql")
+
+
+def push_geo(local_dsn, log=print):
+    """지적도 표만 보냄(전체 복원 없이). 15_geo.sql로 표 · 지도 함수를 만들고 표를 비운 뒤 로컬 줄을 그대로 보냄.
+    도형은 row_to_json이 GeoJSON(+ 좌표계 5186)으로 내보내고 json_populate_recordset이 그대로 받음."""
+    with open(GEO_SQL, encoding="utf-8") as f:
+        query(f.read())
+    query("TRUNCATE " + ", ".join(GEO_TABLES))
+    ok = True
+    for t in GEO_TABLES:
+        for attempt in range(3):
+            try:
+                n = _send_table(t, log, local_dsn)
+                break
+            except Ambiguous as e:
+                query(f"TRUNCATE {t}", idempotent=True)
+                if attempt == 2:
+                    raise
+                log(f"  {t}: 끊김({e}), 비우고 다시 보냄")
+        remote = counts_remote([t])[t]
+        log(f"{t}: 보냄 {n:,} · Supabase {remote:,}")
+        ok = ok and remote == n
+    query("ANALYZE core.geo_parcel; ANALYZE core.geo_building;")
+    return ok
+
+
 def main(argv=None):
     p = argparse.ArgumentParser(prog="python -m hanpilji.supabase")
     sub = p.add_subparsers(dest="cmd", required=True)
@@ -327,10 +357,14 @@ def main(argv=None):
     r.add_argument("dump", nargs="?")
     c = sub.add_parser("counts", help="로컬에 푼 백업과 Supabase 건수 비교")
     c.add_argument("dump", nargs="?", help="주면 먼저 로컬에 풂")
+    g = sub.add_parser("push-geo", help="지적도 표(core.geo_parcel · geo_building)만 로컬 DB에서 덮어쓰기")
+    g.add_argument("--local-dsn", default="postgresql:///hanpilji?host=/var/run/postgresql")
     a = p.parse_args(argv)
     if not enabled():
         print("SUPABASE_ACCESS_TOKEN이 없음", file=sys.stderr)
         return 2
+    if a.cmd == "push-geo":
+        return 0 if push_geo(a.local_dsn) else 1
     dump = a.dump or _latest_dump()
     if a.cmd == "restore":
         return 0 if restore(dump) else 1

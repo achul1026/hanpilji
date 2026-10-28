@@ -4,6 +4,9 @@
 
 브라우저에서 http://127.0.0.1:8000 을 열면 됨. 대화는 서버 메모리에만 두고(창마다 따로), 껐다 켜면 사라짐.
 
+지도 블록의 배경지도: 기본 V-World(HANPILJI_VWORLD_MAP_KEY, 키에 적은 서비스 URL에서만 열림). HANPILJI_MAP_TILES=osm · none으로 바꿈.
+키가 없으면 배경 없이 필지 경계 · 건물 윤곽만 도면처럼 그림. 배경지도 키는 브라우저가 타일을 받을 때 쓰므로 화면에 드러남.
+
 남에게 열 때(--host 0.0.0.0 등): 질문마다 API 요금이 나가므로 HANPILJI_WEB_TOKEN을 정해야만 켜짐.
 그때 주소는 http://서버:8000/?token=정한값 . 토큰이 있어도 접속 주소(IP)마다 시간당 질문 수를 제한함.
 """
@@ -35,6 +38,30 @@ FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index
          "/app.css": ("app.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
          "/favicon.svg": ("favicon.svg", "image/svg+xml")}
 TOOL_PER_HOUR = 240           # 블록 기간 바꾸기(모델 없이 DB만 읽음)는 넉넉히
+
+# 배경지도 타일 주소. {key}는 V-World 키, {style}은 화면 색(밝음 white · 어두움 midnight)으로 채움
+TILES = {
+    "vworld": {"url": "https://api.vworld.kr/req/wmts/1.0.0/{key}/{style}/{z}/{y}/{x}.png",
+               "styles": {"light": "white", "dark": "midnight"}, "max_zoom": 19, "attr": "배경지도 © V-World(국토교통부)"},
+    "osm": {"url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "max_zoom": 19, "attr": "배경지도 © OpenStreetMap"},
+}
+
+
+def map_config(env=None):
+    """화면에 줄 지도 설정. 정하지 않았거나 V-World 키가 없으면 배경 없음(tiles: None)."""
+    env = os.environ if env is None else env
+    # 기본은 V-World(2026-10-28 결정): 배경지도 키만 넣으면 켜지고, 키가 없으면 선만 그림
+    kind = (env.get("HANPILJI_MAP_TILES") or "vworld").strip().lower()
+    t = TILES.get(kind)
+    if not t:
+        return {"tiles": None}
+    t = dict(t)
+    if kind == "vworld":
+        key = (env.get("HANPILJI_VWORLD_MAP_KEY") or "").strip()
+        if not key:
+            return {"tiles": None}
+        t["url"] = t["url"].replace("{key}", key)
+    return {"tiles": t}
 
 
 def page(name):
@@ -80,6 +107,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             if url.path in FILES:   # 화면 파일은 요금이 없어 토큰 없이 줌(토큰은 /api/ 에만)
                 name, ctype = FILES[url.path]
                 return self._send(200, page(name), ctype)
+            if url.path == "/config.json":
+                return self._json(200, map_config())
             if not self._allowed():
                 return self._json(403, {"error": "토큰이 필요합니다"})
             if url.path == "/api/card":
