@@ -85,6 +85,47 @@ class Conn(unittest.TestCase):
         self.assertEqual(seen["body"], {"query": "SELECT 1", "read_only": True})
         self.assertEqual(seen["auth"], "Bearer sbp_test")
 
+    def _flaky(self, errors, idempotent):
+        """errors를 차례로 낸 뒤 성공하는 가짜 API로 query를 부르고 (결과 또는 예외, 부른 횟수)를 돌려줌."""
+        import io
+        import urllib.error
+        calls = []
+
+        class Resp(io.BytesIO):
+            def __enter__(self):
+                return self
+
+            def __exit__(self, *a):
+                pass
+
+        def fake_open(req, timeout):
+            calls.append(1)
+            if len(calls) <= len(errors):
+                err = errors[len(calls) - 1]
+                raise urllib.error.HTTPError(req.full_url, err, "x", {}, io.BytesIO(b"")) if isinstance(err, int) else err
+            return Resp(b'[{"n": 1}]')
+
+        with mock.patch.dict(os.environ, {"SUPABASE_ACCESS_TOKEN": "sbp_test"}), \
+                mock.patch("urllib.request.urlopen", fake_open), mock.patch("time.sleep"):
+            try:
+                out = supabase.query("SELECT 1", ref="abcdefghijklmnopqrst", idempotent=idempotent)
+            except supabase.ApiError as e:
+                out = e
+        return out, len(calls)
+
+    def test_retry_rules(self):
+        # 실행 전에 막힌 429 · 503은 늘 다시 보냄
+        self.assertEqual(self._flaky([429, 503], idempotent=False), ([{"n": 1}], 3))
+        # 끊김 · 502 · 504는 이미 실행됐을 수 있어 조회만 다시 보냄
+        for err in (ConnectionResetError(104, "reset"), 502, 504):
+            out, n = self._flaky([err], idempotent=False)
+            self.assertIsInstance(out, supabase.Ambiguous)
+            self.assertEqual(n, 1)
+            self.assertEqual(self._flaky([err], idempotent=True), ([{"n": 1}], 2))
+        out, n = self._flaky([400], idempotent=True)
+        self.assertNotIsInstance(out, supabase.Ambiguous)
+        self.assertEqual(n, 1)
+
     def test_engine_picks_api(self):
         with mock.patch.dict(os.environ, {"HANPILJI_DB_VIA": "supabase-api", "HANPILJI_DSN": DSN}):
             conn = engine.connect({"db": {"dsn": DSN}})
