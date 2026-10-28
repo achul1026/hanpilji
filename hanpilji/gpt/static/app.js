@@ -9,7 +9,6 @@ const EXAMPLES = [
   ["단지", "도곡렉슬 종합해서 알려줘"],
   ["시세", "은마 76㎡ 최근 6개월 최고가"],
   ["추이", "대치동 아파트 시세 2년 추이"],
-  ["순위", "강남구 최근 1년 전세 거래 많은 단지 5곳"],
   ["규제", "제2종일반주거지역에 휴게음식점 지을 수 있어?"],
   ["법령", "전월세 재계약 때 5% 상한 조문 찾아줘"],
   ["공시지가", "래미안대치팰리스 공시지가 몇 년 동안 얼마나 올랐어?"],
@@ -62,6 +61,7 @@ const fmt = (f, v) => (FMT[f] || FMT.text)(v);
 
 // ------------------------------------------------------------ 마크다운(제목 · 목록 · 표 · 굵게 · 코드 · 근거 번호)
 let citeHandler = null;   // 지금 그리는 답의 근거 번호를 누르면 할 일
+let checks = [];          // 지금 그리는 답의 숫자 검산 결과(엔진이 원자료와 맞춰 본 것)
 function cite(n, onclick) {
   const b = btn("cite", String(n), onclick, "근거 " + n + " 보기");
   if (!onclick) { b.classList.add("dead"); b.disabled = true; }
@@ -94,11 +94,53 @@ function list(lines, i, ind) {
   }
   return [L, i];
 }
+// 「:::숫자」 · 「:::확인 못 함」 칸(엔진 프롬프트가 정한 모양). 숫자는 카드로, 확인 못 함은 노란 상자로
+const FENCE = /^\s*:::\s*(숫자|확인 못 함)\s*$/, FENCE_END = /^\s*:::\s*$/;
+function checkMark(ok) {
+  const c = el("span", "chk " + (ok ? "ok" : "unk")), s = svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", "aria-hidden": "true" });
+  s.append(ok ? svg("path", { d: "M2 6.5l2.5 2.5L10 3.5", fill: "none", stroke: "currentColor", "stroke-width": 2 }) : svg("circle", { cx: 6, cy: 6, r: 4, fill: "none", stroke: "currentColor", "stroke-width": 1.5 }));
+  c.append(s, ok ? "원자료 일치" : "원자료에서 바로 못 찾음"); return c;
+}
+// 핵심 숫자 값이 검산 목록의 어느 숫자와 같은지(띄어쓰기 · 「원」은 빼고 비교). 검산하지 않은 값이면 null
+function checkOf(value) {
+  const norm = t => String(t).replace(/\s|원/g, ""), v = norm(value);
+  const hit = checks.filter(c => v.includes(norm(c.text)));
+  return hit.length ? hit.every(c => c.ok) : null;
+}
+function figs(lines) {
+  const box = el("div", "figs");
+  for (const line of lines) {
+    const [label, value, note, ref] = line.split("|").map(x => x.trim());
+    if (!label || !value) continue;
+    const f = el("div", "fig"), s = el("span", "s"), n = parseInt(String(ref || "").replace(/\D/g, ""), 10);
+    f.append(el("span", "l", label), el("span", "v", value.replace(/(\d[억만])\s*원$/, "$1")));   // 「35억 6,000만 원」 → 원은 빼고 크게
+    if (n) s.append(cite(n, citeHandler && citeHandler(n)), " ");
+    if (note) s.append(note);
+    const ok = checkOf(value);
+    if (ok != null) { if (s.childNodes.length) s.append(el("br")); s.append(checkMark(ok)); }
+    if (s.childNodes.length) f.append(s);
+    box.append(f);
+  }
+  return box;
+}
+function gaps(lines) {
+  const box = el("div", "gap"), ul = el("ul");
+  box.append(el("b", null, "확인 못 한 것"));
+  for (const line of lines) { const t = line.replace(/^\s*[-*•]\s*/, "").trim(); if (t) ul.append(inline(el("li"), t)); }
+  box.append(ul); return box;
+}
 function md(text) {
   const box = el("div", "md"), lines = text.replace(/\r/g, "").split("\n"); let i = 0;
   while (i < lines.length) {
     const l = lines[i];
     if (!l.trim()) { i++; continue; }
+    const fence = l.match(FENCE);
+    if (fence) {
+      const body = []; i++;
+      while (i < lines.length && !FENCE_END.test(lines[i])) body.push(lines[i++]);
+      i++;
+      box.append(fence[1] === "숫자" ? figs(body) : gaps(body)); continue;
+    }
     const h = l.match(HD);
     if (h) { box.append(inline(el("h" + Math.min(h[1].length + 2, 6)), h[2])); i++; continue; }
     if (isTable(lines, i)) {
@@ -111,10 +153,12 @@ function md(text) {
     const m = l.match(LI);
     if (m) { const r = list(lines, i, depth(m[1])); box.append(r[0]); i = r[1]; continue; }
     const para = [];
-    while (i < lines.length && lines[i].trim() && !LI.test(lines[i]) && !HD.test(lines[i]) && !isTable(lines, i)) para.push(lines[i++]);
+    while (i < lines.length && lines[i].trim() && !LI.test(lines[i]) && !HD.test(lines[i]) && !isTable(lines, i) && !FENCE.test(lines[i])) para.push(lines[i++]);
     if (!para.length) para.push(lines[i++]);
     const p = el("p"); para.forEach((x, k) => { if (k) p.append(el("br")); inline(p, x); }); box.append(p);
   }
+  // 첫 단락은 결론 한 줄(엔진 프롬프트). 뒤에 더 있을 때만 크게
+  if (box.firstElementChild && box.firstElementChild.tagName === "P" && box.children.length > 1) box.firstElementChild.classList.add("lead");
   return box;
 }
 
@@ -427,22 +471,68 @@ function stampEl(item) {
   if (!item.blocks.length) ol.append(el("li", null, "데이터 조회 없이 답함"));
   for (const b of item.blocks) { const li = el("li"); li.append(cite(b.ref, () => openDrawer(item, b.ref)), el("span", null, b.title + " · " + sourceLine(b))); ol.append(li); }
   for (const line of (item.footer || "").split("\n")) if (/→ 오류/.test(line)) ol.append(el("li", "err", "조회 실패: " + line.replace(/^- /, "").replace(/\(.*\)\s*→ 오류:/, " ·")));
+  const v = item.verify;
+  if (v && v.checked) {
+    const miss = v.items.filter(x => !x.ok).map(x => x.text), li = el("li", "verify" + (miss.length ? " part" : ""));
+    const sv = svg("svg", { width: 14, height: 14, viewBox: "0 0 12 12", "aria-hidden": "true" });
+    sv.append(svg("path", { d: "M2 6.5l2.5 2.5L10 3.5", fill: "none", stroke: "currentColor", "stroke-width": 2 }));
+    const t = el("span", null, miss.length ? `답의 숫자 ${v.checked}개 중 ${v.matched}개를 원자료에서 그대로 찾았어요` : `답의 숫자 ${v.checked}개를 모두 원자료에서 그대로 찾았어요`);
+    if (miss.length) t.append(el("small", null, "바로 찾지 못한 숫자: " + miss.join(", ") + " (원자료로 계산한 값이거나 확인이 필요한 값)"));
+    li.append(sv, t); ol.append(li);
+  }
   s.append(ol); return s;
 }
+// 답이 다룬 단지 한 곳의 머리(카드 블록이 한 줄일 때만)
+function subjectEl(item) {
+  const b = item.blocks.find(x => x.kind === "card" && (x.rows || []).length === 1); if (!b) return null;
+  const r = b.rows[0], h = el("div", "subject"), nm = el("div", "nm"), chips = el("div", "chips");
+  nm.append(el("h2", null, r.complex_name || r.address || "-"), el("span", "ad", [r.address, r.road_addr].filter(Boolean).join(" · ")));
+  if (r.pnu) nm.append(el("span", "pnu", "PNU " + r.pnu + (r.land_parcel_count > 1 ? ` · 필지 ${r.land_parcel_count}개` : "")));
+  for (const t of [r.build_year && r.build_year + "년 준공", r.bld_households && nf.format(r.bld_households) + "세대", r.bld_floors_above && "최고 " + r.bld_floors_above + "층"]) if (t) chips.append(el("span", null, t));
+  h.append(nm, chips); return h;
+}
+// 이어서 볼 것: 엔진이 고른 조회를 모델 없이 바로 엶. 연 블록은 이 답의 근거에 새 번호로 붙음
+function nextEl(item) {
+  if (!(item.next || []).length) return null;
+  const box = el("div", "next"), row = el("div", "row");
+  box.append(el("span", "lbl", "이어서 볼 것 · 모델 요금 없이 바로 열림"));
+  for (const n of item.next) {
+    const b = btn("nx", n.label, async () => {
+      b.classList.add("busy");
+      const ref = Math.max(0, ...item.blocks.map(x => x.ref || 0)) + 1;
+      try {
+        const r = await fetch("/api/tool", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": token }, body: JSON.stringify({ tool: n.tool, args: n.args, ref }) });
+        const j = await r.json();
+        if (!r.ok) throw new Error(j.error);
+        item.blocks.push(j.block); item.next = item.next.filter(x => x !== n); saveItem();
+        renderAnswer(item, item.el); openDrawer(item, ref);
+      } catch (e) { b.classList.remove("busy"); alertLine(box, "열지 못했습니다: " + e.message); }
+    });
+    b.append(el("i", null, "바로")); row.append(b);
+  }
+  box.append(row); return box;
+}
 // 답 안에 바로 보일 블록: 카드 · 그래프 · 표는 앞에서 3개까지, 조문은 2개까지 짧게. 나머지는 근거 도장에서 서랍으로
-function inlinePicks(blocks) {
+// 단지 머리(subjectEl)를 그린 답이면 같은 내용인 단지 카드는 서랍에만 둠
+function inlinePicks(blocks, skipCard) {
   const out = [], docs = [];
-  blocks.forEach((b, i) => { if (b.kind === "document") { if (docs.length < 2) docs.push(i); } else if (out.length < 3 && (b.rows || b.features || []).length) out.push(i); });
+  blocks.forEach((b, i) => {
+    if (skipCard && b.kind === "card") return;
+    if (b.kind === "document") { if (docs.length < 2) docs.push(i); } else if (out.length < 3 && (b.rows || b.features || []).length) out.push(i);
+  });
   return [...out, ...docs];
 }
 function renderAnswer(item, box) {
   box.textContent = ""; item.el = box;
   if (item.error) { box.append(el("div", "err-msg", item.error)); return; }
+  const head = subjectEl(item); if (head) box.append(head);
   citeHandler = n => item.blocks.some(b => b.ref === n) ? () => openDrawer(item, n) : null;
+  checks = (item.verify && item.verify.items) || [];
   box.append(md(item.answer || ""));
-  citeHandler = null;
-  const inl = el("div", "inline a"); for (const i of inlinePicks(item.blocks)) inl.append(blockEl(item, i, true));
+  citeHandler = null; checks = [];
+  const inl = el("div", "inline a"); for (const i of inlinePicks(item.blocks, !!head)) inl.append(blockEl(item, i, true));
   if (inl.children.length) box.append(inl);
+  const nx = nextEl(item); if (nx) box.append(nx);
   box.append(stampEl(item));
 }
 
@@ -462,7 +552,8 @@ function renderConvs() {
     box.append(row);
   }
 }
-function showLog(on) { welcome.hidden = on; }
+// 처음 화면에서는 입력창이 제목 아래에, 대화가 시작되면 화면 아래로
+function showLog(on) { welcome.hidden = on; app.classList.toggle("home", !on); (on ? $("main") : $("slot")).append($("form")); }
 function addQuestion(text) { log.append(el("div", "q", text)); }
 function openConv(c) {
   cur = c; log.textContent = ""; showLog(true); $("topTitle").textContent = c.title;
@@ -503,7 +594,7 @@ async function send(text) {
         if (e.type === "start") conv.sid = e.sid;
         else if (e.type === "tool") { pending.classList.add("done"); pending = step(e.label); }
         else if (e.type === "block") { item.blocks.push(e.block); }
-        else if (e.type === "answer") { item.answer = e.answer; item.footer = e.footer; done = true; }
+        else if (e.type === "answer") { item.answer = e.answer; item.footer = e.footer; item.verify = e.verify; item.next = e.next; done = true; }
         else if (e.type === "error") { item.error = e.error; done = true; }
       }
     }
@@ -521,5 +612,5 @@ q.addEventListener("input", grow);
 q.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $("form").onsubmit = e => { e.preventDefault(); send(); };
 for (const [k, t] of EXAMPLES) { const b = btn("ex", null, () => send(t)); b.append(el("small", null, k), el("span", null, t)); $("examples").append(b); }
-renderConvs(); grow();
+renderConvs(); showLog(false); grow();
 if (wide()) app.classList.add("nodrawer");

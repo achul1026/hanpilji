@@ -14,7 +14,7 @@ from unittest import mock
 
 import psycopg
 
-from hanpilji.gpt import engine, llm, tools
+from hanpilji.gpt import blocks, engine, llm, tools, verify
 from hanpilji.gpt.llm import Reply
 
 DSN = os.environ.get("HANPILJI_TEST_DSN")
@@ -373,6 +373,36 @@ class Blocks(unittest.TestCase):
         self.assertEqual(latest["kind"], "table", "지표 목록(stat 없음)은 표")
 
 
+class Verify(unittest.TestCase):
+    CARD = {"tool": "q_property_card", "args": {"query": "도곡렉슬"}, "rows": [{
+        "complex_name": "도곡렉슬", "trade_count": 61, "trade_per_pyeong": 128227131, "trade_last_amount": 3560000000,
+        "trade_last_area": 84.92, "jeonse_ratio": 42.1, "land_area_m2": 138750.3, "bld_households": 3002,
+        "recent_deals": json.dumps([{"amount": 2630000000, "area_m2": 59.98}])}]}
+
+    def test_numbers_found_in_raw_rows(self):
+        text = ("평당 1억 2,823만 원, 최근 매매 35억 6,000만 원(84.92㎡), 61건, 3,002세대, 전세가율 42.1%, "
+                "토지 13만 8,750㎡, 59.98㎡ 26억 3,000만 원 [1]. 제7조, 2026년.")
+        got = verify.check(text, [self.CARD])
+        self.assertEqual(got["checked"], got["matched"], got["items"])
+        self.assertEqual(got["checked"], 9, "근거 번호 · 조문 번호 · 연도는 세지 않음")
+
+    def test_wrong_or_rounded_numbers(self):
+        got = verify.check("최근 매매 35억 9,000만 원, 대략 36억 원, 평당 1억 3,000만 원", [self.CARD])
+        self.assertEqual([i["ok"] for i in got["items"]], [False, True, False], "억까지만 쓰면 억 자리 반올림으로 봄")
+
+    def test_no_results_no_check(self):
+        self.assertEqual(verify.check("35억 원", [])["checked"], 0)
+
+    def test_next_steps_skip_called_tools(self):
+        steps = blocks.next_steps([self.CARD, {"tool": "q_parcel_map", "args": {"query": "도곡렉슬"}, "rows": []}])
+        self.assertEqual([s["tool"] for s in steps], ["q_price_trend", "q_deal_list", "q_land_price_trend",
+                                                     "q_price_vs_official"])
+        self.assertEqual(steps[0]["args"], {"name": "도곡렉슬"})
+        for s in steps:
+            tools.check_args(s["tool"], s["args"])   # 도구 형식에 맞는 인자
+        self.assertEqual(blocks.next_steps([{"tool": "q_law_search", "args": {"query": "5%"}, "rows": []}]), [])
+
+
 class Web(unittest.TestCase):
     """웹 채팅 서버를 실제 포트로 띄워 요청 처리(키 · DB 없이: 엔진을 가짜로 바꿈)."""
 
@@ -464,6 +494,8 @@ class Web(unittest.TestCase):
         self.assertEqual(events[1]["label"], "실거래가에서 시세를 셈하는 중")
         self.assertEqual((events[2]["block"]["ref"], events[2]["block"]["kind"]), (1, "table"))
         self.assertEqual(events[3]["answer"], "답 [1]")
+        self.assertEqual(events[3]["verify"]["checked"], 0)
+        self.assertEqual(events[3]["next"][0]["tool"], "q_property_card", "다룬 단지로 이어서 볼 것")
         code, got = self.post({"q": "또"})
         self.assertEqual(got["blocks"][0]["title"], "도곡렉슬 84㎡ 면적별 시세")
 
@@ -485,7 +517,10 @@ class Web(unittest.TestCase):
         self.assertEqual(code, 200)
         self.assertEqual(run.call_args.args[1:], ("q_complex_price", {"name": "도곡렉슬", "months": 36}))
         self.assertEqual(got["block"]["ref"], 2)
-        self.assertEqual(tool({"tool": "q_law_search", "args": {"query": "x"}})[0], 400, "기간 없는 도구는 다시 조회 안 함")
+        self.assertEqual(tool({"tool": "q_law_search", "args": {"query": "x"}})[0], 400, "이어서 볼 것에도 없는 도구는 안 됨")
+        with mock.patch.object(tools, "run", return_value={**PRICE_OUT, "tool": "q_parcel_map"}) as run:
+            self.assertEqual(tool({"tool": "q_parcel_map", "args": {"query": "도곡렉슬"}, "ref": 3})[0], 200,
+                             "이어서 볼 것은 모델 없이 바로 엶")
         self.assertEqual(tool({"tool": "q_complex_price", "args": {"name": "a", "sql": "x"}})[0], 400, "인자 확인")
 
     def test_token_and_rate_limit(self):

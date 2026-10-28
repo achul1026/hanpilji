@@ -186,3 +186,38 @@ def block(out):
 
 def blocks(results):
     return [block(o) for o in results]
+
+
+# 답 아래 「이어서 볼 것」. 모델 없이 마트 함수 하나만 부르는 것(요금 없음)이라 /api/tool로 바로 엶
+FOLLOW_TOOLS = {"q_property_card", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_parcel_map",
+                "q_deal_list"}
+
+
+def _subject(results):
+    """답이 다룬 단지 하나(단지명). 카드 · 시세 결과에서 찾고, 없으면 None."""
+    for out in results:
+        rows = out.get("rows") or []
+        if out["tool"] == "q_property_card" and len(rows) == 1 and rows[0].get("complex_name"):
+            return rows[0]["complex_name"]
+    for out in results:
+        name = (out.get("args") or {}).get("name") or (out.get("args") or {}).get("query")
+        if out["tool"] in ("q_complex_price", "q_deal_list", "q_price_trend", "q_parcel_map") and name:
+            return str(name)
+    return None
+
+
+def next_steps(results, limit=4):
+    """답에서 다룬 단지로 바로 열 수 있는 다음 조회 몇 개. [{"label", "tool", "args"}]"""
+    name = _subject(results)
+    if not name:
+        return []
+    done = {out["tool"] for out in results}
+    steps = [
+        ("q_property_card", f"{name} 종합 카드", {"query": name}),
+        ("q_price_trend", f"{name} 월별 시세 추이", {"name": name}),
+        ("q_deal_list", f"{name} 최근 실거래 목록", {"name": name}),
+        ("q_land_price_trend", f"{name} 공시지가 추이", {"query": name}),
+        ("q_price_vs_official", "공시지가 대비 실거래가", {"query": name}),
+        ("q_parcel_map", f"{name} 지적도", {"query": name}),
+    ]
+    return [{"label": label, "tool": tool, "args": args} for tool, label, args in steps if tool not in done][:limit]
