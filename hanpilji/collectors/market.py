@@ -2,7 +2,7 @@
 
     ECOS_KEY=... RONE_KEY=... KOSIS_KEY=... python -m hanpilji.collectors.market [--only ecos] [--stat base_rate] [--months 120]
     python -m hanpilji.collectors.market --find rone 매매가격지수     # 통계표 찾기(표 번호 확인용, DB 안 씀)
-    python -m hanpilji.collectors.market --items ecos 121Y006        # ECOS 통계표의 항목 코드 보기
+    python -m hanpilji.collectors.market --items 121Y006             # ECOS 통계표의 항목 코드 보기
 
 세 곳:
   한국은행 ECOS(ecos.bok.or.kr): 기준금리 · 주택담보대출 금리 · 국고채 3년 · 소비자물가. 키 ECOS_KEY
@@ -10,9 +10,10 @@
   KOSIS(kosis.kr): 주민등록 인구 · 세대(강남구 · 서울 · 전국). 키 KOSIS_KEY
 키가 없는 곳은 건너뛰고 나머지만 받음. 지표 하나가 실패해도 나머지는 계속.
 
-응답 모양 · 표 번호 · 항목 코드는 각 기관 개발 안내서 기준이고 아직 실제 응답으로 확인하지 못함(2026-10-28, 클라우드에서
-세 곳 모두 네트워크 정책에 막혀 있었음). 첫 실행에서 --find · --items로 확인하고 틀린 번호는 SERIES나
-config.toml [market]에서 고칠 것. R-ONE은 표 이름으로 표 번호를 찾음(이름이 딱 하나만 맞아야 받음).
+표 번호 · 항목 코드 · 응답 모양은 2026-10-28 첫 실제 수집에서 확인함(tests/fixtures/*_real.json).
+번호가 바뀌면 --find · --items로 찾아 SERIES나 config.toml [market]에서 고칠 것.
+R-ONE은 표 이름으로 표 번호를 찾음(이름이 딱 하나만 맞아야 받음, config.toml [market.rone]에 정하면 그 번호).
+KOSIS는 한 번에 40,000셀까지라 지역 코드(objL1)를 정해서 받음.
 """
 import argparse
 import datetime
@@ -27,6 +28,8 @@ from hanpilji import ingest
 REGION = {"전국": "0000000000", "서울": "1100000000", "서울특별시": "1100000000", "강남구": "1168000000"}
 KEYS = {"ecos": "ECOS_KEY", "rone": "RONE_KEY", "kosis": "KOSIS_KEY"}
 PAGE = 1000
+# R-ONE 지역 분류 번호(CLS_ID). 2026-10-28 매매 · 전세 아파트 표에서 확인(두 표가 같은 번호를 씀)
+RONE_CLS = {"전국": 500001, "서울": 500008, "강남구": 530038}
 
 # 지표 목록. id는 한필지 이름(fact_market.stat_id), regions는 받을 지역 이름(응답의 지역 이름과 맞춤)
 SERIES = [
@@ -39,16 +42,18 @@ SERIES = [
     {"id": "cpi", "src": "ecos", "name": "소비자물가지수", "unit": "2020=100", "cycle": "M",
      "ecos": {"stat": "901Y009", "item": "0"}, "note": "물가 상승률은 전년 같은 달 대비(yoy_pct)로 읽음"},
     {"id": "apt_sale_idx", "src": "rone", "name": "아파트 매매가격지수(월간)", "unit": "지수", "cycle": "M",
-     "rone": {"table": r"\(월\).*매매가격지수.*아파트|아파트.*\(월\).*매매가격지수", "cycle": "MM"},
+     "rone": {"table": r"^\(월\) 매매가격지수_아파트$", "cycle": "MM", "cls": RONE_CLS},
      "regions": ["전국", "서울", "강남구"], "note": "한국부동산원 전국주택가격동향조사. 기준 시점 지수=100"},
     {"id": "apt_jeonse_idx", "src": "rone", "name": "아파트 전세가격지수(월간)", "unit": "지수", "cycle": "M",
-     "rone": {"table": r"\(월\).*전세가격지수.*아파트|아파트.*\(월\).*전세가격지수", "cycle": "MM"},
+     "rone": {"table": r"^\(월\) 전세가격지수_아파트$", "cycle": "MM", "cls": RONE_CLS},
      "regions": ["전국", "서울", "강남구"], "note": "한국부동산원 전국주택가격동향조사. 기준 시점 지수=100"},
     {"id": "population", "src": "kosis", "name": "주민등록 인구", "unit": "명", "cycle": "M",
-     "kosis": {"org": "101", "tbl": "DT_1B040A3", "itm": "T20"}, "regions": ["전국", "서울특별시", "강남구"],
+     "kosis": {"org": "101", "tbl": "DT_1B040A3", "itm": "T20", "objL1": "00 11 11680"},
+     "regions": ["전국", "서울특별시", "강남구"],
      "note": "행정안전부 주민등록인구현황(월말)"},
     {"id": "households", "src": "kosis", "name": "주민등록 세대 수", "unit": "세대", "cycle": "M",
-     "kosis": {"org": "101", "tbl": "DT_1B040B3", "itm": "T1"}, "regions": ["전국", "서울특별시", "강남구"],
+     "kosis": {"org": "101", "tbl": "DT_1B040B3", "itm": "T1", "objL1": "00 11 11680"},
+     "regions": ["전국", "서울특별시", "강남구"],
      "note": "행정안전부 주민등록세대현황(월말)"},
 ]
 BY_ID = {s["id"]: s for s in SERIES}
@@ -146,8 +151,8 @@ def rone_points(rows, s):
 
 def kosis_url(key, s, p_from, p_to):
     k = s["kosis"]
-    q = {"method": "getList", "apiKey": key, "itmId": k["itm"] + " ", "objL1": "ALL", "format": "json", "jsonVD": "Y",
-         "prdSe": s["cycle"], "startPrdDe": p_from, "endPrdDe": p_to, "orgId": k["org"], "tblId": k["tbl"]}
+    q = {"method": "getList", "apiKey": key, "itmId": k["itm"] + " ", "objL1": k.get("objL1", "ALL") + " ", "format": "json",
+         "jsonVD": "Y", "prdSe": s["cycle"], "startPrdDe": p_from, "endPrdDe": p_to, "orgId": k["org"], "tblId": k["tbl"]}
     return f"https://kosis.kr/openapi/Param/statisticsParameterData.do?{urllib.parse.urlencode(q)}"
 
 
@@ -238,14 +243,16 @@ def collect(f, s, months, today, overrides):
         points = list(ecos_points(raws, s))
     elif s["src"] == "rone":
         tbl = rone_table(f, key, s, overrides.get(s["id"]))
-        page = 1
-        while True:   # 기간 조건 없이 표 전체를 쪽마다 받고 여기서 지역 · 기간을 고름
-            rows, total = rone_parse(f.get("rone", f"{s['id']}_p{page}.json",
-                                           rone_url(key, "SttsApiTblData", page, STATBL_ID=tbl, DTACYCLE_CD=s["rone"]["cycle"])))
-            raws += rows
-            if not rows or page * PAGE >= total:
-                break
-            page += 1
+        for region in s["regions"]:   # 지역(CLS_ID) · 기간을 걸어 받음. 전 지역을 받으면 120개월에 27쪽
+            page = 1
+            while True:
+                rows, total = rone_parse(f.get("rone", f"{s['id']}_{s['rone']['cls'][region]}_p{page}.json",
+                                               rone_url(key, "SttsApiTblData", page, STATBL_ID=tbl, DTACYCLE_CD=s["rone"]["cycle"],
+                                                        CLS_ID=s["rone"]["cls"][region], START_WRTTIME=p_from, END_WRTTIME=p_to)))
+                raws += rows
+                if not rows or page * PAGE >= total:
+                    break
+                page += 1
         points = [p for p in rone_points(raws, s) if p_from <= p[1] <= p_to]
     else:
         rows, _ = kosis_parse(f.get("kosis", f"{s['id']}.json", kosis_url(key, s, p_from, p_to)))

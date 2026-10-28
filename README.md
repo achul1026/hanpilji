@@ -79,7 +79,7 @@ python -m hanpilji.collectors.vworld --from-dir vworld_raw                     #
 # 시장 · 거시 지표 (키: ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀) → core.fact_market
 python -m hanpilji.collectors.market                  # 금리 · 물가(ECOS) · 아파트 가격지수(R-ONE) · 인구 · 세대(KOSIS) 10년
 python -m hanpilji.collectors.market --find rone 매매가격지수   # 표 번호 확인
-python -m hanpilji.collectors.market --items ecos 121Y006       # ECOS 항목 코드 확인
+python -m hanpilji.collectors.market --items 121Y006            # ECOS 항목 코드 확인
 ```
 
 시험:
@@ -321,6 +321,27 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 
 </details>
 
+**지표 실측: ECOS · R-ONE · KOSIS (2026-10-28)**
+
+| 지표 | 기관 · 표 | 지역 | 기간 | 값 |
+|---|---|---|---|---|
+| 기준금리 · 국고채 3년 · 소비자물가 | ECOS 722Y001 · 721Y001 · 901Y009 | 전국 | 2016-11 ~ 2026-09 | 각 119개월 |
+| 주택담보대출 금리(신규) | ECOS 121Y006 | 전국 | 2016-11 ~ 2026-08 | 118개월 (한 달 늦게 나옴) |
+| 아파트 매매 · 전세 가격지수(월간) | R-ONE A_2024_00045 · A_2024_00050 | 전국 · 서울 · 강남구 | 2016-11 ~ 2026-09 | 각 357개 |
+| 주민등록 인구 · 세대 | KOSIS DT_1B040A3 · DT_1B040B3 | 전국 · 서울 · 강남구 | 2016-11 ~ 2026-09 | 각 357개 |
+
+지표 8개 · 2,975개 값, 실패 0. 한 번 다 받는 데 호출 14번(ECOS 4 · R-ONE 표 목록 2 + 값 6 · KOSIS 2).
+
+<details>
+<summary><b>지표 응답에서 알게 된 것</b></summary>
+
+- ECOS 표 번호 · 항목 코드(기준금리 `0101000`, 주담대 `BECBLA0302`, 국고채 3년 `5020000`, 소비자물가 총지수 `0`)는 처음 정한 값이 모두 맞았습니다.
+- R-ONE에서 「(월) 매매가격지수_아파트」를 넓게 찾으면 규모별 · 연령별 · 계절조정 표까지 4개가 걸려서 표 이름을 정확히 맞춥니다. 표 전체를 받으면 2003년부터 전 지역(226곳)이 와서 10년에 27쪽이므로, 지역 번호(`CLS_ID`: 전국 500001 · 서울 500008 · 강남구 530038)와 기간(`START_WRTTIME` · `END_WRTTIME`)을 걸어 지역마다 1번씩 받습니다.
+- KOSIS는 한 번에 40,000셀까지만 줍니다(넘으면 `err 31`). 지역을 전부(`ALL`) 물으면 10년에 넘어서 지역 코드(`00` 전국 · `11` 서울 · `11680` 강남구)를 정해 받습니다.
+- 오류 응답 모양(ECOS `INFO-100` · `INFO-200`, R-ONE `ERROR-290`, KOSIS `err 11` · `30`)은 문서와 같았습니다. 시험용 응답은 모두 실제 응답을 줄인 것입니다(`tests/fixtures/*_real.json`).
+
+</details>
+
 <details>
 <summary><b>실제 응답에서 알게 된 것</b></summary>
 
@@ -368,7 +389,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [ ] 단지명 · 동 이름으로 시군구를 찾는 도구(시범 구가 늘어나면)
 - [x] Supabase(서울)에 백업 복원 · 클라우드에서 HTTPS로 GPT · 카드 읽기 (2026-10-27)
 - [x] 지표 분석: 실거래 월별 추세 · 공시지가 연도별 추세 · 공시지가 대비 실거래가, 지표 수집기(ECOS · R-ONE · KOSIS) (2026-10-28)
-- [ ] ECOS · R-ONE · KOSIS 키 발급 · 클라우드 허용 도메인 추가 → 첫 실제 응답으로 표 번호 · 항목 코드 확인
+- [x] ECOS · R-ONE · KOSIS 키 발급 · 클라우드 허용 도메인 추가 → 첫 실제 수집으로 표 번호 · 항목 코드 확인 (2026-10-28)
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더
