@@ -1,9 +1,11 @@
--- 1~2단계: 공공데이터포털 API(인증키 필요) — 행위제한 API · 아파트 매매 · 전월세 실거래가
+-- 1~2단계: 공공데이터포털 API(인증키 필요) — 행위제한 API · 아파트 · 오피스텔 매매 · 전월세 실거래가
 
 INSERT INTO ops.ingest_source (source_id, name, operator, method, daily_limit, encoding, cycle, license, url) VALUES
  ('dg_luinfo',     '토지이용규제정보서비스(행위제한)',  '국토교통부', 'api', 1000,  'EUC-KR', '매월',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15058410/openapi.do'),
  ('dg_apt_trade',  '아파트 매매 실거래가 공개 자료',     '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126469/openapi.do'),
- ('dg_apt_rent',   '아파트 전월세 실거래가 공개 자료',   '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126474/openapi.do')
+ ('dg_apt_rent',   '아파트 전월세 실거래가 공개 자료',   '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126474/openapi.do'),
+ ('dg_offi_trade', '오피스텔 매매 실거래가 자료',        '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126464/openapi.do'),
+ ('dg_offi_rent',  '오피스텔 전월세 실거래가 자료',      '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126475/openapi.do')
 ON CONFLICT (source_id) DO UPDATE SET encoding = excluded.encoding;
 
 -- 실거래가 응답 한 건 = 한 줄. 원본 모양 그대로(jsonb) 받고 core로 옮길 때 풂

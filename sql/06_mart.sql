@@ -113,7 +113,7 @@ RETURNS TABLE (complex_name text, emd text, area_m2 numeric,
                period_from date, period_to date, source text, asof date, row_total bigint)
 LANGUAGE sql STABLE AS $$
     WITH c AS (
-        SELECT x.complex_id, x.name, r.emd
+        SELECT x.complex_id, x.name, r.emd, x.kind
         FROM core.dim_complex x
         LEFT JOIN core.dim_region r ON r.lawd_cd = x.lawd_cd
         WHERE left(x.lawd_cd, 5) = p_sigungu
@@ -154,7 +154,7 @@ LANGUAGE sql STABLE AS $$
            coalesce(g.jn, 0), g.avg_dep, g.j_m2,
            CASE WHEN g.avg_amt > 0 AND g.avg_dep IS NOT NULL THEN round(g.avg_dep::numeric / g.avg_amt * 100, 1) END,
            win.d_from, win.d_to,
-           '국토교통부 아파트 매매 · 전월세 실거래가', g.asof,
+           '국토교통부 ' || c.kind || ' 매매 · 전월세 실거래가', g.asof,
            count(*) OVER ()
     FROM g JOIN c USING (complex_id), win
     ORDER BY c.name, g.area_m2
@@ -186,12 +186,12 @@ LANGUAGE sql STABLE AS $$
         SELECT (current_date - make_interval(months => p_months))::date AS d_from, current_date AS d_to
     ), d AS (
         SELECT c.name, '매매'::text AS kind, t.contract_date, t.area, t.floor, t.amount, NULL::bigint AS monthly,
-               NULL::text AS ckind, '국토교통부 아파트 매매 실거래가'::text AS src, t.asof
+               NULL::text AS ckind, t.source AS src, t.asof
         FROM core.fact_deal t JOIN c USING (complex_id)
         WHERE p_kind = '매매' AND NOT t.is_cancelled
         UNION ALL
         SELECT c.name, CASE WHEN e.monthly_rent = 0 THEN '전세' ELSE '월세' END, e.contract_date, e.area, e.floor,
-               e.deposit, e.monthly_rent, e.contract_kind, '국토교통부 아파트 전월세 실거래가', e.asof
+               e.deposit, e.monthly_rent, e.contract_kind, e.source, e.asof
         FROM core.fact_rent e JOIN c USING (complex_id)
         WHERE (p_kind = '전월세' OR (p_kind = '전세' AND e.monthly_rent = 0) OR (p_kind = '월세' AND e.monthly_rent > 0))
     )
@@ -225,13 +225,13 @@ LANGUAGE sql STABLE AS $$
         SELECT x.complex_id, x.name, (SELECT max(b.build_year) FROM core.fact_deal b
                                       WHERE b.complex_id = x.complex_id)::int AS build_year
         FROM core.dim_complex x
-        WHERE left(x.lawd_cd, 5) = p_sigungu
+        WHERE left(x.lawd_cd, 5) = p_sigungu AND x.kind = '아파트'   -- 순위는 아파트끼리만(오피스텔은 단가 · 전세가율이 달라 섞지 않음)
     ), t AS (
         SELECT d.complex_id, count(*) AS n, avg(d.amount)::bigint AS avg_amt,
                (sum(d.amount) / sum(d.area))::bigint AS per_m2, max(d.asof) AS asof
         FROM core.fact_deal d, win
         WHERE NOT d.is_cancelled AND d.contract_date BETWEEN win.d_from AND win.d_to AND left(d.lawd_cd, 5) = p_sigungu
-          AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
+          AND d.deal_type = '아파트' AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
         GROUP BY 1
     ), r AS (
         SELECT e.complex_id,
@@ -242,7 +242,7 @@ LANGUAGE sql STABLE AS $$
                count(*) FILTER (WHERE e.monthly_rent > 0) AS wn, max(e.asof) AS asof
         FROM core.fact_rent e, win
         WHERE e.contract_date BETWEEN win.d_from AND win.d_to AND left(e.lawd_cd, 5) = p_sigungu
-          AND (p_area IS NULL OR abs(e.area - p_area) <= p_area_tol)
+          AND e.rent_type = '아파트' AND (p_area IS NULL OR abs(e.area - p_area) <= p_area_tol)
         GROUP BY 1
     ), g AS (
         SELECT c.name, c.build_year, coalesce(t.n, 0) AS tn, t.avg_amt, t.per_m2,

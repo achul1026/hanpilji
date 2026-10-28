@@ -1,12 +1,16 @@
-"""국토교통부 아파트 매매 · 전월세 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
+"""국토교통부 아파트 · 오피스텔 매매 · 전월세 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
 
-    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent] [--sigungu 11680]
+    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent|offi_trade|offi_rent]
+                                                          [--sigungu 11680]
 
 시군구 x 계약월 x 종류마다 한 트랜잭션. 끝난 달은 커서에 남겨 다시 받지 않되,
 최근 몇 달(config [rtms] refetch_months)은 신고 · 해제가 늦게 붙으므로 매번 다시 받음.
 응답 항목 이름은 실제 응답으로 확인함(강남구 36개월, 2026-10-27). 알아 둘 것:
 - 매매(기본 자료)에는 단지 일련번호(aptSeq) · 법정동 코드(umdCd)가 없음. 전월세에는 aptSeq가 있음.
 - 전월세에는 해제 여부 항목이 없음(매매에만 cdealType=「O」). 빈 값은 공백 한 칸으로 옴.
+오피스텔(매매 15126464 · 전월세 15126475)은 아파트와 항목이 같고 단지명이 offiNm, 동(aptDong) · 도로명(roadnm)이 없음
+(공공데이터포털 명세로 맞춤, 실제 응답은 활용신청 뒤 확인). 거래 종류(deal_type · rent_type)와 단지 종류(dim_complex.kind)에
+「오피스텔」로 넣고, 단지 번호는 「rtms-offi:」로 시작해 같은 지번의 아파트와 섞이지 않음.
 """
 import argparse
 import datetime
@@ -20,11 +24,17 @@ import psycopg
 from hanpilji import config as config_mod
 from hanpilji import datagokr, ingest
 
+# base: 매매(trade) · 전월세(rent) 중 어느 쪽 표에 넣는지. source: ops 실행 기록 · stg 원본의 수집처 이름
 KINDS = {
-    "trade": {"source": "dg_apt_trade", "path": "RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade", "label": "아파트"},
-    "rent": {"source": "dg_apt_rent", "path": "RTMSDataSvcAptRent/getRTMSDataSvcAptRent", "label": "아파트"},
+    "trade": {"source": "dg_apt_trade", "path": "RTMSDataSvcAptTrade/getRTMSDataSvcAptTrade", "label": "아파트",
+              "base": "trade", "src": "국토교통부 아파트 매매 실거래가"},
+    "rent": {"source": "dg_apt_rent", "path": "RTMSDataSvcAptRent/getRTMSDataSvcAptRent", "label": "아파트",
+             "base": "rent", "src": "국토교통부 아파트 전월세 실거래가"},
+    "offi_trade": {"source": "dg_offi_trade", "path": "RTMSDataSvcOffiTrade/getRTMSDataSvcOffiTrade",
+                   "label": "오피스텔", "base": "trade", "src": "국토교통부 오피스텔 매매 실거래가"},
+    "offi_rent": {"source": "dg_offi_rent", "path": "RTMSDataSvcOffiRent/getRTMSDataSvcOffiRent",
+                  "label": "오피스텔", "base": "rent", "src": "국토교통부 오피스텔 전월세 실거래가"},
 }
-SOURCE_LABEL = {"trade": "국토교통부 아파트 매매 실거래가", "rent": "국토교통부 아파트 전월세 실거래가"}
 PAGE_ROWS = 1000
 
 
@@ -52,6 +62,14 @@ def contract_date(row):
     return datetime.date(int(_s(row, "dealYear")), int(_s(row, "dealMonth")), int(_s(row, "dealDay")))
 
 
+def is_offi(row):
+    return "offiNm" in row
+
+
+def complex_name(row):
+    return _s(row, "offiNm") if is_offi(row) else _s(row, "aptNm")
+
+
 def complex_name_key(name):
     """단지명 비교용: 띄어쓰기와 끝 괄호를 뺌."""
     return re.sub(r"\([^()]*\)$", "", name.replace(" ", ""))
@@ -63,15 +81,18 @@ def complex_key(row):
     매매 응답에 aptSeq가 없어서 이렇게 묶음. 강남구 36개월 전월세로 보면 aptSeq와 (동, 지번, 단지명)이
     정확히 1:1이라(700개 단지, 한 단지가 지번으로 갈리거나 두 단지가 합쳐진 경우 0건) 같은 묶음이 됨.
     단, 매매와 전월세가 이름 끝 괄호만 다르게 줄 때가 있어(「강남브리즈힐(토지임대부아파트)」 · 「강남브리즈힐」)
-    끝 괄호는 빼고 비교함. 빼도 다른 단지끼리 합쳐지는 경우는 0건이었음."""
-    parts = [_s(row, "sggCd"), _s(row, "umdNm"), _s(row, "jibun"), complex_name_key(_s(row, "aptNm"))]
-    return "rtms:" + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+    끝 괄호는 빼고 비교함. 빼도 다른 단지끼리 합쳐지는 경우는 0건이었음.
+    오피스텔은 앞머리를 달리 해(rtms-offi:) 같은 지번 · 같은 이름의 주상복합 아파트와 다른 단지가 됨."""
+    parts = [_s(row, "sggCd"), _s(row, "umdNm"), _s(row, "jibun"), complex_name_key(complex_name(row))]
+    return ("rtms-offi:" if is_offi(row) else "rtms:") + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
 def row_key(kind, row):
-    """재수집해도 같은 값. 해제 여부처럼 나중에 바뀌는 항목은 넣지 않음."""
+    """재수집해도 같은 값. 해제 여부처럼 나중에 바뀌는 항목은 넣지 않음. kind는 trade · rent(아파트 값은 예전 그대로)."""
     keys = ["sggCd", "umdNm", "jibun", "aptNm", "aptDong", "dealYear", "dealMonth", "dealDay", "excluUseAr", "floor"]
     keys += ["dealAmount"] if kind == "trade" else ["deposit", "monthlyRent", "contractTerm", "contractType"]
+    if is_offi(row):
+        keys.append("offiNm")
     return hashlib.sha1("|".join(_s(row, k) for k in keys).encode()).hexdigest()
 
 
@@ -131,7 +152,7 @@ def to_rent(row, sigungu):
 
 # ── 적재 ──
 
-def _ensure_dims(cur, lawd, row, asof):
+def _ensure_dims(cur, lawd, row, asof, label):
     cur.execute(
         """INSERT INTO core.dim_region (lawd_cd, emd, source, asof) VALUES (%s, %s, %s, %s)
            ON CONFLICT (lawd_cd) DO NOTHING""",
@@ -143,15 +164,15 @@ def _ensure_dims(cur, lawd, row, asof):
                SELECT coalesce((SELECT g.lawd_cd FROM core.dim_region g
                                 WHERE left(g.lawd_cd, 5) = left(%(lawd)s, 5) AND g.emd = %(emd)s LIMIT 1),
                                %(lawd)s) AS lawd)
-           INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, road_addr, build_year, pnu, source, asof)
+           INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, road_addr, build_year, pnu, kind, source, asof)
            SELECT %(id)s, %(name)s, v.lawd, %(jibun)s, %(road)s, %(year)s, core.make_pnu(v.lawd, %(jibun)s),
-                  %(src)s, %(asof)s FROM v
+                  %(kind)s, %(src)s, %(asof)s FROM v
            ON CONFLICT (complex_id) DO UPDATE SET asof = excluded.asof, lawd_cd = excluded.lawd_cd,
                jibun = coalesce(excluded.jibun, core.dim_complex.jibun),
                pnu = coalesce(excluded.pnu, core.dim_complex.pnu),
                road_addr = coalesce(excluded.road_addr, core.dim_complex.road_addr),
                build_year = greatest(excluded.build_year, core.dim_complex.build_year)""",
-        {"id": complex_key(row), "name": _s(row, "aptNm") or "(이름 없음)", "lawd": lawd, "emd": _s(row, "umdNm"),
+        {"id": complex_key(row), "name": complex_name(row) or "(이름 없음)", "kind": label, "lawd": lawd, "emd": _s(row, "umdNm"),
          "jibun": _s(row, "jibun") or None, "road": _s(row, "roadnm") or None, "year": _int(_s(row, "buildYear")),
          "src": "국토교통부 실거래가(시군구 · 동 · 지번 · 단지명)", "asof": asof},
     )
@@ -159,8 +180,7 @@ def _ensure_dims(cur, lawd, row, asof):
 
 def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
     """한 달 치를 stg에 갈아 끼우고 core에 올림. 반환: (적재, 제외)."""
-    src = KINDS[kind]["source"]
-    label = KINDS[kind]["label"]
+    src, label, base, src_label = (KINDS[kind][k] for k in ("source", "label", "base", "src"))
     loaded = rejected = 0
     seen, keys = {}, []
     # 파이프라인: 줄마다 응답을 기다리지 않고 몰아 보냄. 원격 DB(Supabase)에서는 왕복 수천 번이 몇 번으로 줄어듦
@@ -169,25 +189,25 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                     (src, sigungu, ym))
         for row in rows:
             # 모든 항목이 같은 거래가 한 달에 여러 건이면 「-1」 「-2」를 붙여 따로 셈(같은 응답이면 같은 번호)
-            base = row_key(kind, row)
-            n = seen.get(base, 0)
-            seen[base] = n + 1
-            key = base if n == 0 else f"{base}-{n}"
+            rk = row_key(base, row)
+            n = seen.get(rk, 0)
+            seen[rk] = n + 1
+            key = rk if n == 0 else f"{rk}-{n}"
             cur.execute(
                 """INSERT INTO stg.rtms_raw (run_id, source_id, sigungu_cd, deal_ym, row_key, row_data)
                    VALUES (%s, %s, %s, %s, %s, %s)
                    ON CONFLICT (source_id, row_key) DO UPDATE SET run_id = excluded.run_id, row_data = excluded.row_data""",
                 (run_id, src, sigungu, ym, key, json.dumps(row, ensure_ascii=False)),
             )
-            v, why = (to_deal if kind == "trade" else to_rent)(row, sigungu)
+            v, why = (to_deal if base == "trade" else to_rent)(row, sigungu)
             if v is None:
-                ingest.reject(conn, run_id, src, "core.fact_deal" if kind == "trade" else "core.fact_rent", why, row)
+                ingest.reject(conn, run_id, src, "core.fact_deal" if base == "trade" else "core.fact_rent", why, row)
                 rejected += 1
                 continue
-            v["deal_id" if kind == "trade" else "rent_id"] = key
+            v["deal_id" if base == "trade" else "rent_id"] = key
             keys.append(key)
-            _ensure_dims(cur, v["lawd_cd"], row, asof)
-            if kind == "trade":
+            _ensure_dims(cur, v["lawd_cd"], row, asof, label)
+            if base == "trade":
                 cur.execute(
                     """INSERT INTO core.fact_deal (deal_id, lawd_cd, complex_id, deal_type, contract_date, amount, area,
                            floor, build_year, is_cancelled, match_method, source, asof)
@@ -195,7 +215,7 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                                %(floor)s, %(build_year)s, %(is_cancelled)s, '시군구·동·지번·단지명', %(src)s, %(asof)s)
                        ON CONFLICT (deal_id) DO UPDATE SET lawd_cd = excluded.lawd_cd, complex_id = excluded.complex_id,
                            build_year = excluded.build_year, is_cancelled = excluded.is_cancelled, asof = excluded.asof""",
-                    {**v, "t": label, "src": SOURCE_LABEL["trade"], "asof": asof},
+                    {**v, "t": label, "src": src_label, "asof": asof},
                 )
             else:
                 cur.execute(
@@ -205,24 +225,24 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                                %(deposit)s, %(monthly_rent)s, %(contract_kind)s, %(renewal)s, %(src)s, %(asof)s)
                        ON CONFLICT (rent_id) DO UPDATE SET lawd_cd = excluded.lawd_cd, complex_id = excluded.complex_id,
                            renewal = excluded.renewal, asof = excluded.asof""",
-                    {**v, "t": label, "src": SOURCE_LABEL["rent"], "asof": asof},
+                    {**v, "t": label, "src": src_label, "asof": asof},
                 )
             loaded += 1
         # 이번 응답에 없는 그 달 거래(정정 · 삭제된 신고)는 core에서도 뺌
         y, m = int(ym[:4]), int(ym[4:])
         first = datetime.date(y, m, 1)
         nxt = datetime.date(y + (m == 12), m % 12 + 1, 1)
-        if kind == "trade":
+        if base == "trade":
             cur.execute(
                 """DELETE FROM core.fact_deal WHERE left(lawd_cd, 5) = %s AND contract_date >= %s AND contract_date < %s
                    AND source = %s AND NOT (deal_id = ANY(%s))""",
-                (sigungu, first, nxt, SOURCE_LABEL[kind], keys),
+                (sigungu, first, nxt, src_label, keys),
             )
         else:
             cur.execute(
                 """DELETE FROM core.fact_rent WHERE left(lawd_cd, 5) = %s AND contract_date >= %s AND contract_date < %s
                    AND source = %s AND NOT (rent_id = ANY(%s))""",
-                (sigungu, first, nxt, SOURCE_LABEL[kind], keys),
+                (sigungu, first, nxt, src_label, keys),
             )
     return loaded, rejected
 
@@ -257,14 +277,14 @@ def main(argv=None, fetch=datagokr.fetch):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--months", type=int, help="몇 개월 치(기본: config [rtms] months)")
-    ap.add_argument("--only", choices=list(KINDS), action="append")
+    ap.add_argument("--only", choices=list(KINDS), action="append", help="기본: config [rtms] kinds, 없으면 전부")
     ap.add_argument("--sigungu", action="append", help="시군구 5자리(기본: config [pilot])")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     rcfg = cfg.get("rtms", {})
     months = months_back(args.months or rcfg.get("months", 36))
     refetch = set(months[: rcfg.get("refetch_months", 3)])
-    kinds = args.only or list(KINDS)
+    kinds = args.only or rcfg.get("kinds") or list(KINDS)
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = datetime.date.today()
     failed_any = stop = False

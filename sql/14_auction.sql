@@ -97,6 +97,8 @@ ON CONFLICT (step) DO UPDATE SET item = excluded.item, what_to_check = excluded.
 -- ── 공매 물건 할인율: 최저입찰가를 같은 단지 · 비슷한 면적의 최근 실거래와 비교 ──
 -- 물건마다 현재 회차 하나(입찰이 안 끝난 회차 중 가장 이른 것, 없으면 가장 최근 회차). 입찰 시각은 한국 시각이라 DB 시간대와 상관없이 KST로 비교
 -- 단지는 지번 PNU로 단지 필지(core.v_complex_parcel)에서 찾고, 없으면 주소의 「동 지번」으로 찾음(core.find_complex). 실거래는 그 단지의 최근 p_months개월 매매 중 면적 ±3㎡의 ㎡당 중위 단가
+-- 같은 종류끼리만 비교: 용도 아파트 → 아파트 단지 · 아파트 매매, 용도 오피스텔 → 오피스텔 단지 · 오피스텔 매매
+--   용도 「업무시설」은 오피스텔이 법상 업무시설이라 그 필지에 오피스텔 단지가 있을 때만 오피스텔 매매와 비교(label에 적음). 상가 · 사무실은 비교 안 함
 -- est_market_price = ㎡당 중위 단가 x 물건 면적. discount_pct = (1 - 최저입찰가 ÷ est_market_price) x 100
 -- 권리관계는 보지 않음: 할인이 커도 선순위 임차인 · 유치권이 있으면 실제로는 비쌀 수 있음(q_auction_checklist)
 DROP FUNCTION IF EXISTS mart.q_auction_discount(text, text, boolean, numeric, int, int);
@@ -118,23 +120,29 @@ LANGUAGE sql STABLE AS $$
         ORDER BY a.cltr_mng_no, (a.bid_end >= (now() AT TIME ZONE 'Asia/Seoul')) DESC NULLS LAST,
                  CASE WHEN a.bid_end >= (now() AT TIME ZONE 'Asia/Seoul') THEN a.bid_begin END ASC,
                  a.bid_begin DESC NULLS LAST
+    ), ck AS (   -- 물건 용도로 비교할 실거래 종류를 정함. NULL이면 비교 안 함
+        SELECT cur.*, CASE WHEN coalesce(cur.usage, '') LIKE '%아파트%' THEN '아파트'
+                           WHEN coalesce(cur.usage, '') LIKE '%오피스텔%' OR cur.usage = '업무시설' THEN '오피스텔' END AS want
+        FROM cur
     ), m AS (
         SELECT c.*, cx.complex_id, cx.name AS cx_name, t.n, t.med, round(t.med::numeric * c.area_m2) AS est
-        FROM cur c
-        LEFT JOIN LATERAL (
+        FROM ck c
+        LEFT JOIN LATERAL (   -- 같은 필지에 아파트 · 오피스텔 단지가 같이 있으면(주상복합) 물건과 같은 종류 단지
             SELECT * FROM (
-                SELECT 1 AS k, x.complex_id, x.name FROM core.v_complex_parcel v JOIN core.dim_complex x USING (complex_id)
+                SELECT 1 AS k, x.complex_id, x.name, x.kind FROM core.v_complex_parcel v JOIN core.dim_complex x USING (complex_id)
                 WHERE c.pnu IS NOT NULL AND v.pnu = c.pnu
                 UNION ALL
-                SELECT 2, f.complex_id, f.name FROM core.find_complex(p_sigungu, c.emd || c.jibun) f
+                SELECT 2, f.complex_id, f.name, x.kind FROM core.find_complex(p_sigungu, c.emd || c.jibun) f
+                JOIN core.dim_complex x USING (complex_id)
                 WHERE c.emd IS NOT NULL AND c.jibun IS NOT NULL
-            ) z ORDER BY z.k LIMIT 1
+            ) z WHERE c.want IS NULL OR z.kind = c.want   -- 비교 안 하는 용도도 단지 이름은 보여 줌
+            ORDER BY z.k LIMIT 1
         ) cx ON true
         LEFT JOIN LATERAL (
             SELECT count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY d.amount / d.area) AS med
             FROM core.fact_deal d
             WHERE d.complex_id = cx.complex_id AND NOT d.is_cancelled AND c.area_m2 IS NOT NULL
-              AND c.usage LIKE '%아파트%'   -- 실거래는 아파트뿐. 같은 건물의 상가 · 오피스텔을 아파트 값과 비교하지 않음
+              AND d.deal_type = c.want   -- 같은 건물의 상가 · 오피스텔을 아파트 값과 비교하지 않음(반대도)
               AND abs(d.area - c.area_m2) <= 3
               AND d.contract_date > current_date - make_interval(months => greatest(1, least(p_months, 36)))
         ) t ON true
@@ -146,13 +154,15 @@ LANGUAGE sql STABLE AS $$
     SELECT rank() OVER (ORDER BY r.disc DESC NULLS LAST), r.kind, r.cltr_mng_no, r.name, r.address, r.usage, r.area_m2,
            r.appraisal, r.min_bid, round(r.min_bid * 100.0 / nullif(r.appraisal, 0), 1), r.fail_count, r.round_no,
            r.status, r.bid_begin, r.bid_end, r.cx_name, coalesce(r.n, 0), r.med::bigint, r.est::bigint, r.disc,
-           CASE WHEN r.est IS NULL THEN CASE WHEN coalesce(r.usage, '') NOT LIKE '%아파트%' THEN '시세 비교 불가(아파트가 아님)'
+           CASE WHEN r.est IS NULL THEN CASE WHEN r.want IS NULL THEN '시세 비교 불가(아파트 · 오피스텔이 아님)'
+                                             WHEN r.complex_id IS NULL AND r.usage = '업무시설' THEN '시세 비교 불가(업무시설 · 오피스텔 단지 없음)'
                                              WHEN r.complex_id IS NULL THEN '시세 비교 불가(단지를 못 찾음)'
                                              ELSE '시세 비교 불가(같은 면적 거래 없음)' END
                 WHEN r.disc >= 15 THEN '실거래 대비 15% 이상 낮음 · 권리 확인 전'
                 WHEN r.disc > 0 THEN '실거래보다 낮음 · 권리 확인 전'
-                ELSE '실거래보다 낮지 않음' END,
-           r.source || CASE WHEN r.est IS NOT NULL THEN ' · 국토교통부 아파트 매매 실거래가' ELSE '' END,
+                ELSE '실거래보다 낮지 않음' END
+             || CASE WHEN r.est IS NOT NULL AND r.usage = '업무시설' THEN ' · 업무시설을 오피스텔 거래와 비교' ELSE '' END,
+           r.source || CASE WHEN r.est IS NOT NULL THEN ' · 국토교통부 ' || r.want || ' 매매 실거래가' ELSE '' END,
            r.asof, count(*) OVER ()
     FROM r
     WHERE p_min_discount IS NULL OR r.disc >= p_min_discount

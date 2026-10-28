@@ -208,7 +208,7 @@ LANGUAGE sql STABLE AS $$
                CASE WHEN zone.zones IS NULL THEN '용도지역 · 규제' END,
                CASE WHEN bld.n IS NULL THEN '건축물대장(용도 · 층수 · 주차 · 위반)' END], NULL),
            win.d_from, win.d_to,
-           concat_ws(' · ', '국토교통부 아파트 매매 · 전월세 실거래가', land.src,
+           concat_ws(' · ', '국토교통부 ' || c.kind || ' 매매 · 전월세 실거래가', land.src,
                      CASE WHEN price.price IS NOT NULL THEN '공시지가' END, zone.src, bld.src),
            greatest(t.asof, j.asof, c.asof, land.asof, price.asof, zone.asof, bld.asof),
            c.n_match
