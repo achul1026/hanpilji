@@ -35,12 +35,17 @@ def service_key():
     return key
 
 
-def build_url(path, params, key=None):
-    """Decoding 키는 한 번 인코딩하고, 이미 인코딩된 키(% 포함)는 그대로 붙임."""
+def build_url(path, params, key=None, base=BASE):
+    """Decoding 키는 한 번 인코딩하고, 이미 인코딩된 키(% 포함)는 그대로 붙임. base는 기관 경로(국토부 1613000이 기본)."""
     key = key or service_key()
     enc_key = key if "%" in key else urllib.parse.quote(key, safe="")
     query = urllib.parse.urlencode(params)
-    return f"{BASE}/{path}?serviceKey={enc_key}" + (f"&{query}" if query else "")
+    return f"{base}/{path}?serviceKey={enc_key}" + (f"&{query}" if query else "")
+
+
+def _gateway_error(h, text):
+    msg = " ".join(v for v in (h.get("errMsg"), h.get("returnAuthMsg")) if v) or text[:200]
+    return ApiError(f"{h.get('returnReasonCode', '?')} {msg}")
 
 
 def _xml_to_obj(el):
@@ -67,14 +72,16 @@ def parse(data: bytes):
         text = data.decode("cp949").strip()
     if text.startswith("{"):
         obj = json.loads(text)
+        if "OpenAPI_ServiceResponse" in obj:   # JSON으로 물어도 게이트웨이 오류는 이 모양(2026-10-28 온비드 실측)
+            raise _gateway_error(obj["OpenAPI_ServiceResponse"].get("cmmMsgHeader") or {}, text)
         obj = obj.get("response", obj)
     else:
         root = ET.fromstring(re.sub(r"^<\?xml[^>]*\?>", "", text))  # 이미 str이라 인코딩 선언은 뺌
         obj = _xml_to_obj(root)
         if root.tag == "OpenAPI_ServiceResponse":  # 게이트웨이 오류(키 미등록 · 한도 초과 등)
-            h = obj.get("cmmMsgHeader", {}) if isinstance(obj, dict) else {}
-            msg = " ".join(v for v in (h.get("errMsg"), h.get("returnAuthMsg")) if v) or text[:200]
-            raise ApiError(f"{h.get('returnReasonCode', '?')} {msg}")
+            raise _gateway_error(obj.get("cmmMsgHeader", {}) if isinstance(obj, dict) else {}, text)
+    if isinstance(obj, dict) and "header" not in obj and isinstance(obj.get("result"), dict):
+        obj = {"header": obj["result"]}   # 온비드는 결과 없음을 {"result": {"resultCode": "03"}}로 줌(2026-10-28 실측)
     if not isinstance(obj, dict) or "header" not in obj:
         raise ApiError(f"알 수 없는 응답: {text[:200]}")
     code = str(obj["header"].get("resultCode", "")).strip()
@@ -98,10 +105,10 @@ def items(obj):
     return as_list(its.get("item")) if isinstance(its, dict) else []
 
 
-def fetch(path, params, http_get=ingest.http_get):
+def fetch(path, params, http_get=ingest.http_get, base=BASE):
     """한 번 호출해서 (원본 bytes, 풀린 응답)을 돌려줌. 원본은 호출한 쪽이 보관."""
     try:
-        data = http_get(build_url(path, params))
+        data = http_get(build_url(path, params, base=base))
     except urllib.error.HTTPError as e:  # 키 오류는 HTTP 403 + 오류 XML로 옴(2026-10-23 실측)
         try:
             parse(e.read())  # 오류 XML이면 여기서 ApiError
