@@ -58,6 +58,7 @@ jobs:
         run: python -m hanpilji.collectors.rtms
       - name: 공매 물건(온비드)
         if: ${{ !cancelled() && env.WHAT == 'daily' }}
+        timeout-minutes: 30
         run: python -m hanpilji.collectors.onbid
 
       - name: 법령

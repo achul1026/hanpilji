@@ -7,6 +7,7 @@
 """
 import argparse
 import datetime
+import functools
 import re
 import sys
 import urllib.parse
@@ -20,6 +21,10 @@ from hanpilji.textnorm import search_text
 
 SOURCE = "law_go_kr"
 BASE = "http://www.law.go.kr/DRF"
+# 법제처는 해외(깃허브 실행기)에서 가끔 응답을 아예 안 줌(2026-10-28 두 번). 한 번에 오래 기다리지 않고,
+# 접속 실패가 이만큼 연달아 나면 남은 법령은 다음 실행으로 넘김(커서가 그대로라 그때 받음)
+fetch_default = functools.partial(ingest.http_get, tries=2, timeout=15)
+MAX_NET_FAILS = 3
 
 
 def _t(el, tag):
@@ -176,7 +181,7 @@ def collect_one(conn, cfg, run_id, name, fetch):
     return "done", n
 
 
-def main(argv=None, fetch=ingest.http_get):
+def main(argv=None, fetch=fetch_default):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--only", action="append", help="이 법령만(여러 번 가능)")
@@ -187,11 +192,17 @@ def main(argv=None, fetch=ingest.http_get):
     names = args.only or cfg["law"]["names"]
     with psycopg.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
-        loaded, failed = 0, []
-        for name in names:
+        loaded, failed, net_fails = 0, [], 0
+        for i, name in enumerate(names):
+            if net_fails >= MAX_NET_FAILS:
+                left = names[i:]
+                failed += left
+                print(f"법제처 접속 실패 {net_fails}번 연속 → 남은 {len(left)}개는 다음 실행에서", file=sys.stderr)
+                break
             try:
                 status, n = collect_one(conn, cfg, run_id, name, fetch)
                 loaded += n
+                net_fails = 0
                 print(f"{status:8} {n:5}조  {name}")
             except Exception as e:  # 한 법령이 실패해도 나머지는 계속
                 conn.rollback()
@@ -199,6 +210,7 @@ def main(argv=None, fetch=ingest.http_get):
                 ingest.end_task(conn, task, "failed", str(e)[:500])
                 conn.commit()
                 failed.append(name)
+                net_fails = net_fails + 1 if isinstance(e, OSError) else 0  # URLError · 시간 초과 · DNS 실패
                 print(f"failed       {name}: {e}", file=sys.stderr)
         ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, len(failed),
                           ("실패: " + ", ".join(failed)) if failed else None)
