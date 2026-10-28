@@ -62,9 +62,14 @@ class Pipeline(unittest.TestCase):
     def test_3_failure_keeps_cursor(self):
         before = self.q("SELECT cursor_value FROM ops.ingest_cursor")
 
+        calls = []
+
         def broken(url):
+            calls.append(url)
             raise OSError("network down")
-        self.assertEqual(law.main(["--config", self.cfg], fetch=broken), 1)
+        only = sum((["--only", f"법령{i}"] for i in range(5)), [])
+        self.assertEqual(law.main(["--config", self.cfg, *only], fetch=broken), 1)
+        self.assertEqual(len(calls), law.MAX_NET_FAILS)  # 연달아 접속 실패하면 남은 법령은 부르지 않음
         self.assertEqual(self.q("SELECT cursor_value FROM ops.ingest_cursor"), before)
         self.assertEqual(self.q("SELECT status FROM ops.ingest_run ORDER BY run_id DESC LIMIT 1")[0][0], "failed")
 
