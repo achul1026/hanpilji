@@ -26,6 +26,15 @@ ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS jibun text;
 ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS road_addr text;
 ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS build_year smallint;
 ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS pnu varchar(25);   -- 법정동 + 지번으로 만든 값. 토지 · 건물 데이터와 잇는 열쇠
+-- 건축물대장 총괄표제부(단지 전체 한 장)에서 옴. 총괄표제부가 없는 작은 단지는 비우고 카드가 동별 표제부를 합침
+ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS site_area_m2 numeric(14, 2);   -- 대지면적
+ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS parking_total integer;          -- 총 주차 대수
+ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS bc_rat numeric(7, 2);           -- 건폐율 %
+ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS vl_rat numeric(8, 2);           -- 용적률 %
+-- 건축물대장 표제부(동마다 한 장)에서 옴
+ALTER TABLE core.dim_building ADD COLUMN IF NOT EXISTS is_main boolean;               -- 주건축물(부속건축물이면 false)
+ALTER TABLE core.dim_building ADD COLUMN IF NOT EXISTS households integer;            -- 세대 수
+ALTER TABLE core.dim_building ADD COLUMN IF NOT EXISTS site_area numeric(14, 2);      -- 대지면적(집합건물 동은 0으로 와서 비움)
 
 -- PNU 19자리 = 법정동 10 + 대장 구분 1(일반 1 · 산 2) + 본번 4 + 부번 4. 「527」 「12-3」 「산 4-1」 꼴만, 「BL」(블록) 등은 NULL
 CREATE OR REPLACE FUNCTION core.make_pnu(p_lawd text, p_jibun text) RETURNS varchar
@@ -73,6 +82,8 @@ WHERE x.complex_id = code.complex_id;
 --   용도지역은 「접함」을 빼고 「포함」 · 「저촉」만. 공시지가는 대표 필지의 최신 해 개별공시지가를 먼저 씀
 -- 전세가율은 면적이 섞이지 않게 매매 · 전세가 모두 있는 전용면적 중 매매가 가장 많은 타입 하나로 셈(jeonse_ratio_area)
 -- 거래 요약은 최근 p_months개월, 해제된 매매 제외. recent_deals는 최근 매매 5건(같은 스냅숏에서 읽음)
+-- 토지 면적은 토지대장 면적 합이 없으면 건축물대장 대지면적(총괄표제부 → 동별 표제부)을 쓰고 land_area_kind에 출처를 적음
+-- 세대 · 주차 · 건폐율 · 용적률도 총괄표제부(dim_complex)가 먼저, 없으면 동별 표제부를 합침. 동 수는 주건축물만
 -- 아직 수집 전이라 비어 있는 칸은 missing에 적음. 같은 이름의 단지가 여럿이면 최대 5줄
 DROP FUNCTION IF EXISTS mart.q_property_card(text, text, int);
 CREATE FUNCTION mart.q_property_card(p_sigungu text, p_query text, p_months int DEFAULT 12)
@@ -81,10 +92,10 @@ RETURNS TABLE (complex_name text, address text, road_addr text, pnu varchar, bui
                trade_count bigint, trade_per_pyeong bigint, trade_last_date date, trade_last_amount bigint,
                trade_last_area numeric, jeonse_count bigint, jeonse_avg bigint,
                jeonse_ratio numeric, jeonse_ratio_area numeric, wolse_count bigint, recent_deals jsonb,
-               land_parcel_count bigint, land_category text, land_area_m2 numeric,
+               land_parcel_count bigint, land_category text, land_area_m2 numeric, land_area_kind text,
                land_price_per_m2 bigint, land_price_year int, zones text, zone_rule_count bigint,
                bld_count bigint, bld_main_use text, bld_approval_date date, bld_floors_above int, bld_households int,
-               bld_parking bigint, bld_elevator boolean, bld_violation boolean,
+               bld_parking bigint, bld_elevator boolean, bld_violation boolean, bld_bc_rat numeric, bld_vl_rat numeric,
                missing text[], period_from date, period_to date, source text, asof date, row_total bigint)
 LANGUAGE sql STABLE AS $$
     WITH q AS (
@@ -140,7 +151,8 @@ LANGUAGE sql STABLE AS $$
         UNION SELECT cb.complex_id, pb.pnu FROM cb JOIN core.bridge_parcel_building pb USING (bld_pk)
     ), land AS (
         SELECT cp.complex_id, count(*) AS n, string_agg(DISTINCT p.land_category, ', ') AS cat,
-               sum(p.area_m2) AS area, max(p.asof) AS asof
+               sum(p.area_m2) AS area, max(p.asof) AS asof,
+               string_agg(DISTINCT p.source, ' · ') FILTER (WHERE p.land_category IS NOT NULL) AS src
         FROM cp JOIN core.dim_parcel p USING (pnu) GROUP BY 1
     ), price AS (
         SELECT DISTINCT ON (cp.complex_id) cp.complex_id, lp.price_per_m2 AS price, lp.base_year::int AS yr, lp.asof
@@ -148,17 +160,24 @@ LANGUAGE sql STABLE AS $$
         ORDER BY cp.complex_id, (cp.pnu = c.pnu) DESC, lp.base_year DESC, lp.is_standard, lp.pnu
     ), zone AS (
         SELECT cp.complex_id, string_agg(DISTINCT z.zone_name, ', ') AS zones, max(bz.asof) AS asof,
+               string_agg(DISTINCT bz.source, ' · ') AS src,
                (SELECT count(DISTINCT r.rule_id) FROM core.bridge_parcel_zone bz2 JOIN cp cp2 USING (pnu)
                 JOIN core.reg_rule r USING (zone_cd)
                 WHERE cp2.complex_id = cp.complex_id AND bz2.overlap <> '접함'
                   AND (r.sigungu_cd IS NULL OR r.sigungu_cd = p_sigungu)) AS rules
         FROM cp JOIN core.bridge_parcel_zone bz USING (pnu) JOIN core.dim_zone z USING (zone_cd)
         WHERE bz.overlap <> '접함' GROUP BY 1
-    ), bld AS (
-        SELECT complex_id, count(*) AS n,
-               (array_agg(main_use ORDER BY total_area DESC NULLS LAST))[1] AS main_use,
+    ), bld AS (   -- 동 수 · 용도 · 세대는 주건축물만. 주차는 부속건축물(지하주차장 등)까지 합침
+        SELECT complex_id, count(*) FILTER (WHERE is_main IS NOT FALSE) AS n,
+               (array_agg(main_use ORDER BY is_main IS NOT FALSE DESC, total_area DESC NULLS LAST))[1] AS main_use,
                min(approval_date) AS approval, max(floors_above) AS floors, sum(parking_count) AS parking,
-               bool_or(has_elevator) AS elevator, bool_or(is_violation) AS violation, max(asof) AS asof
+               sum(households) FILTER (WHERE is_main IS NOT FALSE) AS households, max(site_area) AS site_area,
+               max(bc_rat) AS bc_rat, max(vl_rat) AS vl_rat, string_agg(DISTINCT source, ' · ') AS src,
+               -- 승강기는 주건축물만 봄. 한 동이라도 모름(대장에 0대로 적힌 6층 이상)이면 「없음」이라 하지 않음
+               CASE WHEN bool_or(has_elevator) FILTER (WHERE is_main IS NOT FALSE) THEN true
+                    WHEN count(*) FILTER (WHERE is_main IS NOT FALSE AND has_elevator IS NULL) > 0 THEN NULL
+                    ELSE bool_or(has_elevator) FILTER (WHERE is_main IS NOT FALSE) END AS elevator,
+               bool_or(is_violation) AS violation, max(asof) AS asof
         FROM cb GROUP BY 1
     )
     SELECT c.name,
@@ -168,18 +187,25 @@ LANGUAGE sql STABLE AS $$
            coalesce(t.n, 0), t.per_py, t.last_date, t.last_amt, t.last_area,
            coalesce(j.jn, 0), j.j_avg, ratio.r, ratio.area_m2, coalesce(j.wn, 0),
            coalesce((SELECT jsonb_agg(e) FROM (SELECT e FROM jsonb_array_elements(t.deals) e LIMIT 5) s), '[]'::jsonb),
-           land.n, land.cat, land.area, price.price, price.yr, zone.zones, zone.rules,
-           bld.n, bld.main_use, bld.approval, bld.floors, c.households, bld.parking, bld.elevator, bld.violation,
+           land.n, land.cat, coalesce(land.area, c.site_area_m2, bld.site_area),
+           CASE WHEN land.area IS NOT NULL THEN '토지대장 면적 합'
+                WHEN coalesce(c.site_area_m2, bld.site_area) IS NOT NULL THEN '건축물대장 대지면적' END,
+           price.price, price.yr, zone.zones, zone.rules,
+           bld.n, bld.main_use, bld.approval, bld.floors, coalesce(c.households, bld.households),
+           -- 동별 주차 합이 0이면 「0대」가 아니라 대장에 안 적힌 것(은마 31동 모두 0, 2026-10-27 실측)으로 보고 비움
+           coalesce(c.parking_total, nullif(bld.parking, 0)), bld.elevator, bld.violation,
+           coalesce(c.bc_rat, bld.bc_rat), coalesce(c.vl_rat, bld.vl_rat),
+           -- 토지 칸은 지목(토지대장)과 면적을 따로 셈: 건축물대장 대지면적만 있어도 면적은 채움
            array_remove(ARRAY[
                CASE WHEN c.pnu IS NULL THEN '지번(PNU)' END,
-               CASE WHEN land.n IS NULL THEN '토지(지목 · 면적)' END,
+               CASE WHEN land.cat IS NULL THEN '토지 지목' END,
+               CASE WHEN coalesce(land.area, c.site_area_m2, bld.site_area) IS NULL THEN '토지 면적' END,
                CASE WHEN price.price IS NULL THEN '공시지가' END,
                CASE WHEN zone.zones IS NULL THEN '용도지역 · 규제' END,
                CASE WHEN bld.n IS NULL THEN '건축물대장(용도 · 층수 · 주차 · 위반)' END], NULL),
            win.d_from, win.d_to,
-           '국토교통부 아파트 매매 · 전월세 실거래가' || CASE WHEN land.n IS NOT NULL THEN ' · 토지' ELSE '' END
-               || CASE WHEN zone.zones IS NOT NULL THEN ' · 토지이용계획' ELSE '' END
-               || CASE WHEN bld.n IS NOT NULL THEN ' · 건축물대장' ELSE '' END,
+           concat_ws(' · ', '국토교통부 아파트 매매 · 전월세 실거래가', land.src,
+                     CASE WHEN price.price IS NOT NULL THEN '공시지가' END, zone.src, bld.src),
            greatest(t.asof, j.asof, c.asof, land.asof, price.asof, zone.asof, bld.asof),
            c.n_match
     FROM c LEFT JOIN t USING (complex_id) LEFT JOIN j USING (complex_id) LEFT JOIN ratio USING (complex_id)

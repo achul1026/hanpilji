@@ -7,9 +7,9 @@
 **필지 하나로 잇는 부동산 공공데이터셋**<br>
 땅 · 건물 · 거래 · 규제 데이터를 필지 번호(PNU)로 묶고, 그 데이터로만 답하는 부동산 GPT를 얹습니다.
 
-![stage](https://img.shields.io/badge/stage-3%20GPT%20%EC%97%B0%EA%B2%B0-f6d365?style=for-the-badge)
+![stage](https://img.shields.io/badge/stage-4%20%EB%8D%B0%EB%AA%A8-f6d365?style=for-the-badge)
 ![laws](https://img.shields.io/badge/%EB%B2%95%EB%A0%B9-17%EA%B0%9C%20%C2%B7%201%2C542%EC%A1%B0-81c995?style=for-the-badge)
-![tests](https://img.shields.io/badge/tests-54%20passed-4fc3f7?style=for-the-badge)
+![tests](https://img.shields.io/badge/tests-76%20passed-4fc3f7?style=for-the-badge)
 
 ![Python](https://img.shields.io/badge/Python-3.11+-3776AB?logo=python&logoColor=white)
 ![Claude](https://img.shields.io/badge/LLM-Claude%20API-d97757?logo=anthropic&logoColor=white)
@@ -69,6 +69,7 @@ python -m hanpilji.collectors.eum_rule 행위제한.csv    # 토지이음에서 
 export DATA_GO_KR_KEY=...
 python -m hanpilji.collectors.luinfo                  # 행위제한 API → core.reg_rule (조례 기준)
 python -m hanpilji.collectors.rtms                    # 아파트 매매 · 전월세 36개월 → core.fact_deal · fact_rent
+python -m hanpilji.collectors.bld                     # 단지 필지마다 건축물대장 → core.dim_building · 용도지역 (강남구 2~3시간)
 ```
 
 시험:
@@ -177,6 +178,15 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 채팅 →
 
 > [!IMPORTANT]
 > 클라우드 환경의 로컬 PostgreSQL은 세션마다 새로 떠서 데이터가 남지 않습니다. 오래 남길 데이터는 [Supabase](#️-supabase-영구-db)에 있고, 클라우드 세션에서는 `HANPILJI_DB_VIA=supabase-api`를 주면 GPT · 웹 카드가 거기서 읽습니다.
+>
+> 수집이 끝날 때마다 프로젝트 공유 폴더에도 백업을 남깁니다. 로컬 DB가 필요하면 다시 수집하지 말고 백업에서 되살리세요(몇 분).
+>
+> ```bash
+> HANPILJI_DSN=postgresql:///hanpilji scripts/restore_db.sh            # /mnt/project-files/hanpilji-data/ 의 가장 최근 백업
+> pg_dump -Fc -Z 6 -d "$HANPILJI_DSN" -f /mnt/project-files/hanpilji-data/hanpilji_YYYYMMDD.dump   # 새로 수집한 뒤 백업
+> ```
+>
+> 접속 주소는 `HANPILJI_DSN` 하나로만 받으므로 Supabase 같은 바깥 DB로 옮겨도 같은 스크립트를 씁니다. 백업 파일은 저장소에 올리지 않습니다.
 
 ### 모델과 제공자
 
@@ -235,7 +245,7 @@ HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용
 | 1 | 공공데이터포털 인증키 · 호출 확인 | 🟢 실제 응답으로 항목 이름 · 코드 확인 (2026-10-27) |
 | 2 | 시세 축: 시범 구(강남구) 3년치 | 🟢 매매 1만 432건 · 전월세 7만 924건 적재 |
 | 3 | GPT 엔진 연결 | 🟢 Claude API 도구 호출 엔진, 실제 질문 15개로 확인 (2026-10-27) |
-| 4 | 데모 | 🟡 단지 카드(위치 · 거래 + PNU로 토지 · 용도지역 · 건물 자리) · 웹 채팅. 토지 · 건축물대장 수집 남음 |
+| 4 | 데모 | 🟡 단지 카드 · 웹 채팅. 건축물대장으로 건물 · 용도지역 · 대지면적 채움 (2026-10-27). 지목 · 공시지가는 V-World 회신 대기 |
 
 **0단계 실측 (2026-10-22)**
 
@@ -262,6 +272,38 @@ SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 84, 12);
 | 단지 | ㎡ | 매매 | 매매 평균 | 평당 | 전세 | 전세 평균 | 전세가율 |
 |---|---|---|---|---|---|---|---|
 | 도곡렉슬 | 85 | 21건 | 35억 4,904만 | 1억 3,806만 | 76건 | 14억 9,511만 | 42.1% |
+
+**4단계 실측: 강남구 건축물대장 (2026-10-27)**
+
+| 항목 | 결과 |
+|---|---|
+| 받은 필지 | 단지 721개 중 PNU가 있는 719개가 걸친 필지 709개 전부(한 필지에 단지가 둘인 곳이 있음). 호출 약 3,000번, 하루 한도 10,000번 안 |
+| 건물 | 2,883동(주건축물 2,133동). 건물이 붙은 단지 711개 |
+| 용도지역 · 지구 | 필지 695개, 용도지역이 붙은 단지 705개. 그중 「제3종일반주거지역」처럼 종까지 적혀 행위제한 규칙(1,072건)이 이어지는 단지 286개, 「일반주거지역」만 적혀 규칙을 붙일 수 없는 단지 417개 |
+| 대지면적 · 세대 · 주차 · 건폐율 · 용적률 | 총괄표제부가 있는 큰 단지 140개는 단지 전체 값, 나머지는 동별 표제부를 합침 |
+| 적재 제외 | 부속지번 1줄(지번 칸에 「0^205-3」처럼 읽을 수 없는 값) |
+
+```sql
+SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_property_card('11680', '도곡렉슬');
+```
+
+| 동 | 세대 | 주차 | 대지면적 | 용도지역 |
+|---|---|---|---|---|
+| 35 | 3,002 | 4,443 | 138,750㎡ (건축물대장) | 일반주거지역 |
+
+<details>
+<summary><b>건축물대장 응답에서 알게 된 것</b></summary>
+
+- 공공데이터포털의 옛 토지 API(토지특성 · 개별공시지가 · 토지이용계획, `1611000/nsdi/...`)는 「서비스가 없거나 폐기됨」(12)으로 옵니다. 지금은 V-World로만 제공되고 클라우드에서 V-World 접속은 막혀 있어 지목 · 공시지가는 비워 두었습니다.
+- 총괄표제부(단지 한 장)는 큰 단지에만 있습니다. 집합건물 동의 표제부는 대지면적 · 건폐율 · 용적률이 0으로 옵니다.
+- 지역지구 코드는 「1023」 「UQA123」 두 체계가 섞여 오고, 「도시지역」 「일반주거지역」 같은 상위 이름도 같이 옵니다. 이름으로 UQ 코드에 맞추고 더 구체적인 이름이 있으면 상위 이름은 뺍니다. 「제3종」이 아니라 「일반주거지역」만 적힌 필지도 많습니다(417개).
+- 오래된 아파트는 6층이 넘어도 승강기가 0대로 적힌 경우가 많아 그때는 「없음」이 아니라 모름으로 둡니다. 동별 주차 합이 0인 단지(은마 등)도 모름으로 둡니다. 위반건축물 여부는 이 API에 없습니다.
+- 부속지번은 번 · 지가 `0000`이고 글(`atchEtcJibunNm` 「36-6」)로만 오는 줄이 많아 글에서 읽습니다.
+- 빈 응답 · `05 SERVICETIMEOUT`이 가끔 와서(709필지 중 10번) 잠깐 뒤 다시 부릅니다.
+- 지역지구 코드는 구분(지역 · 지구 · 구역)마다 따로 매겨져 겹칩니다(「980」 = 용도지구미지정 · 용도구역미지정). 「구분-코드」로 저장하고 「…미지정」은 뺍니다.
+- 정리 규칙을 바꿨을 때는 API를 다시 부르지 않고 저장해 둔 응답으로 다시 만들 수 있습니다: `python -m hanpilji.collectors.bld --from-stg`.
+
+</details>
 
 <details>
 <summary><b>실제 응답에서 알게 된 것</b></summary>
@@ -302,8 +344,8 @@ SELECT * FROM mart.q_complex_price('11680', '도곡렉슬', 84, 12);
 - [x] 공공데이터포털 인증키 발급 → 첫 실제 응답으로 항목 이름 · UQ 코드 확인 (2026-10-27)
 - [x] 강남구 법정동 코드표로 단지마다 동 · 지번 · 도로명 · PNU 채움 (2026-10-27)
 - [x] 단지 카드(`q_property_card`) · 웹 카드 화면 (2026-10-27)
-- [ ] 토지(지목 · 면적 · 공시지가) · 필지별 용도지역 수집 → 카드의 토지 · 규제 칸 채우기
-- [ ] 건축물대장 수집기
+- [x] 건축물대장 수집기 · 필지별 용도지역(건축물대장 지역지구) · 대지면적 → 카드의 건물 · 규제 칸 (2026-10-27)
+- [ ] 토지 지목 · 공시지가: 공공데이터포털 토지 API가 폐기되어 V-World 키와 클라우드 접속 허용이 있어야 함
 - [x] 부동산 GPT 엔진: 마트 함수 도구 호출 · 근거 자동 첨부 · 터미널 / 웹 채팅 (2026-10-27)
 - [x] Anthropic API 키 등록 → 실제 질문으로 답 품질 확인(모른다 · 투자 질문 포함) (2026-10-27)
 - [x] 거래 목록 · 단지 순위 도구 (2026-10-27)
@@ -321,7 +363,8 @@ hanpilji/
 │   │   ├── law.py           # 법제처 → core.doc_law
 │   │   ├── eum_rule.py      # 토지이음 CSV → core.reg_rule
 │   │   ├── luinfo.py        # 행위제한 API → core.reg_rule
-│   │   └── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
+│   │   ├── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
+│   │   └── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
 │   ├── datagokr.py          # 공공데이터포털 공통(키 · 호출 · 응답 풀기)
 │   ├── gpt/
 │   │   ├── engine.py        # 질문 → 도구 호출 반복 → 답 + 근거
@@ -332,8 +375,9 @@ hanpilji/
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
 │   ├── supabase.py          # Supabase를 HTTPS로: 백업 복원 · GPT용 읽기 연결
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
-├── sql/00~10_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
-├── scripts/init_db.sh
+├── sql/00~11_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
+├── scripts/init_db.sh       # 빈 DB에 스키마 올리기
+├── scripts/restore_db.sh    # 백업에서 되살리기
 ├── tests/                   # fixtures/*_real.xml 은 법제처 실제 응답
 └── docs/assets/             # README 도트 그림 (make_banner.py로 다시 만듦)
 ```

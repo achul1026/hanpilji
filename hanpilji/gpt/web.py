@@ -122,9 +122,11 @@ function card(r,deals){const c=el("div","pc");c.append(el("h3",null,r.complex_na
  g.append(sec("거래 (최근 12개월)",[[r.trade_count?"평당 "+won(r.trade_per_pyeong):"매매 없음","big"],
   ["매매 "+r.trade_count+"건 · 마지막 "+(r.trade_last_date?r.trade_last_date+" "+won(r.trade_last_amount)+" ("+r.trade_last_area+"㎡)":"-")],
   ["전세 "+r.jeonse_count+"건 평균 "+won(r.jeonse_avg)+(r.jeonse_ratio!=null?" · 전세가율 "+r.jeonse_ratio+"% ("+r.jeonse_ratio_area+"㎡ 기준)":"")],["월세 "+r.wolse_count+"건"]]));
- g.append(sec("토지",[["필지 "+(r.land_parcel_count||0)+"개 · 지목 "+(r.land_category||"-")+" · 면적 "+(r.land_area_m2||"-")+"㎡"],["공시지가 "+(r.land_price_per_m2?won(r.land_price_per_m2)+"/㎡ ("+r.land_price_year+")":"-")]],!has("토지")));
+ g.append(sec("토지",[["필지 "+(r.land_parcel_count||0)+"개 · 지목 "+(r.land_category||"수집 전")],["면적 "+(r.land_area_m2!=null?Number(r.land_area_m2).toLocaleString()+"㎡"+(r.land_area_kind?" ("+r.land_area_kind+")":""):"-")],
+  ["공시지가 "+(r.land_price_per_m2?won(r.land_price_per_m2)+"/㎡ ("+r.land_price_year+")":"수집 전")]],!has("토지 지목")&&!has("토지 면적")&&!has("공시지가")));
  g.append(sec("용도지역 · 규제",[[r.zones||"-"],["행위제한 규칙 "+(r.zone_rule_count||0)+"개"]],!has("용도지역")));
- g.append(sec("건물",[["건물 "+(r.bld_count||0)+"동 · "+(r.bld_main_use||"-")+" · 최고 "+(r.bld_floors_above||"-")+"층"],["사용승인 "+(r.bld_approval_date||"-")+" · 주차 "+(r.bld_parking??"-")+"대"],
+ g.append(sec("건물",[["건물 "+(r.bld_count||0)+"동 · "+(r.bld_main_use||"-")+" · 최고 "+(r.bld_floors_above||"-")+"층"],["사용승인 "+(r.bld_approval_date||"-")+" · 세대 "+(r.bld_households??"-")+" · 주차 "+(r.bld_parking??"-")+"대"],
+  ["건폐율 "+(r.bld_bc_rat!=null?r.bld_bc_rat+"%":"-")+" · 용적률 "+(r.bld_vl_rat!=null?r.bld_vl_rat+"%":"-")],
   ["승강기 "+(r.bld_elevator==null?"-":r.bld_elevator?"있음":"없음")+" · 위반 "+(r.bld_violation==null?"-":r.bld_violation?"있음":"없음")]],!has("건축물대장")));
  c.append(g);
  if(deals&&deals.length){const t=el("table");const h=el("tr");["계약일","전용","층","매매가"].forEach((x,i)=>h.append(el("th",i?"n":null,x)));t.append(h);
