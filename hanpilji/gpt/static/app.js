@@ -384,6 +384,7 @@ async function send(text) {
   text = (text ?? q.value).trim(); if (!text || busy) return;
   busy = true; go.disabled = true; q.value = ""; grow();
   if (!cur) cur = newConv(text.length > 40 ? text.slice(0, 40) + "…" : text);
+  const conv = cur;   // 답을 기다리는 사이 다른 대화를 열어도 이 대화에 남김
   showLog(true); $("topTitle").textContent = cur.title; renderConvs();
   addQuestion(text);
   const item = { q: text, answer: "", footer: "", blocks: [] }, box = el("div", "a"), steps = el("ul", "steps");
@@ -391,7 +392,7 @@ async function send(text) {
   const step = label => { const li = el("li", null, label); steps.append(li); box.scrollIntoView({ block: "end", behavior: "smooth" }); return li; };
   let pending = step("질문을 읽는 중");
   try {
-    const r = await fetch("/api/ask/stream", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": token }, body: JSON.stringify({ q: text, sid: cur.sid }) });
+    const r = await fetch("/api/ask/stream", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": token }, body: JSON.stringify({ q: text, sid: conv.sid }) });
     if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "연결 오류 " + r.status); }
     const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "", done = false;
     while (!done) {
@@ -402,7 +403,7 @@ async function send(text) {
         const chunk = buf.slice(0, k); buf = buf.slice(k + 2);
         if (!chunk.startsWith("data: ")) continue;
         const e = JSON.parse(chunk.slice(6));
-        if (e.type === "start") cur.sid = e.sid;
+        if (e.type === "start") conv.sid = e.sid;
         else if (e.type === "tool") { pending.classList.add("done"); pending = step(e.label); }
         else if (e.type === "block") { item.blocks.push(e.block); }
         else if (e.type === "answer") { item.answer = e.answer; item.footer = e.footer; done = true; }
@@ -412,8 +413,8 @@ async function send(text) {
     if (!item.answer && !item.error) item.error = "답을 받지 못했습니다. 잠시 뒤 다시 물어 주세요.";
   } catch (e) { item.error = String(e.message || e); }
   renderAnswer(item, box);
-  cur.items.push(item); saveItem(item);
-  if (item.blocks.length && wide()) openDrawer(item, item.blocks[0].ref);
+  conv.items.push(item); conv.at = Date.now(); save(); renderConvs();
+  if (cur === conv && item.blocks.length && wide()) openDrawer(item, item.blocks[0].ref);
   busy = false; go.disabled = !q.value.trim(); q.focus();
 }
 
