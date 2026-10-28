@@ -1,4 +1,4 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 11개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수 13개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
@@ -132,8 +132,8 @@ TOOLS = [
     {
         "name": "q_law_search",
         "description": (
-            "부동산 법령 17개(국토계획법 · 건축법 · 주택법 · 주택임대차보호법 · 상가건물 임대차보호법 · "
-            "공인중개사법 · 도시정비법 등과 시행령)의 현행 조문 검색. 낱말 절반 이상이 맞는 조문을 점수순으로 최대 10개. "
+            "부동산 법령 21개(국토계획법 · 건축법 · 주택법 · 주택임대차보호법 · 상가건물 임대차보호법 · "
+            "공인중개사법 · 도시정비법 등과 시행령, 경매 · 공매용 민사집행법 · 민사집행규칙 · 국세기본법 · 국세징수법)의 현행 조문 검색. 낱말 절반 이상이 맞는 조문을 점수순으로 최대 10개. "
             "「100분의 5」 같은 표현은 「5%」로도 찾힘. 짧은 핵심 낱말 2~4개로 물을 것."),
         "input_schema": {
             "type": "object",
@@ -277,6 +277,55 @@ TOOLS = [
         },
         "sql": "SELECT * FROM mart.q_market_series(%s::text, %s::text, %s::int)",
         "args": lambda a: (a.get("stat") or None, a.get("region") or None, max(1, min(int(a.get("months") or 24), 120))),
+    },
+    {
+        "name": "q_auction_discount",
+        "description": (
+            "공매 물건(한국자산관리공사 온비드)의 최저입찰가를 같은 단지 · 비슷한 면적(±3㎡)의 최근 실거래와 비교. 물건마다 현재 회차 한 줄: "
+            "물건관리번호 · 물건명 · 주소 · 용도 · 면적 · 감정가 · 최저입찰가 · 감정가 대비 % · 유찰 횟수 · 입찰 기간 · 찾은 단지 · "
+            "실거래 건수 · ㎡당 중위 단가 · 추정 시세(est_market_price = 단가 x 면적) · 실거래 대비 할인율(discount_pct) · label. "
+            "할인율 큰 순. 단지는 주소의 「동 지번」으로 찾고, 못 찾거나 같은 면적 거래가 없으면 할인율이 비고 label에 이유가 있음. "
+            "주의 세 가지를 답에 밝힐 것: ① 권리관계(선순위 임차인 · 유치권 등)는 보지 않아 할인이 커도 실제로는 비쌀 수 있음 — "
+            "q_auction_checklist로 확인 항목을 함께 안내, ② 온비드 면적이 실거래의 전용면적과 기준이 다를 수 있음, "
+            "③ 법원경매는 공식 API가 없어 들어 있지 않음. 0건이면 「공매 데이터 수집 전이거나 조건에 맞는 물건이 없음」. "
+            "입찰 권유는 하지 않음. 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "물건명 · 주소 · 용도 일부. 예: 아파트, 대치동"},
+                "open_only": {"type": "boolean", "description": "입찰이 안 끝난 물건만. 기본 true"},
+                "min_discount": {"type": "number", "description": "실거래 대비 할인율이 이 % 이상인 것만. 예: 15"},
+                "months": {"type": "integer", "description": "비교할 실거래 기간(개월). 기본 12, 최대 36"},
+                "limit": {"type": "integer", "description": "몇 건. 기본 20, 최대 30"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_auction_discount(%s::text, %s::text, %s::boolean, %s::numeric, %s::int, %s::int)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a.get("query") or None,
+                           True if a.get("open_only") is None else a["open_only"], a.get("min_discount"), _months(a),
+                           max(1, min(int(a.get("limit") or 20), 30))),
+    },
+    {
+        "name": "q_auction_checklist",
+        "description": (
+            "경매 · 공매 입찰 전에 확인할 권리 항목 14개(말소기준권리 · 선순위 임차인 · 배당요구 · 소액임차인 · 당해세 · 유치권 · "
+            "대지권 · 관리비 · 위반건축물 · 매각물건명세서 · 입찰보증금 · 실제 점유 등). 항목마다 무엇을 · 어느 서류에서 보는지와 "
+            "근거 조문(법령명 · 조문 번호, 수집돼 있으면 조문 제목 · 본문 앞부분). 「경매 권리분석 어떻게 해」 「말소기준권리가 뭐야」 "
+            "「선순위 임차인 있으면 어떻게 돼」나 공매 물건을 안내할 때 부름. 개별 물건의 권리관계를 판단하는 도구가 아님: "
+            "등기부 · 매각물건명세서는 갖고 있지 않으니 「서류를 직접 확인하고 복잡하면 전문가 상담」을 한 줄 덧붙일 것."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "kind": {"type": "string", "enum": ["경매", "공매"], "description": "경매 · 공매 하나만. 없으면 전부"},
+                "query": {"type": "string", "description": "항목 이름 일부. 예: 임차인, 유치권"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_auction_checklist(%s::text, %s::text)",
+        "args": lambda a: (a.get("kind") or None, a.get("query") or None),
     },
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}

@@ -1,0 +1,27 @@
+{
+  "header": {"resultCode": "00", "resultMsg": "NORMAL SERVICE."},
+  "body": {
+    "items": {
+      "item": [
+        {"cltrMngNo": "2026-0001-000001", "pbctCdtnNo": "1001", "pbctNsq": "1", "onbidCltrNm": "시험시 경매구 가동 1 시험파크 제101동 제5층 제501호",
+         "lctnSdnm": "시험시", "lctnSggnm": "경매구", "lctnEmdNm": "가동", "prptDivNm": "압류재산", "dspsMthodNm": "매각",
+         "cltrUsgMclsCtgrNm": "주거용건물", "cltrUsgSclsCtgrNm": "아파트", "bldSqms": "100.0", "apslEvlAmt": "400000000",
+         "lowstBidPrcIndctCont": "320,000,000", "usbdNft": "0", "pbctStatNm": "유찰", "cltrBidBgngDt": "202001061000", "cltrBidEndDt": "202001081700"},
+        {"cltrMngNo": "2026-0001-000001", "pbctCdtnNo": "1002", "pbctNsq": "2", "onbidCltrNm": "시험시 경매구 가동 1 시험파크 제101동 제5층 제501호",
+         "lctnSdnm": "시험시", "lctnSggnm": "경매구", "lctnEmdNm": "가동", "prptDivNm": "압류재산", "dspsMthodNm": "매각",
+         "cltrUsgMclsCtgrNm": "주거용건물", "cltrUsgSclsCtgrNm": "아파트", "bldSqms": "100.0", "apslEvlAmt": "400000000",
+         "lowstBidPrcIndctCont": "250,000,000", "usbdNft": "1", "pbctStatCd": "0001", "cltrBidBgngDt": "209911091000", "cltrBidEndDt": "209911111700"},
+        {"cltrMngNo": "2026-0001-000002", "pbctCdtnNo": "2001", "pbctNsq": "1", "onbidCltrNm": "시험시 경매구 가동 999 다세대 제2층 제201호",
+         "lctnSdnm": "시험시", "lctnSggnm": "경매구", "lctnEmdNm": "가동", "prptDivNm": "국유재산", "dspsMthodNm": "매각",
+         "cltrUsgSclsCtgrNm": "다세대주택", "bldSqms": "45.5", "apslEvlAmt": "300000000",
+         "lowstBidPrcIndctCont": "300000000", "usbdNft": "0", "pbctStatNm": "입찰준비중", "cltrBidBgngDt": "209912011000", "cltrBidEndDt": "209912031700"},
+        {"cltrMngNo": "2026-0001-000003", "pbctCdtnNo": "3001", "pbctNsq": "3", "onbidCltrNm": "시험시 경매구 가동 1 시험파크 제102동 제3층 제301호",
+         "lctnSdnm": "시험시", "lctnSggnm": "경매구", "lctnEmdNm": "가동", "prptDivNm": "압류재산", "dspsMthodNm": "매각",
+         "cltrUsgSclsCtgrNm": "아파트", "bldSqms": "100", "apslEvlAmt": "400000000",
+         "lowstBidPrcIndctCont": "200000000", "usbdNft": "2", "pbctStatNm": "낙찰", "cltrBidBgngDt": "202003021000", "cltrBidEndDt": "202003041700"},
+        {"pbctCdtnNo": "9", "onbidCltrNm": "물건번호 없는 줄"}
+      ]
+    },
+    "numOfRows": 500, "pageNo": 1, "totalCount": 5
+  }
+}

@@ -62,7 +62,7 @@ flowchart LR
 pip install -r requirements.txt
 export HANPILJI_DSN=postgresql://user@localhost/hanpilji
 bash scripts/init_db.sh                               # 여러 번 돌려도 됨. --postgis --pgvector 선택
-python -m hanpilji.collectors.law                     # 법령 17개 → core.doc_law
+python -m hanpilji.collectors.law                     # 법령 21개(부동산 17 + 경매 · 공매 4) → core.doc_law
 python -m hanpilji.collectors.eum_rule 행위제한.csv    # 토지이음에서 내려받은 파일
 
 # 공공데이터포털 인증키가 있으면 (키는 환경변수로만)
@@ -80,6 +80,9 @@ python -m hanpilji.collectors.vworld --from-dir vworld_raw                     #
 python -m hanpilji.collectors.market                  # 금리 · 물가(ECOS) · 아파트 가격지수(R-ONE) · 인구 · 세대(KOSIS) 10년
 python -m hanpilji.collectors.market --find rone 매매가격지수   # 표 번호 확인
 python -m hanpilji.collectors.market --items ecos 121Y006       # ECOS 항목 코드 확인
+
+# 공매 물건 (키: DATA_GO_KR_KEY, 온비드 물건목록 API를 따로 활용신청) → core.fact_auction
+python -m hanpilji.collectors.onbid                   # 시범 구의 입찰 진행 · 예정 공매 물건(재산유형마다 끝 쪽까지)
 ```
 
 시험:
@@ -94,6 +97,7 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 > [아파트 매매 실거래가](https://www.data.go.kr/data/15126469/openapi.do) ·
 > [아파트 전월세 실거래가](https://www.data.go.kr/data/15126474/openapi.do) ·
 > [건축HUB 건축물대장정보](https://www.data.go.kr/data/15134735/openapi.do).
+> 공매 물건은 「한국자산관리공사_차세대 온비드 부동산 물건목록 조회서비스」를 하나 더 신청하면 같은 키로 됩니다.
 > Encoding · Decoding 키 어느 쪽을 넣어도 됩니다.
 
 > [!NOTE]
@@ -114,12 +118,16 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 | `mart.q_land_price_trend(시군구, 동 · 단지?, 시작 연도?)` | 「도곡렉슬 공시지가 5년간 얼마나 올랐어?」 | 14 |
 | `mart.q_price_vs_official(시군구, 단지?, 개월?, 몇 곳?, 정렬?)` | 「공시지가 대비 실거래가가 높은 단지」 | 20 |
 | `mart.q_market_series(지표?, 지역?, 개월?)` | 「요즘 기준금리랑 주담대 금리」 「강남구 매매가격지수」 | 120 |
+| `mart.q_auction_discount(시군구, 검색어?, 진행 중만?, 최소 할인율?, 개월?, 몇 건?)` | 「강남구 공매 아파트 중 실거래보다 싼 것」 | 30 |
+| `mart.q_auction_checklist(경매·공매?, 항목?)` | 「경매 권리분석 뭘 봐야 해?」 「말소기준권리가 뭐야」 | 14 |
 
 `q_complex_price`는 단지 x 전용면적마다 거래단가 · 거래가격 · 전세단가 · 전세시세를 한 줄로 돌려줍니다. 해제된 거래와 월세는 빼고, ㎡당 · 평당 단가와 전세가율도 같이 줍니다.
 
 `q_deal_list`는 거래를 한 건씩(계약일 · 면적 · 층 · 금액 · 신규/갱신) 돌려주고, `price_desc`로 정렬하면 첫 줄이 최고가입니다. `q_complex_rank`는 단지 이름 없이 매매 · 전세 · 월세 건수, ㎡당 단가, 전세가율로 줄을 세웁니다. 단가 · 전세가율 순위는 거래가 3건 이상인 단지만 넣고, 준공연도는 매매 신고의 건축년도를 씁니다.
 
 `q_price_trend`는 달마다 매매 · 전세 ㎡당 **중위** 단가와 전월 · 전년 같은 달 대비를 줍니다. 신고 기한(계약 후 30일)이 안 지난 달은 `partial`로 표시합니다. `q_land_price_trend`의 상승률은 두 해 모두 값이 있는 같은 필지끼리 비교한 값의 중위값입니다. `q_price_vs_official`의 배수(거래 단가 ÷ 공시지가)는 땅 ㎡당과 집 전용 ㎡당을 나눈 비교 지표라 시세 반영률이 아니고, 용적률이 높을수록 작게 나옵니다. `q_market_series`는 지표를 비우면 지표마다 최근 값 한 줄씩 돌려줍니다.
+
+`q_auction_discount`는 공매 물건마다 현재 회차의 최저입찰가를 같은 단지(주소의 「동 지번」으로 찾음) · 비슷한 면적(±3㎡)의 최근 매매 ㎡당 중위 단가 x 면적과 비교해 할인율을 줍니다. 권리관계는 보지 않으므로 할인이 커도 선순위 임차인 · 유치권이 있으면 실제로는 비쌀 수 있고, 그래서 `q_auction_checklist`가 입찰 전 확인 항목 14개를 근거 조문(민사집행법 · 주택임대차보호법 · 국세기본법 등)과 함께 돌려줍니다. 법원경매는 공식 API가 없어 아직 넣지 않았습니다(`kind` 열로 같은 표에 넣을 자리는 있음).
 
 모든 함수가 `row_total`(전체 건수)을 함께 돌려줘서, GPT가 「10건만 보여드렸고 전체는 39건」처럼 말할 수 있습니다.
 
@@ -369,6 +377,10 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [x] Supabase(서울)에 백업 복원 · 클라우드에서 HTTPS로 GPT · 카드 읽기 (2026-10-27)
 - [x] 지표 분석: 실거래 월별 추세 · 공시지가 연도별 추세 · 공시지가 대비 실거래가, 지표 수집기(ECOS · R-ONE · KOSIS) (2026-10-28)
 - [ ] ECOS · R-ONE · KOSIS 키 발급 · 클라우드 허용 도메인 추가 → 첫 실제 응답으로 표 번호 · 항목 코드 확인
+- [x] 경매 · 공매 분석: 공매 수집기(온비드) · 실거래 대비 할인율 · 입찰 전 권리 확인 항목, 경매 법령 4개 추가 (2026-10-28)
+- [ ] 온비드 물건목록 API 활용신청 → 첫 실제 응답으로 항목 이름 확인 · 경매 법령 4개 적재
+- [ ] 새 공매 물건 · 유찰로 값이 내려간 물건 알림(매주, 웹사이트가 생기면)
+- [ ] 법원경매 물건: 공식 API가 생기거나 제휴 데이터가 정해지면
 - [ ] V-World 상업 이용 회신
 
 ## 📁 폴더
@@ -383,18 +395,20 @@ hanpilji/
 │   │   ├── luinfo.py        # 행위제한 API → core.reg_rule
 │   │   ├── rtms.py          # 아파트 매매 · 전월세 → core.fact_deal · fact_rent
 │   │   ├── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
-│   │   └── vworld.py        # V-World 토지특성 · 토지이용계획 → dim_parcel 지목 · fact_land_price · bridge_parcel_zone
+│   │   ├── vworld.py        # V-World 토지특성 · 토지이용계획 → dim_parcel 지목 · fact_land_price · bridge_parcel_zone
+│   │   ├── market.py        # ECOS · R-ONE · KOSIS → core.fact_market
+│   │   └── onbid.py         # 온비드 공매 물건 → core.fact_auction
 │   ├── datagokr.py          # 공공데이터포털 공통(키 · 호출 · 응답 풀기)
 │   ├── gpt/
 │   │   ├── engine.py        # 질문 → 도구 호출 반복 → 답 + 근거
-│   │   ├── tools.py         # 마트 함수 4개 = 도구 정의 · 인자 확인
+│   │   ├── tools.py         # 마트 함수 13개 = 도구 정의 · 인자 확인
 │   │   ├── llm.py           # 제공자(Anthropic) · 교체 지점
 │   │   ├── __main__.py      # 터미널 대화
 │   │   └── web.py           # 웹 채팅
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
 │   ├── supabase.py          # Supabase를 HTTPS로: 백업 복원 · GPT용 읽기 연결
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
-├── sql/00~11_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
+├── sql/00~14_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값
 ├── scripts/init_db.sh       # 빈 DB에 스키마 올리기
 ├── scripts/restore_db.sh    # 백업에서 되살리기
 ├── tests/                   # fixtures/*_real.xml 은 법제처 실제 응답
