@@ -208,6 +208,8 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 - **지적도:** 단지 · 주소를 물으면 대상 필지 경계(측량 청색), 둘레 이웃 필지와 번지 · 지목, 건물 윤곽, 축척 막대를 그립니다. 도형은 화면에만 가고 모델에게는 번지 · 면적 · 중심 좌표만 넘깁니다(토큰 절약). 배경지도는 `HANPILJI_MAP_TILES=vworld`(+ `HANPILJI_VWORLD_MAP_KEY`, 밝은 화면 white · 어두운 화면 midnight) · `osm` 중에서 고르고, 안 정하면 모눈 위에 선만 그립니다. 연속지적도는 참고용 도면이라 측량 · 경계 확정에 쓸 수 없다고 늘 함께 적습니다.
 - **대화 목록:** 이 브라우저에만 저장합니다. 휴대폰에서는 근거 서랍이 아래에서 올라옵니다.
 
+<p align="center"><img src="docs/assets/web_map.png" width="860" alt="지적도 블록: 도곡렉슬 필지 5개 경계와 이웃 필지 번지 · 지목, 건물 윤곽, 축척 막대"></p>
+
 <p align="center"><img src="docs/assets/web_mobile.png" width="860" alt="휴대폰 화면: 첫 화면, 지표 답, 아래에서 올라온 근거 서랍"></p>
 
 | 주소 | 하는 일 |
@@ -449,7 +451,9 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [ ] 법원경매 물건: 공식 API가 생기거나 제휴 데이터가 정해지면
 - [ ] V-World 상업 이용 회신
 - [x] 지적도 · 건물 윤곽 적재 코드 · 지도 함수(`q_parcel_map`) · 웹 지도 블록 (2026-10-28)
-- [ ] 국내 PC에서 강남구 지적도 받기(`scripts/vworld_fetch_geom_gangnam.py`) → 적재 · Supabase 반영
+- [x] 국내 PC에서 강남구 지적도 받기 → 필지 경계 34,658개(면적 합 39.5㎢) · 건물 윤곽 24,235개, 한필지 필지 1,149/1,168개에 경계 (2026-10-28)
+- [ ] 지적도 Supabase 반영(`python -m hanpilji.supabase push-geo`)
+- [ ] 경계가 없는 한필지 필지 19개: 본번 0 같은 잘못 만든 PNU · 합병 · 분할로 바뀐 번지 확인
 
 ## 📁 폴더
 

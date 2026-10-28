@@ -126,12 +126,12 @@ tr:last-child td{border-bottom:0}
 .legend{display:flex;gap:12px;flex-wrap:wrap;font-size:11.5px;color:var(--muted);margin-top:4px}
 .legend i{display:inline-block;width:12px;height:3px;border-radius:2px;margin-right:5px;vertical-align:middle}
 .map svg{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:6px}
-.map svg path.nb:hover,.map svg path.bd:hover{stroke:var(--survey);stroke-opacity:1}
+.map svg path.m-nb:hover,.map svg path.m-bd:hover{stroke:var(--survey);stroke-opacity:1}
 .map .tiles{opacity:.9}
 .legend i.mk{width:12px;height:10px;border-radius:2px}
-.legend i.mk.tg{background:var(--survey-soft);border:2px solid var(--survey)}
-.legend i.mk.nb{background:transparent;border:1px solid var(--muted)}
-.legend i.mk.bd{background:color-mix(in srgb,var(--ink) 16%,transparent);border:1px solid var(--muted)}
+.legend i.mk-tg{background:var(--survey-soft);border:2px solid var(--survey)}
+.legend i.mk-nb{background:transparent;border:1px solid var(--muted)}
+.legend i.mk-bd{background:color-mix(in srgb,var(--ink) 16%,transparent);border:1px solid var(--muted)}
 
 .doc{padding:14px 16px;font-size:14px;line-height:1.8}
 .doc+.doc{border-top:1px solid var(--line)}
