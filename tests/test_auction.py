@@ -159,7 +159,7 @@ class WithDb(unittest.TestCase):
         self.assertEqual(float(top[8]), 62.5)
         self.assertIn("실거래가", top[9])
         self.assertEqual((rows[1][3], rows[1][6]), ("피엔유빌", None), "지번(999)이 달라도 PNU로 단지를 찾음")
-        self.assertIn("같은 면적 거래 없음", rows[1][7])
+        self.assertIn("아파트가 아님", rows[1][7], "다세대는 아파트 실거래와 비교하지 않음")
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, false)", self.SGG)[0][0], 3)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, true, 20)", self.SGG)[0][0], 1)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, '다세대')", self.SGG)[0][0], 1)

@@ -134,6 +134,7 @@ LANGUAGE sql STABLE AS $$
             SELECT count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY d.amount / d.area) AS med
             FROM core.fact_deal d
             WHERE d.complex_id = cx.complex_id AND NOT d.is_cancelled AND c.area_m2 IS NOT NULL
+              AND c.usage LIKE '%아파트%'   -- 실거래는 아파트뿐. 같은 건물의 상가 · 오피스텔을 아파트 값과 비교하지 않음
               AND abs(d.area - c.area_m2) <= 3
               AND d.contract_date > current_date - make_interval(months => greatest(1, least(p_months, 36)))
         ) t ON true
@@ -145,7 +146,8 @@ LANGUAGE sql STABLE AS $$
     SELECT rank() OVER (ORDER BY r.disc DESC NULLS LAST), r.kind, r.cltr_mng_no, r.name, r.address, r.usage, r.area_m2,
            r.appraisal, r.min_bid, round(r.min_bid * 100.0 / nullif(r.appraisal, 0), 1), r.fail_count, r.round_no,
            r.status, r.bid_begin, r.bid_end, r.cx_name, coalesce(r.n, 0), r.med::bigint, r.est::bigint, r.disc,
-           CASE WHEN r.est IS NULL THEN CASE WHEN r.complex_id IS NULL THEN '시세 비교 불가(단지를 못 찾음)'
+           CASE WHEN r.est IS NULL THEN CASE WHEN coalesce(r.usage, '') NOT LIKE '%아파트%' THEN '시세 비교 불가(아파트가 아님)'
+                                             WHEN r.complex_id IS NULL THEN '시세 비교 불가(단지를 못 찾음)'
                                              ELSE '시세 비교 불가(같은 면적 거래 없음)' END
                 WHEN r.disc >= 15 THEN '실거래 대비 15% 이상 낮음 · 권리 확인 전'
                 WHEN r.disc > 0 THEN '실거래보다 낮음 · 권리 확인 전'
