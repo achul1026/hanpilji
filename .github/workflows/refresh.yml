@@ -51,8 +51,10 @@ jobs:
           test -n "$HANPILJI_DSN" || { echo "::error::HANPILJI_DSN 비밀값이 없음"; exit 1; }
           echo "이번 실행: $WHAT"
 
+      # 단계마다 시간 제한: 한 기관이 응답을 끌어도(2026-10-28 법령 단계 20분 멈춤) 다음 수집기는 돎
       - name: 실거래 매매 · 전월세
         if: env.WHAT == 'daily'
+        timeout-minutes: 30
         run: python -m hanpilji.collectors.rtms
       - name: 공매 물건(온비드)
         if: ${{ !cancelled() && env.WHAT == 'daily' }}
@@ -60,16 +62,20 @@ jobs:
 
       - name: 법령
         if: ${{ !cancelled() && env.WHAT == 'weekly' }}
+        timeout-minutes: 20
         run: python -m hanpilji.collectors.law
       - name: 시장 지표
         if: ${{ !cancelled() && env.WHAT == 'weekly' }}
+        timeout-minutes: 20
         run: python -m hanpilji.collectors.market --months 12
 
       - name: 건축물대장
         if: ${{ !cancelled() && env.WHAT == 'monthly' }}
+        timeout-minutes: 240
         run: python -m hanpilji.collectors.bld --refresh
       - name: 행위제한
         if: ${{ !cancelled() && env.WHAT == 'monthly' }}
+        timeout-minutes: 60
         run: python -m hanpilji.collectors.luinfo --refresh
 
       - name: 수집처별 마지막 성공
