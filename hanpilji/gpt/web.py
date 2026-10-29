@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hanpilji import config as config_mod
-from hanpilji.gpt import blocks, engine, llm, tools
+from hanpilji.gpt import blocks, engine, llm, tools, verify
 
 MAX_SESSIONS = 200
 MAX_QUESTION = 1000
@@ -45,6 +45,11 @@ TILES = {
                "styles": {"light": "white", "dark": "midnight"}, "max_zoom": 19, "attr": "배경지도 © V-World(국토교통부)"},
     "osm": {"url": "https://tile.openstreetmap.org/{z}/{x}/{y}.png", "max_zoom": 19, "attr": "배경지도 © OpenStreetMap"},
 }
+
+
+def extras(ans):
+    """답에 붙여 보내는 것: 숫자 검산 결과와 이어서 볼 것(둘 다 모델이 아니라 엔진이 만듦)."""
+    return {"verify": verify.check(ans.text, ans.results), "next": blocks.next_steps(ans.results)}
 
 
 def map_config(env=None):
@@ -192,7 +197,7 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             if ans is None:
                 return self._json(500, {"error": ASK_FAILED, "sid": sid})
             self._json(200, {"answer": ans.text, "footer": ans.footer, "sid": sid,
-                             "blocks": blocks.blocks(ans.results)})
+                             "blocks": blocks.blocks(ans.results), **extras(ans)})
 
         def _stream(self, question, sid, sess):
             """진행을 Server-Sent Events로 흘려보냄: tool(조회 시작) · block(조회 결과) · answer(답) · error."""
@@ -223,13 +228,14 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             if ans is None:
                 send({"type": "error", "error": ASK_FAILED})
             else:
-                send({"type": "answer", "answer": ans.text, "footer": ans.footer, "stop": ans.stop})
+                send({"type": "answer", "answer": ans.text, "footer": ans.footer, "stop": ans.stop, **extras(ans)})
             self.close_connection = True
 
         def _tool(self, body):
-            """블록의 기간만 바꿔 다시 조회(모델을 부르지 않아 요금 없음). 인자는 도구 형식대로 확인함."""
+            """블록의 기간을 바꿔 다시 조회하거나 「이어서 볼 것」을 엶(모델을 부르지 않아 요금 없음).
+            인자는 도구 형식대로 확인함."""
             name, args = body.get("tool"), body.get("args")
-            if name not in blocks.MONTHS_CHOICES or not isinstance(args, dict):
+            if name not in blocks.MONTHS_CHOICES and name not in blocks.FOLLOW_TOOLS or not isinstance(args, dict):
                 return self._json(400, {"error": "다시 조회할 수 없는 블록"})
             if not self._rate_ok("tool", tool_per_hour):
                 return self._json(429, {"error": "너무 자주 바꿨습니다. 잠시 뒤 다시 해 주세요."})
