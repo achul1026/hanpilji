@@ -14,7 +14,7 @@ from unittest import mock
 
 import psycopg
 
-from hanpilji.gpt import blocks, engine, llm, tools, verify
+from hanpilji.gpt import blocks, engine, llm, report, tools, verify
 from hanpilji.gpt.llm import Reply
 
 DSN = os.environ.get("HANPILJI_TEST_DSN")
@@ -403,6 +403,59 @@ class Verify(unittest.TestCase):
         self.assertEqual(blocks.next_steps([{"tool": "q_law_search", "args": {"query": "5%"}, "rows": []}]), [])
 
 
+class Report(unittest.TestCase):
+    def fake_run(self, rows_by_query):
+        def run(conn, name, args):
+            if name == "q_property_card":
+                rows = rows_by_query[args["query"]]
+            else:
+                rows = [{"month": "202609", "x": 1}]
+            return {"tool": name, "args": args, "rows": rows, "shown": len(rows), "row_total": len(rows),
+                    "sources": ["s"], "asof": "2026-10-28"}
+        return run
+
+    def test_report_runs_card_then_tools_by_name(self):
+        run = self.fake_run({"도곡동 527": [{"complex_name": "도곡렉슬"}]})
+        with mock.patch.object(tools, "run", side_effect=run) as m:
+            out = report.report(mock.Mock(), "도곡동 527")
+        self.assertEqual(out["subject"], "도곡렉슬")
+        self.assertEqual([b["tool"] for b in out["blocks"]],
+                         ["q_property_card", "q_parcel_map", "q_price_trend", "q_land_price_trend", "q_price_vs_official"])
+        self.assertEqual([b["ref"] for b in out["blocks"]], [1, 2, 3, 4, 5])
+        self.assertEqual(m.call_args_list[2].args[1:], ("q_price_trend", {"name": "도곡렉슬"}), "카드가 정한 단지 이름으로")
+
+    def test_many_or_none_give_choices(self):
+        run = self.fake_run({"래미안": [{"complex_name": "래미안대치팰리스"}, {"complex_name": "역삼래미안"}],
+                             "래미안대치팰리스": [{"complex_name": "래미안대치팰리스"}, {"complex_name": "래미안대치팰리스2"}],
+                             "없음": []})
+        with mock.patch.object(tools, "run", side_effect=run):
+            with self.assertRaises(report.NotOne) as e:
+                report.report(mock.Mock(), "래미안")
+            self.assertEqual(e.exception.choices, ["래미안대치팰리스", "역삼래미안"])
+            self.assertEqual(report.report(mock.Mock(), "래미안대치팰리스")["subject"], "래미안대치팰리스",
+                             "이름이 정확히 같은 단지가 하나면 그것으로")
+            with self.assertRaises(report.NotOne):
+                report.compare(mock.Mock(), "래미안대치팰리스", "없음")
+
+    def test_one_failing_tool_does_not_break_report(self):
+        good = self.fake_run({"도곡렉슬": [{"complex_name": "도곡렉슬"}]})
+
+        def run(conn, name, args):
+            if name == "q_parcel_map":
+                raise RuntimeError("db")
+            return good(conn, name, args)
+        with mock.patch.object(tools, "run", side_effect=run):
+            out = report.report(mock.Mock(), "도곡렉슬")
+        self.assertNotIn("q_parcel_map", [b["tool"] for b in out["blocks"]])
+
+    def test_compare(self):
+        run = self.fake_run({"a": [{"complex_name": "A"}], "b": [{"complex_name": "B"}]})
+        with mock.patch.object(tools, "run", side_effect=run):
+            out = report.compare(mock.Mock(), "a", "b")
+        self.assertEqual(out["subjects"], ["A", "B"])
+        self.assertEqual([b["tool"] for b in out["blocks"]], ["q_property_card", "q_property_card", "q_price_trend", "q_price_trend"])
+
+
 class Web(unittest.TestCase):
     """웹 채팅 서버를 실제 포트로 띄워 요청 처리(키 · DB 없이: 엔진을 가짜로 바꿈)."""
 
@@ -456,6 +509,25 @@ class Web(unittest.TestCase):
         run.assert_called_once()   # 카드와 최근 거래를 한 함수(한 스냅숏)에서 읽음
         self.assertEqual(run.call_args.args[1:], ("q_property_card", {"query": "도곡"}))
         self.assertEqual(got["rows"], card["rows"])
+
+    def test_report_and_compare_endpoints(self):
+        self.serve()
+        import urllib.error
+        import urllib.request
+
+        def get(path):
+            try:
+                with urllib.request.urlopen(self.base + path) as r:
+                    return r.status, json.loads(r.read())
+            except urllib.error.HTTPError as e:
+                return e.code, json.loads(e.read())
+        with mock.patch.object(report, "report", return_value={"subject": "도곡렉슬", "blocks": []}) as rep:
+            self.assertEqual(get("/api/report?q=%EB%8F%84%EA%B3%A1")[1]["subject"], "도곡렉슬")
+        self.assertEqual(rep.call_args.args[1], "도곡")
+        with mock.patch.object(report, "compare", side_effect=report.NotOne("래미안", ["a", "b"])):
+            self.assertEqual(get("/api/compare?a=x&b=%EB%9E%98%EB%AF%B8%EC%95%88")[1], {"query": "래미안", "choices": ["a", "b"]})
+        self.assertEqual(get("/api/report")[0], 400)
+        self.assertEqual(get("/api/compare?a=x")[0], 400)
 
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
