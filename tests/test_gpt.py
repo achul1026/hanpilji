@@ -406,12 +406,12 @@ class Verify(unittest.TestCase):
 class Web(unittest.TestCase):
     """웹 채팅 서버를 실제 포트로 띄워 요청 처리(키 · DB 없이: 엔진을 가짜로 바꿈)."""
 
-    def serve(self, token=None, per_hour=30):
+    def serve(self, token=None, per_hour=30, **kw):
         import threading
         from http.server import ThreadingHTTPServer
 
         from hanpilji.gpt import web
-        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler({}, None, 6, token, per_hour))
+        server = ThreadingHTTPServer(("127.0.0.1", 0), web.make_handler({}, None, 6, token, per_hour, **kw))
         threading.Thread(target=server.serve_forever, daemon=True).start()
         self.addCleanup(server.server_close)
         self.addCleanup(server.shutdown)
@@ -528,6 +528,22 @@ class Web(unittest.TestCase):
         self.assertEqual(self.post({"q": "a"})[0], 403)
         self.assertEqual(self.post({"q": "a"}, {"X-Token": "wrong"})[0], 403)
         self.assertEqual([self.post({"q": "a"}, {"X-Token": "s3cret"})[0] for _ in range(3)], [200, 200, 429])
+
+    def test_daily_limit_and_proxy_address(self):
+        self.serve(per_hour=1, daily_limit=2, trust_proxy=True)
+        ip = lambda a: {"X-Forwarded-For": a}
+        self.assertEqual(self.post({"q": "a"}, ip("9.9.9.9, 1.1.1.1"))[0], 200)
+        self.assertEqual(self.post({"q": "a"}, ip("8.8.8.8, 1.1.1.1"))[0], 429, "앞쪽 주소를 바꿔도 같은 방문자")
+        self.assertEqual(self.post({"q": "a"}, ip("2.2.2.2"))[0], 200)
+        code, got = self.post({"q": "a"}, ip("3.3.3.3"))
+        self.assertEqual(code, 429)
+        self.assertIn("오늘", got["error"], "모든 방문자를 합친 하루 한도")
+
+    def test_public_mode_needs_no_token(self):
+        from hanpilji.gpt import web
+        os.environ.pop(web.TOKEN_ENV, None)
+        with mock.patch.dict(os.environ, {web.PUBLIC_ENV: "1", web.DAILY_ENV: "x"}):
+            self.assertEqual(web.main(["--host", "0.0.0.0", "--port", "0"]), 2, "한도가 숫자가 아니면 안 켬")
 
     def test_refuses_public_host_without_token(self):
         from hanpilji.gpt import web

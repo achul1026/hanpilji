@@ -9,6 +9,9 @@
 
 남에게 열 때(--host 0.0.0.0 등): 질문마다 API 요금이 나가므로 HANPILJI_WEB_TOKEN을 정해야만 켜짐.
 그때 주소는 http://서버:8000/?token=정한값 . 토큰이 있어도 접속 주소(IP)마다 시간당 질문 수를 제한함.
+누구나 쓰게 공개하려면(Cloud Run 등) 토큰 대신 HANPILJI_WEB_PUBLIC=1. 그때는 전체 질문 수를 24시간에
+HANPILJI_WEB_DAILY_LIMIT개(기본 50)로 막아 요금이 한도 밖으로 나가지 않게 함. 포트는 환경변수 PORT가 있으면 그것.
+앞에 프록시가 있으면 HANPILJI_TRUST_PROXY=1로 X-Forwarded-For의 마지막 주소를 접속 주소로 씀(Cloud Run이 덧붙이는 값).
 """
 import argparse
 import hmac
@@ -30,7 +33,12 @@ MAX_SESSIONS = 200
 MAX_QUESTION = 1000
 MAX_BODY = 16 * 1024          # 질문 1,000자면 넉넉함. 넘으면 읽지 않고 거절
 PER_HOUR = 30                 # 접속 주소마다 시간당 질문 수
+DAILY_LIMIT = 50              # 공개 모드에서 모든 방문자를 합친 24시간 질문 수(질문당 몇백 원이라 처음엔 작게)
+MAX_HIT_KEYS = 5000           # 접속 주소별 기록이 이보다 많으면 지난 것을 비움
 TOKEN_ENV = "HANPILJI_WEB_TOKEN"
+PUBLIC_ENV = "HANPILJI_WEB_PUBLIC"
+DAILY_ENV = "HANPILJI_WEB_DAILY_LIMIT"
+PROXY_ENV = "HANPILJI_TRUST_PROXY"
 ASK_FAILED = "답을 만드는 중 오류가 났습니다. 잠시 뒤 다시 물어 주세요."
 
 STATIC = Path(__file__).with_name("static")
@@ -73,9 +81,11 @@ def page(name):
     return (STATIC / name).read_text(encoding="utf-8")
 
 
-def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hour=TOOL_PER_HOUR):
+def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hour=TOOL_PER_HOUR,
+                 daily_limit=None, trust_proxy=False):
     sessions, lock = {}, threading.Lock()   # sid → {"messages", "lock"}
     hits = {}                               # (종류, 접속 주소) → 최근 1시간 요청 시각들
+    asked = []                              # 모든 방문자의 최근 24시간 질문 시각(daily_limit용)
 
     class Handler(BaseHTTPRequestHandler):
         def _send(self, code, body, ctype):
@@ -96,15 +106,37 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             given = self.headers.get("X-Token") or parse_qs(urlsplit(self.path).query).get("token", [""])[0]
             return hmac.compare_digest(given.encode(), token.encode())
 
+        def _client(self):
+            headers = getattr(self, "headers", None)   # 요청 줄이 깨지면 머리글을 읽기 전에 기록부터 남김
+            if trust_proxy and headers is not None:
+                fwd = [a.strip() for a in (headers.get("X-Forwarded-For") or "").split(",") if a.strip()]
+                if fwd:   # 앞쪽은 방문자가 마음대로 넣을 수 있어 프록시가 붙인 마지막 값만 믿음
+                    return fwd[-1]
+            return self.client_address[0]
+
         def _rate_ok(self, kind="ask", limit=None):
             limit = per_hour if limit is None else limit
-            now, key = time.monotonic(), (kind, self.client_address[0])
+            now, key = time.monotonic(), (kind, self._client())
             with lock:
+                if len(hits) > MAX_HIT_KEYS:
+                    for k in [k for k, v in hits.items() if not v or now - v[-1] >= 3600]:
+                        del hits[k]
                 recent = [t for t in hits.get(key, []) if now - t < 3600]
                 if len(recent) >= limit:
                     hits[key] = recent
                     return False
                 hits[key] = recent + [now]
+                return True
+
+        def _daily_ok(self):
+            if daily_limit is None:
+                return True
+            now = time.monotonic()
+            with lock:
+                asked[:] = [t for t in asked if now - t < 86400]
+                if len(asked) >= daily_limit:
+                    return False
+                asked.append(now)
                 return True
 
         def do_GET(self):
@@ -165,6 +197,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 return self._json(400, {"error": "질문이 비어 있음"})
             if not self._rate_ok():
                 return self._json(429, {"error": f"질문이 너무 많습니다. 한 시간에 {per_hour}개까지 받습니다."})
+            if not self._daily_ok():
+                return self._json(429, {"error": "오늘 받을 수 있는 질문을 모두 받았습니다. 내일 다시 물어 주세요."})
             sid, sess = self._session(body.get("sid"))
             if path == "/api/ask":
                 return self._ask(question, sid, sess)
@@ -251,7 +285,7 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             self._json(200, {"block": blocks.block(out)})
 
         def log_message(self, fmt, *args):   # 질문 내용이 접속 기록에 남지 않게 경로만
-            sys.stderr.write(f"{self.address_string()} {self.command} {urlsplit(self.path).path} {args[1] if len(args) > 1 else ''}\n")
+            sys.stderr.write(f"{self._client()} {self.command} {urlsplit(self.path).path} {args[1] if len(args) > 1 else ''}\n")
 
     return Handler
 
@@ -267,12 +301,19 @@ def main(argv=None):
     p = argparse.ArgumentParser(prog="python -m hanpilji.gpt.web", description="한필지 웹")
     p.add_argument("--config", default="config.toml")
     p.add_argument("--host", default="127.0.0.1")
-    p.add_argument("--port", type=int, default=8000)
+    p.add_argument("--port", type=int, default=int(os.environ.get("PORT") or 8000))
     a = p.parse_args(argv)
     cfg = config_mod.load(a.config)
     token = os.environ.get(TOKEN_ENV) or None
-    if token is None and not _loopback(a.host):
-        print(f"{a.host}로 열려면 환경변수 {TOKEN_ENV}를 정하세요(질문마다 API 요금이 나감).", file=sys.stderr)
+    public = os.environ.get(PUBLIC_ENV) == "1"
+    try:
+        daily = int(os.environ.get(DAILY_ENV) or DAILY_LIMIT) if public else None
+    except ValueError:
+        print(f"{DAILY_ENV}는 숫자여야 합니다.", file=sys.stderr)
+        return 2
+    if token is None and not public and not _loopback(a.host):
+        print(f"{a.host}로 열려면 환경변수 {TOKEN_ENV}를 정하거나, 누구나 쓰게 하려면 {PUBLIC_ENV}=1"
+              f"(하루 질문 수 {DAILY_ENV}로 제한)을 정하세요(질문마다 API 요금이 나감).", file=sys.stderr)
         return 2
     try:
         rounds = engine.rounds_from(cfg)
@@ -283,7 +324,8 @@ def main(argv=None):
     except ValueError as e:
         print(e, file=sys.stderr)
         return 2
-    server = ThreadingHTTPServer((a.host, a.port), make_handler(cfg, model, rounds, token))
+    server = ThreadingHTTPServer((a.host, a.port), make_handler(cfg, model, rounds, token, daily_limit=daily,
+                                                                trust_proxy=os.environ.get(PROXY_ENV) == "1"))
     print(f"http://{a.host}:{a.port} 에서 열었습니다 (끄려면 Ctrl+C)", file=sys.stderr)
     try:
         server.serve_forever()

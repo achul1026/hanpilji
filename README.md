@@ -198,6 +198,8 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 
 웹은 대화(가운데)와 **근거 서랍**(오른쪽)으로 되어 있습니다. 답 속 `[1]` 같은 번호를 누르면 그 숫자가 나온 원본(표 · 월별 그래프 · 조문 원문 · 단지 카드)이 서랍에 열립니다. 서버는 파이썬 표준 라이브러리만 쓰고, 화면은 `hanpilji/gpt/static/`의 파일 셋(HTML · CSS · JS, 빌드 없음)입니다.
 
+누구나 쓰게 공개하는 법(Google Cloud Run 서울, `Dockerfile`, 하루 질문 한도, V-World 운영키 신청)은 [docs/deploy_cloudrun.md](docs/deploy_cloudrun.md)에 있습니다.
+
 <p align="center"><img src="docs/assets/web_home.png" width="860" alt="한필지 첫 화면: 제목 아래 입력창, 예시 질문, 같은 질문에 대한 흔한 AI 답과 한필지 답 비교"></p>
 
 <p align="center"><img src="docs/assets/web_answer.png" width="860" alt="한필지 답: 도곡렉슬 단지 머리, 결론 한 줄, 원자료 일치 표시가 붙은 핵심 숫자 카드, 근거 서랍의 단지 카드"></p>

@@ -1,0 +1,10 @@
+.git
+.github
+raw/
+docs/
+tests/
+sql/
+scripts/
+**/__pycache__
+*.pyc
+.env
