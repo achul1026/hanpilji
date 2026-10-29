@@ -11,8 +11,9 @@
 오피스텔(매매 15126464 · 전월세 15126475)은 아파트와 항목이 같고 단지명이 offiNm, 동(aptDong) · 도로명(roadnm)이 없음
 (실제 응답으로 확인, 강남구 36개월 2026-10-29). 거래 종류(deal_type · rent_type)와 단지 종류(dim_complex.kind)에
 「오피스텔」로 넣고, 단지 번호는 「rtms-offi:」로 시작해 같은 지번의 아파트와 섞이지 않음.
-연립다세대(매매 15126467 · 전월세 15126473)는 건물 이름이 mhouseNm이고 연립 · 다세대 구분이 houseType에 옴(명세 기준,
-첫 실제 응답으로 확인할 것). 종류는 「연립다세대」 하나로 넣고 단지 번호는 「rtms-rh:」로 시작. 빌라는 건물 한 동이 한 단지.
+연립다세대(매매 15126467 · 전월세 15126473)는 건물 이름이 mhouseNm이고 연립 · 다세대 구분이 houseType에 옴(실제 응답으로
+확인, 강남구 2026-10-29). 매매만 주소 끝에 「2」가 붙음(RTMSDataSvcRHTrade2). 종류는 「연립다세대」 하나로 넣고
+단지 번호는 「rtms-rh:」로 시작. 빌라는 건물 한 동이 한 단지.
 """
 import argparse
 import datetime
@@ -36,7 +37,7 @@ KINDS = {
                    "label": "오피스텔", "base": "trade", "src": "국토교통부 오피스텔 매매 실거래가"},
     "offi_rent": {"source": "dg_offi_rent", "path": "RTMSDataSvcOffiRent/getRTMSDataSvcOffiRent",
                   "label": "오피스텔", "base": "rent", "src": "국토교통부 오피스텔 전월세 실거래가"},
-    "rh_trade": {"source": "dg_rh_trade", "path": "RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
+    "rh_trade": {"source": "dg_rh_trade", "path": "RTMSDataSvcRHTrade2/getRTMSDataSvcRHTrade2",
                  "label": "연립다세대", "base": "trade", "src": "국토교통부 연립다세대 매매 실거래가"},
     "rh_rent": {"source": "dg_rh_rent", "path": "RTMSDataSvcRHRent/getRTMSDataSvcRHRent",
                 "label": "연립다세대", "base": "rent", "src": "국토교통부 연립다세대 전월세 실거래가"},
