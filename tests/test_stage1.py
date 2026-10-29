@@ -25,7 +25,7 @@ def as_month(rows, ym):
 
 
 def fixture_fetch(path, params):
-    name = ("rtms_offi_trade_doc.xml" if "OffiTrade" in path else "rtms_offi_rent_doc.xml" if "OffiRent" in path
+    name = ("rtms_offi_trade_real.xml" if "OffiTrade" in path else "rtms_offi_rent_real.xml" if "OffiRent" in path
             else "rtms_trade_real.xml" if "Trade" in path else "rtms_rent_real.xml" if "Rent" in path
             else "luinfo_real_snackbar.xml")
     data = (FIX / name).read_bytes()
@@ -95,17 +95,17 @@ class RtmsParse(unittest.TestCase):
         self.assertNotEqual(rtms.complex_key(a), rtms.complex_key({**a, "aptNm": "강남브리즈힐2"}))
 
     def test_officetel(self):
-        offi = datagokr.items(datagokr.parse((FIX / "rtms_offi_trade_doc.xml").read_bytes()))
-        offi_rent = datagokr.items(datagokr.parse((FIX / "rtms_offi_rent_doc.xml").read_bytes()))
+        offi = datagokr.items(datagokr.parse((FIX / "rtms_offi_trade_real.xml").read_bytes()))
+        offi_rent = datagokr.items(datagokr.parse((FIX / "rtms_offi_rent_real.xml").read_bytes()))
         d, why = rtms.to_deal(offi[0], "11680")
         self.assertIsNone(why)
-        self.assertEqual((d["amount"], d["area"], d["floor"]), (310_000_000, 29.5, 5))
-        self.assertTrue(rtms.to_deal(offi[2], "11680")[0]["is_cancelled"])
-        self.assertEqual(rtms.to_rent(offi_rent[1], "11680")[0]["monthly_rent"], 950_000)
+        self.assertEqual((d["amount"], d["area"], d["floor"], d["build_year"]), (165_000_000, 28.12, 2, 2004))
+        self.assertTrue(rtms.to_deal(offi[1], "11680")[0]["is_cancelled"], "해제는 cdealType=O(아파트와 같음)")
+        self.assertEqual(rtms.to_rent(offi_rent[1], "11680")[0]["monthly_rent"], 200_000)
         # 같은 지번 · 같은 이름(주상복합)이어도 아파트와 다른 단지, 오피스텔 매매 · 전월세는 한 단지
         self.assertTrue(rtms.complex_key(offi[0]).startswith("rtms-offi:"))
-        self.assertEqual(offi[0]["jibun"], self.rows[0]["jibun"].strip())
-        self.assertNotEqual(rtms.complex_key({**offi[0], "offiNm": self.rows[0]["aptNm"]}), rtms.complex_key(self.rows[0]))
+        same_place = {**offi[0], **{k: self.rows[0][k] for k in ("umdNm", "jibun")}, "offiNm": self.rows[0]["aptNm"]}
+        self.assertNotEqual(rtms.complex_key(same_place), rtms.complex_key(self.rows[0]))
         self.assertEqual({rtms.complex_key(r) for r in offi + offi_rent}, {rtms.complex_key(offi[0])})
         self.assertNotEqual(rtms.row_key("trade", offi[0]), rtms.row_key("trade", {**offi[0], "offiNm": "다른 오피스텔"}))
 
@@ -203,12 +203,12 @@ class Stage1Pipeline(unittest.TestCase):
                          "똑같은 전월세 2건도 따로 셈(실제 응답)")
         self.assertEqual(self.q("SELECT count(*) FROM core.dim_complex WHERE kind = '아파트'")[0][0], 1,
                          "매매 · 전월세가 한 단지로 묶임")
-        # 오피스텔: 같은 지번이어도 아파트와 다른 단지, 출처도 따로
+        # 오피스텔: 아파트와 다른 단지, 출처도 따로
         self.assertEqual(self.q("SELECT count(*), count(DISTINCT complex_id), min(source) FROM core.fact_deal"
                                 " WHERE deal_type = '오피스텔'")[0], (3, 1, "국토교통부 오피스텔 매매 실거래가"))
         self.assertEqual(self.q("SELECT count(*) FROM core.fact_rent WHERE rent_type = '오피스텔'")[0][0], 2)
         self.assertEqual(self.q("SELECT name, kind, pnu FROM core.dim_complex WHERE kind = '오피스텔'"),
-                         [("세곡오피스텔", "오피스텔", "1168011100105330000")])
+                         [("역삼SK허브블루", "오피스텔", "1168010100108310040")])
         self.assertEqual(self.q("SELECT count(*) FROM ops.reject_estate")[0][0], 0)
 
     def test_1b_month_refresh(self):

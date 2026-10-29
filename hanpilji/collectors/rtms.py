@@ -9,7 +9,7 @@
 - 매매(기본 자료)에는 단지 일련번호(aptSeq) · 법정동 코드(umdCd)가 없음. 전월세에는 aptSeq가 있음.
 - 전월세에는 해제 여부 항목이 없음(매매에만 cdealType=「O」). 빈 값은 공백 한 칸으로 옴.
 오피스텔(매매 15126464 · 전월세 15126475)은 아파트와 항목이 같고 단지명이 offiNm, 동(aptDong) · 도로명(roadnm)이 없음
-(공공데이터포털 명세로 맞춤, 실제 응답은 활용신청 뒤 확인). 거래 종류(deal_type · rent_type)와 단지 종류(dim_complex.kind)에
+(실제 응답으로 확인, 강남구 36개월 2026-10-29). 거래 종류(deal_type · rent_type)와 단지 종류(dim_complex.kind)에
 「오피스텔」로 넣고, 단지 번호는 「rtms-offi:」로 시작해 같은 지번의 아파트와 섞이지 않음.
 """
 import argparse
