@@ -112,14 +112,19 @@ class WithDb(unittest.TestCase):
             c.execute("INSERT INTO core.dim_region (lawd_cd, sido, sigungu, emd, source, asof) VALUES "
                       "('9998000000', '시험시', '경매구', NULL, 't-au', %s), ('9998010100', '시험시', '경매구', '가동', 't-au', %s)",
                       (d, d))
-            c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, pnu, source, asof) VALUES "
-                      "('t-au1', '시험파크', '9998010100', '1', NULL, 't-au', %s), "
-                      "('t-au2', '피엔유빌', '9998010100', '500', '9998010100105000000', 't-au', %s)", (d, d))
+            c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, pnu, kind, source, asof) VALUES "
+                      "('t-au1', '시험파크', '9998010100', '1', NULL, '아파트', 't-au', %s), "
+                      "('t-au2', '피엔유빌', '9998010100', '500', '9998010100105000000', '연립다세대', 't-au', %s)", (d, d))
+            # 피엔유빌(다세대) 45㎡: ㎡당 690만 2건 → 추정 시세 45.5㎡ x 690만 = 3억 1,395만
             # 시험파크 100㎡: ㎡당 300만 · 330만 · 360만(중위 330만 → 추정 시세 3억 3천만), 60㎡ 거래는 면적이 달라 뺌
             for i, (area, unit) in enumerate([(100, 3000000), (101, 3300000), (99, 3600000), (60, 9000000)]):
                 c.execute("INSERT INTO core.fact_deal (deal_id, lawd_cd, complex_id, deal_type, contract_date, amount, area, "
                           "source, asof) VALUES (%s, '9998000000', 't-au1', '아파트', %s, %s, %s, 't-au', %s)",
                           (f"t-au-{i}", d - datetime.timedelta(days=30), unit * area, area, d))
+            for i in range(2):
+                c.execute("INSERT INTO core.fact_deal (deal_id, lawd_cd, complex_id, deal_type, contract_date, amount, area, "
+                          "source, asof) VALUES (%s, '9998000000', 't-au2', '연립다세대', %s, %s, 45, 't-au', %s)",
+                          (f"t-au-rh{i}", d - datetime.timedelta(days=30), 6_900_000 * 45, d))
 
     @classmethod
     def tearDownClass(cls):
@@ -158,8 +163,9 @@ class WithDb(unittest.TestCase):
         self.assertIn("15% 이상", top[7])
         self.assertEqual(float(top[8]), 62.5)
         self.assertIn("실거래가", top[9])
-        self.assertEqual((rows[1][3], rows[1][6]), ("피엔유빌", None), "지번(999)이 달라도 PNU로 단지를 찾음")
-        self.assertIn("오피스텔이 아님", rows[1][7], "다세대는 아파트 · 오피스텔 실거래와 비교하지 않음")
+        self.assertEqual((rows[1][3], rows[1][4], rows[1][5]), ("피엔유빌", 2, 313_950_000), "지번(999)이 달라도 PNU로 단지를 찾음")
+        self.assertEqual(float(rows[1][6]), 4.4, "다세대 물건은 그 건물의 연립다세대 매매와 비교")
+        self.assertIn("연립다세대 매매", rows[1][9])
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, false)", self.SGG)[0][0], 3)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, true, 20)", self.SGG)[0][0], 1)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, '다세대')", self.SGG)[0][0], 1)
@@ -192,7 +198,7 @@ class WithDb(unittest.TestCase):
         self.assertEqual((rows["T-OF2"][0], float(rows["T-OF2"][3])), ("주상복합텔", 8.2))
         self.assertIn("업무시설을 오피스텔 거래와 비교", rows["T-OF2"][4])
         self.assertIsNone(rows["T-OF3"][3])
-        self.assertIn("오피스텔이 아님", rows["T-OF3"][4])
+        self.assertIn("연립다세대가 아님", rows["T-OF3"][4])
 
     def test_checklist(self):
         rows = self.q("SELECT step, law_name, article_no, article_title, row_total FROM mart.q_auction_checklist()")

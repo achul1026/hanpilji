@@ -26,6 +26,7 @@ def as_month(rows, ym):
 
 def fixture_fetch(path, params):
     name = ("rtms_offi_trade_real.xml" if "OffiTrade" in path else "rtms_offi_rent_real.xml" if "OffiRent" in path
+            else "rtms_rh_trade_doc.xml" if "RHTrade" in path else "rtms_rh_rent_real.xml" if "RHRent" in path
             else "rtms_trade_real.xml" if "Trade" in path else "rtms_rent_real.xml" if "Rent" in path
             else "luinfo_real_snackbar.xml")
     data = (FIX / name).read_bytes()
@@ -108,6 +109,25 @@ class RtmsParse(unittest.TestCase):
         self.assertNotEqual(rtms.complex_key(same_place), rtms.complex_key(self.rows[0]))
         self.assertEqual({rtms.complex_key(r) for r in offi + offi_rent}, {rtms.complex_key(offi[0])})
         self.assertNotEqual(rtms.row_key("trade", offi[0]), rtms.row_key("trade", {**offi[0], "offiNm": "다른 오피스텔"}))
+
+    def test_rowhouse(self):
+        """연립다세대: 이름은 mhouseNm, 단지 번호는 rtms-rh:. 매매는 명세로 만든 자료, 전월세는 실제 응답(은성주택 4건)."""
+        rh = datagokr.items(datagokr.parse((FIX / "rtms_rh_trade_doc.xml").read_bytes()))
+        rh_rent = datagokr.items(datagokr.parse((FIX / "rtms_rh_rent_real.xml").read_bytes()))
+        self.assertEqual(rtms.complex_name(rh_rent[0]), "은성주택")
+        d, why = rtms.to_deal(rh[0], "11680")
+        self.assertIsNone(why)
+        self.assertEqual((d["amount"], d["area"], d["floor"], d["build_year"]), (520_000_000, 45.12, 2, 1995))
+        self.assertTrue(rtms.to_deal(rh[1], "11680")[0]["is_cancelled"])
+        r, _ = rtms.to_rent(rh_rent[0], "11680")
+        self.assertEqual((r["deposit"], r["monthly_rent"], r["contract_kind"]), (240_000_000, 0, "갱신"))
+        self.assertTrue(rtms.complex_key(rh[0]).startswith("rtms-rh:"))
+        self.assertEqual({rtms.complex_key(r) for r in rh + rh_rent}, {rtms.complex_key(rh[0])}, "매매 · 전월세가 한 건물")
+        # 같은 지번 · 같은 이름이어도 아파트 · 오피스텔과 다른 단지
+        same = {k: rh[0][k] for k in ("sggCd", "umdNm", "jibun")}
+        self.assertEqual(len({rtms.complex_key({**same, "aptNm": "은성주택"}), rtms.complex_key({**same, "offiNm": "은성주택"}),
+                              rtms.complex_key({**same, "mhouseNm": "은성주택"})}), 3)
+        self.assertNotEqual(rtms.row_key("trade", rh[0]), rtms.row_key("trade", {**rh[0], "mhouseNm": "다른 빌라"}))
 
     def test_apt_keys_unchanged(self):
         """오피스텔을 넣으며 아파트 키가 바뀌면 이미 쌓인 거래가 모두 새 줄이 됨. 값은 2026-10-28 이전 코드로 낸 것."""
@@ -209,6 +229,12 @@ class Stage1Pipeline(unittest.TestCase):
         self.assertEqual(self.q("SELECT count(*) FROM core.fact_rent WHERE rent_type = '오피스텔'")[0][0], 2)
         self.assertEqual(self.q("SELECT name, kind, pnu FROM core.dim_complex WHERE kind = '오피스텔'"),
                          [("역삼SK허브블루", "오피스텔", "1168010100108310040")])
+        # 연립다세대: 해제 1건 포함 매매 3건 · 똑같은 2건 포함 전월세 4건이 한 건물
+        self.assertEqual(self.q("SELECT count(*), count(*) FILTER (WHERE is_cancelled), count(DISTINCT complex_id), min(source)"
+                                " FROM core.fact_deal WHERE deal_type = '연립다세대'")[0], (3, 1, 1, "국토교통부 연립다세대 매매 실거래가"))
+        self.assertEqual(self.q("SELECT count(*) FROM core.fact_rent WHERE rent_type = '연립다세대'")[0][0], 4)
+        self.assertEqual(self.q("SELECT name, kind, pnu FROM core.dim_complex WHERE kind = '연립다세대'"),
+                         [("은성주택", "연립다세대", "1168010100107740009")])
         self.assertEqual(self.q("SELECT count(*) FROM ops.reject_estate")[0][0], 0)
 
     def test_1b_month_refresh(self):

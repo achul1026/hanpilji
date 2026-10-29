@@ -6,7 +6,7 @@ name: 데이터 자동 최신화
 
 on:
   schedule:
-    - cron: '17 19 * * *'    # 매일 04:17 KST: 아파트 · 오피스텔 실거래 매매 · 전월세(최근 3개월 다시) · 공매 물건(온비드)
+    - cron: '17 19 * * *'    # 매일 04:17 KST: 아파트 · 오피스텔 · 연립다세대 실거래 매매 · 전월세(최근 3개월 다시) · 공매 물건(온비드)
     - cron: '7 20 * * 0'     # 매주 월 05:07 KST: 법령(개정된 것만) · 시장 지표(최근 12개월)
     - cron: '37 20 1 * *'    # 매월 2일 05:37 KST: 건축물대장 · 행위제한
   workflow_dispatch:
@@ -61,6 +61,11 @@ jobs:
         if: ${{ !cancelled() && env.WHAT == 'daily' }}
         timeout-minutes: 30
         run: python -m hanpilji.collectors.rtms --only offi_trade --only offi_rent
+      # 연립다세대도 API 두 개를 따로 활용신청. 아직이면 이 단계만 실패
+      - name: 실거래 매매 · 전월세(연립다세대)
+        if: ${{ !cancelled() && env.WHAT == 'daily' }}
+        timeout-minutes: 30
+        run: python -m hanpilji.collectors.rtms --only rh_trade --only rh_rent
       - name: 공매 물건(온비드)
         if: ${{ !cancelled() && env.WHAT == 'daily' }}
         timeout-minutes: 30

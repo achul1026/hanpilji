@@ -1,6 +1,6 @@
-"""국토교통부 아파트 · 오피스텔 매매 · 전월세 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
+"""국토교통부 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
 
-    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent|offi_trade|offi_rent]
+    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent|offi_trade|offi_rent|rh_trade|rh_rent]
                                                           [--sigungu 11680]
 
 시군구 x 계약월 x 종류마다 한 트랜잭션. 끝난 달은 커서에 남겨 다시 받지 않되,
@@ -11,6 +11,8 @@
 오피스텔(매매 15126464 · 전월세 15126475)은 아파트와 항목이 같고 단지명이 offiNm, 동(aptDong) · 도로명(roadnm)이 없음
 (실제 응답으로 확인, 강남구 36개월 2026-10-29). 거래 종류(deal_type · rent_type)와 단지 종류(dim_complex.kind)에
 「오피스텔」로 넣고, 단지 번호는 「rtms-offi:」로 시작해 같은 지번의 아파트와 섞이지 않음.
+연립다세대(매매 15126467 · 전월세 15126473)는 건물 이름이 mhouseNm이고 연립 · 다세대 구분이 houseType에 옴(명세 기준,
+첫 실제 응답으로 확인할 것). 종류는 「연립다세대」 하나로 넣고 단지 번호는 「rtms-rh:」로 시작. 빌라는 건물 한 동이 한 단지.
 """
 import argparse
 import datetime
@@ -34,7 +36,13 @@ KINDS = {
                    "label": "오피스텔", "base": "trade", "src": "국토교통부 오피스텔 매매 실거래가"},
     "offi_rent": {"source": "dg_offi_rent", "path": "RTMSDataSvcOffiRent/getRTMSDataSvcOffiRent",
                   "label": "오피스텔", "base": "rent", "src": "국토교통부 오피스텔 전월세 실거래가"},
+    "rh_trade": {"source": "dg_rh_trade", "path": "RTMSDataSvcRHTrade/getRTMSDataSvcRHTrade",
+                 "label": "연립다세대", "base": "trade", "src": "국토교통부 연립다세대 매매 실거래가"},
+    "rh_rent": {"source": "dg_rh_rent", "path": "RTMSDataSvcRHRent/getRTMSDataSvcRHRent",
+                "label": "연립다세대", "base": "rent", "src": "국토교통부 연립다세대 전월세 실거래가"},
 }
+# 응답에 있는 단지명 항목 → 단지 번호 앞머리. 아파트(aptNm)는 「rtms:」 그대로
+NAME_FIELDS = {"offiNm": "rtms-offi:", "mhouseNm": "rtms-rh:"}
 PAGE_ROWS = 1000
 
 
@@ -62,12 +70,13 @@ def contract_date(row):
     return datetime.date(int(_s(row, "dealYear")), int(_s(row, "dealMonth")), int(_s(row, "dealDay")))
 
 
-def is_offi(row):
-    return "offiNm" in row
+def name_field(row):
+    """단지명 항목 이름: 오피스텔 offiNm, 연립다세대 mhouseNm, 아파트 aptNm."""
+    return next((k for k in NAME_FIELDS if k in row), "aptNm")
 
 
 def complex_name(row):
-    return _s(row, "offiNm") if is_offi(row) else _s(row, "aptNm")
+    return _s(row, name_field(row))
 
 
 def complex_name_key(name):
@@ -82,17 +91,17 @@ def complex_key(row):
     정확히 1:1이라(700개 단지, 한 단지가 지번으로 갈리거나 두 단지가 합쳐진 경우 0건) 같은 묶음이 됨.
     단, 매매와 전월세가 이름 끝 괄호만 다르게 줄 때가 있어(「강남브리즈힐(토지임대부아파트)」 · 「강남브리즈힐」)
     끝 괄호는 빼고 비교함. 빼도 다른 단지끼리 합쳐지는 경우는 0건이었음.
-    오피스텔은 앞머리를 달리 해(rtms-offi:) 같은 지번 · 같은 이름의 주상복합 아파트와 다른 단지가 됨."""
+    오피스텔 · 연립다세대는 앞머리를 달리 해(rtms-offi: · rtms-rh:) 같은 지번 · 같은 이름의 아파트와 다른 단지가 됨."""
     parts = [_s(row, "sggCd"), _s(row, "umdNm"), _s(row, "jibun"), complex_name_key(complex_name(row))]
-    return ("rtms-offi:" if is_offi(row) else "rtms:") + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
+    return NAME_FIELDS.get(name_field(row), "rtms:") + hashlib.sha1("|".join(parts).encode()).hexdigest()[:16]
 
 
 def row_key(kind, row):
     """재수집해도 같은 값. 해제 여부처럼 나중에 바뀌는 항목은 넣지 않음. kind는 trade · rent(아파트 값은 예전 그대로)."""
     keys = ["sggCd", "umdNm", "jibun", "aptNm", "aptDong", "dealYear", "dealMonth", "dealDay", "excluUseAr", "floor"]
     keys += ["dealAmount"] if kind == "trade" else ["deposit", "monthlyRent", "contractTerm", "contractType"]
-    if is_offi(row):
-        keys.append("offiNm")
+    if name_field(row) != "aptNm":
+        keys.append(name_field(row))
     return hashlib.sha1("|".join(_s(row, k) for k in keys).encode()).hexdigest()
 
 
