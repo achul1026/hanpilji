@@ -80,9 +80,12 @@ CREATE TABLE IF NOT EXISTS core.dim_complex (
     households     integer,
     dong_count     integer,
     lawd_cd        char(10) REFERENCES core.dim_region,  -- 추가: 지역 합계용
+    kind           text NOT NULL DEFAULT '아파트',  -- 추가: 아파트 · 오피스텔(실거래가 API 종류)
     source         text NOT NULL,
     asof           date NOT NULL
 );
+-- 이미 만든 DB에도 붙임(오피스텔 실거래 전에 쌓인 단지는 모두 아파트)
+ALTER TABLE core.dim_complex ADD COLUMN IF NOT EXISTS kind text NOT NULL DEFAULT '아파트';
 
 -- ───────────── 연결 ─────────────
 

@@ -66,6 +66,7 @@ $$;
 -- 평균 대신 중위값: 비싼 단지가 몰린 달에 값이 튀지 않게. 단가는 전용면적 ㎡당
 -- 실거래 신고 기한이 계약 후 30일이라 「달 끝 + 30일」이 기준일보다 뒤인 달은 아직 덜 들어온 달(partial = true)
 -- 범위: p_name(단지) > p_emd(동) > 구 전체. 0건인 달도 줄을 냄(값은 비움)
+-- 동 · 구 전체는 아파트만(오피스텔 단가를 섞으면 중위값이 흔들림). 단지를 주면 그 단지의 종류(아파트 · 오피스텔) 그대로
 DROP FUNCTION IF EXISTS mart.q_price_trend(text, int, text, text, numeric, numeric);
 CREATE FUNCTION mart.q_price_trend(p_sigungu text, p_months int DEFAULT 24, p_emd text DEFAULT NULL,
                                    p_name text DEFAULT NULL, p_area numeric DEFAULT NULL, p_area_tol numeric DEFAULT 3)
@@ -75,7 +76,8 @@ RETURNS TABLE (month text, trade_count bigint, trade_median_per_m2 bigint, trade
                partial boolean, scope text, source text, asof date, row_total bigint)
 LANGUAGE sql STABLE AS $$
     WITH cx AS (
-        SELECT f.complex_id, f.name FROM core.find_complex(p_sigungu, p_name) f WHERE p_name IS NOT NULL LIMIT 1
+        SELECT f.complex_id, f.name, x.kind FROM core.find_complex(p_sigungu, p_name) f
+        JOIN core.dim_complex x USING (complex_id) WHERE p_name IS NOT NULL LIMIT 1
     ), reg AS (
         SELECT lawd_cd FROM core.dim_region WHERE p_emd IS NOT NULL AND left(lawd_cd, 5) = p_sigungu
           AND emd = replace(p_emd, ' ', '')
@@ -91,7 +93,7 @@ LANGUAGE sql STABLE AS $$
         FROM core.fact_deal d, win
         WHERE NOT d.is_cancelled AND left(d.lawd_cd, 5) = p_sigungu
           AND d.contract_date >= win.m_from - interval '12 months'
-          AND (p_name IS NULL OR d.complex_id = (SELECT complex_id FROM cx))
+          AND (p_name IS NULL OR d.complex_id = (SELECT complex_id FROM cx)) AND (p_name IS NOT NULL OR d.deal_type = '아파트')
           AND (p_emd IS NULL OR d.complex_id IN (SELECT complex_id FROM dc))
           AND (p_area IS NULL OR abs(d.area - p_area) <= p_area_tol)
     ), r AS (
@@ -99,7 +101,7 @@ LANGUAGE sql STABLE AS $$
         FROM core.fact_rent e, win
         WHERE e.monthly_rent = 0 AND e.area > 0 AND e.deposit > 0 AND left(e.lawd_cd, 5) = p_sigungu
           AND e.contract_date >= win.m_from - interval '12 months'
-          AND (p_name IS NULL OR e.complex_id = (SELECT complex_id FROM cx))
+          AND (p_name IS NULL OR e.complex_id = (SELECT complex_id FROM cx)) AND (p_name IS NOT NULL OR e.rent_type = '아파트')
           AND (p_emd IS NULL OR e.complex_id IN (SELECT complex_id FROM dc))
           AND (p_area IS NULL OR abs(e.area - p_area) <= p_area_tol)
     ), dm AS (
@@ -124,7 +126,7 @@ LANGUAGE sql STABLE AS $$
                      CASE WHEN p_name IS NULL AND p_emd IS NOT NULL THEN
                           CASE WHEN EXISTS (SELECT 1 FROM reg) THEN p_emd ELSE p_emd || '(못 찾음)' END END,
                      CASE WHEN p_area IS NOT NULL THEN '전용 ' || p_area || '㎡ ±' || p_area_tol END),
-           '국토교통부 아파트 매매 · 전월세 실거래가', asof.a, count(*) OVER ()
+           '국토교통부 ' || coalesce((SELECT kind FROM cx), '아파트') || ' 매매 · 전월세 실거래가', asof.a, count(*) OVER ()
     FROM s, win, asof
     WHERE s.m >= win.m_from
     ORDER BY s.m
@@ -204,8 +206,9 @@ LANGUAGE sql STABLE AS $$
     WITH win AS (
         SELECT (current_date - make_interval(months => greatest(1, least(p_months, 36))))::date AS d_from, current_date AS d_to
     ), c AS (
-        SELECT x.complex_id, x.name, x.build_year, x.vl_rat FROM core.dim_complex x
+        SELECT x.complex_id, x.name, x.build_year, x.vl_rat, x.kind FROM core.dim_complex x
         WHERE left(x.lawd_cd, 5) = p_sigungu
+          AND (p_query IS NOT NULL OR x.kind = '아파트')   -- 순위는 아파트끼리만. 단지를 주면 오피스텔도
           AND (p_query IS NULL OR x.complex_id IN (SELECT f.complex_id FROM core.find_complex(p_sigungu, p_query) f LIMIT 5))
     ), t AS (
         SELECT d.complex_id, count(*) AS n, percentile_cont(0.5) WITHIN GROUP (ORDER BY d.amount / d.area) AS med,
@@ -251,7 +254,7 @@ LANGUAGE sql STABLE AS $$
     SELECT rank() OVER (ORDER BY m.mult * CASE WHEN p_order = 'asc' THEN -1 ELSE 1 END DESC NULLS LAST),
            m.name, m.build_year::int, coalesce(m.n, 0), m.med::bigint, m.v::bigint, m.y, m.mult,
            round(m.g::numeric, 1), m.tg, m.vl_rat, win.d_from, win.d_to,
-           '국토교통부 아파트 매매 실거래가 · V-World 토지특성 개별공시지가', m.asof, count(*) OVER ()
+           '국토교통부 ' || m.kind || ' 매매 실거래가 · V-World 토지특성 개별공시지가', m.asof, count(*) OVER ()
     FROM m, win
     ORDER BY m.mult * CASE WHEN p_order = 'asc' THEN -1 ELSE 1 END DESC NULLS LAST, m.name
     LIMIT CASE WHEN p_query IS NOT NULL THEN 5 ELSE greatest(1, least(coalesce(p_limit, 10), 20)) END

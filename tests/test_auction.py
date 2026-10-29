@@ -159,10 +159,40 @@ class WithDb(unittest.TestCase):
         self.assertEqual(float(top[8]), 62.5)
         self.assertIn("실거래가", top[9])
         self.assertEqual((rows[1][3], rows[1][6]), ("피엔유빌", None), "지번(999)이 달라도 PNU로 단지를 찾음")
-        self.assertIn("아파트가 아님", rows[1][7], "다세대는 아파트 실거래와 비교하지 않음")
+        self.assertIn("오피스텔이 아님", rows[1][7], "다세대는 아파트 · 오피스텔 실거래와 비교하지 않음")
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, false)", self.SGG)[0][0], 3)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, NULL, true, 20)", self.SGG)[0][0], 1)
         self.assertEqual(self.q("SELECT count(*) FROM mart.q_auction_discount(%s, '다세대')", self.SGG)[0][0], 1)
+
+    def test_officetel_discount(self):
+        """주상복합 필지(아파트 · 오피스텔 단지가 같이 있음)에서 오피스텔 물건은 오피스텔 매매와만 비교."""
+        d, pnu = datetime.date.today(), "9998010100100070000"
+        end = datetime.datetime(2099, 12, 3, 17, 0)
+        self.addCleanup(self.q, "DELETE FROM core.fact_auction WHERE cltr_mng_no LIKE 'T-OF%%' RETURNING 1")
+        with psycopg.connect(DSN) as c:
+            c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, pnu, kind, source, asof) VALUES "
+                      "('t-au3', '주상복합', '9998010100', '7', %s, '아파트', 't-au', %s), "
+                      "('t-au4', '주상복합텔', '9998010100', '7', %s, '오피스텔', 't-au', %s)", (pnu, d, pnu, d))
+            # 같은 30㎡라도 아파트는 ㎡당 1,000만, 오피스텔은 ㎡당 500만
+            for i, (cid, kind, unit) in enumerate([("t-au3", "아파트", 10_000_000)] * 3 + [("t-au4", "오피스텔", 5_000_000)] * 3):
+                c.execute("INSERT INTO core.fact_deal (deal_id, lawd_cd, complex_id, deal_type, contract_date, amount, area, "
+                          "source, asof) VALUES (%s, '9998000000', %s, %s, %s, %s, 30, 't-au', %s)",
+                          (f"t-au-of{i}", cid, kind, d - datetime.timedelta(days=20), unit * 30, d))
+            for no, usage, area, bid in [("T-OF1", "오피스텔", 30, 120_000_000), ("T-OF2", "업무시설", 30.5, 140_000_000),
+                                         ("T-OF3", "근린생활시설", 30, 100_000_000)]:
+                c.execute("INSERT INTO core.fact_auction (cltr_mng_no, pbct_cdtn_no, sigungu_cd, sido, emd, jibun, pnu, name, "
+                          "usage, dsps_method, area_m2, appraisal, min_bid, bid_begin, bid_end, source, asof) VALUES "
+                          "(%s, '1', %s, '시험시', '가동', '7', %s, %s, %s, '매각', %s, %s, %s, %s, %s, 't-au', %s)",
+                          (no, self.SGG, pnu, f"시험시 경매구 가동 7 {no}", usage, area, bid * 2, bid, end, end, d))
+        rows = {r[0]: r[1:] for r in self.q(
+            "SELECT cltr_mng_no, complex_name, deal_count, est_market_price, discount_pct, label, source "
+            "FROM mart.q_auction_discount(%s, 'T-OF')", self.SGG)}
+        self.assertEqual(rows["T-OF1"][:4], ("주상복합텔", 3, 150_000_000, 20), "같은 필지 아파트 값(㎡당 1,000만)이 아니라 오피스텔 값")
+        self.assertIn("오피스텔 매매", rows["T-OF1"][5])
+        self.assertEqual((rows["T-OF2"][0], float(rows["T-OF2"][3])), ("주상복합텔", 8.2))
+        self.assertIn("업무시설을 오피스텔 거래와 비교", rows["T-OF2"][4])
+        self.assertIsNone(rows["T-OF3"][3])
+        self.assertIn("오피스텔이 아님", rows["T-OF3"][4])
 
     def test_checklist(self):
         rows = self.q("SELECT step, law_name, article_no, article_title, row_total FROM mart.q_auction_checklist()")
