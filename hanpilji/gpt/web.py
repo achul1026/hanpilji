@@ -58,7 +58,8 @@ TILES = {
 
 def extras(ans):
     """답에 붙여 보내는 것: 숫자 검산 결과와 이어서 볼 것(둘 다 모델이 아니라 엔진이 만듦)."""
-    return {"verify": verify.check(ans.text, ans.results), "next": blocks.next_steps(ans.results)}
+    return {"verify": verify.check(ans.text, ans.results), "next": blocks.next_steps(ans.results),
+            "visual": getattr(ans, "visual", None)}
 
 
 def map_config(env=None):
@@ -243,6 +244,10 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                     with engine.connect(cfg) as conn:
                         ans = engine.ask(question, model, conn, sess["messages"], max_rounds=rounds, on_event=on_event,
                                          screen=True)
+                        try:   # 답 카드의 필지 모양 · 거래 점(없어도 답은 나감)
+                            ans.visual = blocks.visual(conn, ans.results)
+                        except Exception as e:
+                            print(f"그림 오류: {e!r}", file=sys.stderr)
                 except Exception as e:
                     print(f"오류: {e!r}", file=sys.stderr)
                     return None

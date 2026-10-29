@@ -297,3 +297,64 @@ def next_steps(results, limit=4):
         ("q_parcel_map", f"{name} 지적도", {"query": name}),
     ]
     return [{"label": label, "tool": tool, "args": args} for tool, label, args in steps if tool not in done][:limit]
+
+
+# 답 카드에 붙는 그림(2026-10-29 v2 화면): 다룬 단지의 필지 모양과 최근 매매 하나하나.
+# 모델을 다시 부르지 않고 마트 함수만 부름(요금 없음). 실패해도 답은 그대로 나가게 None
+def _parcel_path(rows):
+    """대상 필지 도형 → 가로 100에 맞춘 SVG path(북쪽이 위). 경도는 위도에 맞춰 줄임."""
+    import math
+    rings = []
+    for r in rows:
+        g = r.get("geojson")
+        if r.get("layer") != "대상 필지" or not g:
+            continue
+        g = json.loads(g) if isinstance(g, str) else g
+        polys = g["coordinates"] if g.get("type") == "MultiPolygon" else [g.get("coordinates") or []]
+        rings += [p[0] for p in polys if p]
+    pts = [c for ring in rings for c in ring]
+    if not pts:
+        return None
+    x0, x1 = min(p[0] for p in pts), max(p[0] for p in pts)
+    y0, y1 = min(p[1] for p in pts), max(p[1] for p in pts)
+    k = math.cos(math.radians((y0 + y1) / 2))
+    s = 100 / max((x1 - x0) * k, y1 - y0, 1e-9)
+    d = " ".join("M" + " L".join(f"{(x - x0) * k * s:.1f} {(y1 - y) * s:.1f}" for x, y in ring[:400]) + "Z" for ring in rings)
+    return {"d": d, "w": round((x1 - x0) * k * s, 1), "h": round((y1 - y0) * s, 1)}
+
+
+def visual(conn, results):
+    """{"subject": {"name", "address", "build_year", "area_m2", "parcel"}, "deals": {"rows": [{"d", "a", "f"}], "from", "to"}}"""
+    name = _subject(results)
+    if not name:
+        return None
+    by = {out["tool"]: out for out in results}
+    run = lambda tool, args: by[tool] if tool in by else tools_mod.run(conn, tool, args)
+    price = by.get("q_complex_price")
+    area = ((price or by.get("q_deal_list") or {}).get("args") or {}).get("area_m2")
+    prow = (price or {}).get("rows") or []
+    shown_area = prow[0].get("area_m2") if area and len(prow) == 1 and prow[0].get("area_m2") else area   # 84를 물어도 85㎡ 타입으로 잡힘
+    if shown_area:
+        shown_area = float(shown_area)
+        shown_area = int(shown_area) if shown_area.is_integer() else shown_area
+    out = {"subject": {"name": name, "area_m2": shown_area}}
+    try:
+        card = (run("q_property_card", {"query": name}).get("rows") or [])
+        if len(card) == 1:
+            out["subject"].update(name=card[0].get("complex_name") or name, address=card[0].get("address"),
+                                  build_year=card[0].get("build_year") and int(card[0]["build_year"]))
+        out["subject"]["parcel"] = _parcel_path(run("q_parcel_map", {"query": name}).get("rows") or [])
+    except Exception:
+        pass
+    # 거래 점: 면적을 정해 시세를 본 답이거나 거래 목록을 본 답일 때만(여러 면적이 섞이면 점이 뜻이 없음)
+    if area or "q_deal_list" in by:
+        try:
+            args = {"name": name, **({"area_m2": area} if area else {}),
+                    "months": ((price or {}).get("args") or {}).get("months") or 12}
+            rows = [r for r in run("q_deal_list", args).get("rows") or [] if r.get("kind") == "매매" and r.get("amount")]
+            if len(rows) >= 2:
+                out["deals"] = {"rows": [{"d": str(r["contract_date"]), "a": int(r["amount"]), "f": r.get("floor") and int(r["floor"])} for r in rows],
+                                "from": str(rows[0].get("period_from") or ""), "to": str(rows[0].get("period_to") or "")}
+        except Exception:
+            pass
+    return out

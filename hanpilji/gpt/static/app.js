@@ -548,11 +548,12 @@ function subjectEl(item) {
   for (const t of [r.build_year && r.build_year + "년 준공", r.bld_households && nf.format(r.bld_households) + "세대", r.bld_floors_above && "최고 " + r.bld_floors_above + "층"]) if (t) chips.append(el("span", null, t));
   h.append(nm, chips); return h;
 }
-// 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기는 글에서 빼서 따로 그림.
+// 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기 · 계산 · 범위 밖은 글에서 빼서 따로 그림.
 // 예전 답의 「:::숫자」는 글에 남겨 md()가 그대로 그림
-const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기)\s*$/;
+const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖)\s*$/;
 function splitAnswer(text) {
-  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [] }, lines = String(text || "").replace(/\r/g, "").split("\n");
+  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [] };
+  const lines = String(text || "").replace(/\r/g, "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(PARTS);
     if (!m) { out.prose.push(lines[i]); continue; }
@@ -563,38 +564,120 @@ function splitAnswer(text) {
 }
 const bullet = t => t.replace(/^\s*[-*•]\s*/, "").trim();
 const refOf = t => parseInt(String(t || "").replace(/\D/g, ""), 10) || null;
-// 출처 도장 한 줄: 첫 원자료의 기관 · 검산 결과. 누르면 그 원자료가 열림
-function stampChip(item, ref) {
+const cells2 = line => line.split("|").map(x => x.trim());
+const CHECK = () => { const sv = svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", "aria-hidden": "true" }); sv.append(svg("path", { d: "M2 6.5l2.5 2.5L10 3.5", fill: "none", stroke: "currentColor", "stroke-width": 2 })); return sv; };
+
+// 출처 알약: 첫 원자료의 기관 · 건수 · 검산 결과. 누르면 그 원자료가 열림
+// count: 거래 점 그래프의 건수(요약 표는 줄 수가 거래 수가 아니라서 건수를 붙이지 않음)
+function stampChip(item, ref, count) {
   const b = item.blocks.find(x => x.ref === ref) || item.blocks[0];
   if (!b) return null;
-  const src = (((b.source || {}).sources || [])[0] || b.title).replace(/\s*\(MST \d+\)/, ""), more = item.blocks.length > 1 ? ` 외 ${item.blocks.length - 1}` : "";
+  const s = b.source || {}, src = ((s.sources || [])[0] || b.title).replace(/\s*\(MST \d+\)/, "").replace(/ · 전월세/, "");
+  const n = count ? ` ${nf.format(count)}건` : b.tool === "q_deal_list" && s.row_total ? ` ${nf.format(s.row_total)}건` : "", more = item.blocks.length > 1 ? ` 외 ${item.blocks.length - 1}` : "";
   // 숫자를 모두 원자료에서 찾았을 때만 「원자료 일치」. 계산값 · 조문 속 숫자는 못 찾을 수 있어 일부 일치는 표시하지 않음
-  const v = item.verify, ok = v && v.checked && v.matched === v.checked ? "원자료 일치" : "";
+  const v = item.verify, ok = v && v.checked && v.matched === v.checked;
   const c = btn("schip", null, () => openDrawer(item, b.ref), "출처 보기");
-  if (ok) { const sv = svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", "aria-hidden": "true" }); sv.append(svg("path", { d: "M2 6.5l2.5 2.5L10 3.5", fill: "none", stroke: "currentColor", "stroke-width": 2 })); c.append(sv); }
-  c.append(el("span", null, [src + more, ok].filter(Boolean).join(" · ")));
+  c.append(CHECK(), el("span", null, src + n + more + (ok ? " · 원자료 일치" : "")));
   return c;
 }
-function keyEl(line, item) {
-  const [label, value, note, ref] = line.split("|").map(x => x.trim()), card = el("div", "key");
-  if (label) card.append(el("div", "kl", label));
-  card.append(el("div", "kv" + (String(value || "").length > 14 ? " long" : ""), value || "-"));
-  if (note) card.append(el("div", "ks", note));
-  const st = stampChip(item, refOf(ref)); if (st) card.append(st);
-  return card;
+
+// 답이 다룬 단지: 실제 필지 모양(연속지적도) · 이름 · 면적 · 주소
+function subjRow(sub) {
+  if (!sub || !sub.name) return null;
+  const row = el("div", "subj"), th = el("div", "thumb"), tx = el("div", "st");
+  if (sub.parcel && sub.parcel.d) {
+    const sv = svg("svg", { viewBox: `-3 -3 ${sub.parcel.w + 6} ${sub.parcel.h + 6}`, role: "img", "aria-label": sub.name + " 필지 모양" });
+    sv.append(svg("path", { d: sub.parcel.d, fill: "var(--survey)", "fill-opacity": .18, stroke: "var(--survey)", "stroke-width": 2.6, "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }));
+    th.append(sv); row.append(th);
+  }
+  tx.append(el("b", null, sub.name + (sub.area_m2 ? ` · 전용 ${sub.area_m2}㎡` : "")));
+  const addr = [String(sub.address || "").replace(/^서울특별시\s*/, ""), sub.build_year && sub.build_year + "년 준공"].filter(Boolean).join(" · ");
+  if (addr) tx.append(el("span", null, addr));
+  row.append(tx); return row;
 }
-// 「열기」 줄: 모델이 고른 더보기(내용 + 원자료) · 엔진이 고른 바로 볼 것(모델 요금 없음) · 아직 안 가리킨 원자료
-function moreEl(item, rows) {
-  const box = el("div", "more-rows"), used = new Set();
-  const row = (label, hint, onclick) => { const b = btn("mrow", null, onclick); b.append(el("span", null, label), el("small", null, hint || "열기 ›")); box.append(b); return b; };
-  for (const line of rows) {
-    const [label, text, ref] = line.split("|").map(x => x.trim()), n = refOf(ref);
-    if (!label) continue;
-    if (n) used.add(n);
-    row(label, "열기 ›", () => openDrawer(item, n, { label, text }));
+
+// 큰 값: 「35억 5,150만 원」 → 35억 5,150 + 작은 「만」, 「5%까지」 → 5% + 작은 「까지」
+function bigValue(value) {
+  const v = el("div", "kv"), t = String(value || "-").trim();
+  const m = t.match(/^(.*\d)\s*(만|억)\s*원$/) || t.match(/^([\d.,]+\s*%)(.+)$/) || t.match(/^(.*\d)\s*(원|㎡|건|층|세대)$/);
+  if (m) { v.append(m[1]); v.append(el("small", null, m[2])); } else v.textContent = t;
+  if (t.length > 14) v.classList.add("long");
+  return v;
+}
+
+// 거래 점 그래프: 점 하나 = 거래 하나, 점선 = 평균, 마지막 거래는 크게
+function dealsChart(deals) {
+  const rows = (deals && deals.rows || []).filter(r => r.a && r.d);
+  if (rows.length < 3) return null;
+  const W = 320, H = 96, P = 7, t = d => new Date(d + "T00:00:00").getTime();
+  const t0 = deals.from ? t(deals.from) : Math.min(...rows.map(r => t(r.d))), t1 = deals.to ? t(deals.to) : Math.max(...rows.map(r => t(r.d)));
+  const lo = Math.min(...rows.map(r => r.a)), hi = Math.max(...rows.map(r => r.a)), pad = (hi - lo) * .1 || hi * .05;
+  const x = d => P + (W - 2 * P) * Math.min(1, Math.max(0, (t(d) - t0) / Math.max(1, t1 - t0)));
+  const y = a => P + (H - 2 * P) * (1 - (a - lo + pad) / (hi - lo + 2 * pad));
+  const avg = rows.reduce((s, r) => s + r.a, 0) / rows.length, last = rows.reduce((m, r) => r.d > m.d ? r : m, rows[0]);
+  const box = el("div", "dchart"), tip = el("div", "dtip");
+  const showTip = r => { tip.textContent = `${r === last ? "마지막 거래 " : ""}${r.d.slice(5).replace("-", ".")} · ${won(r.a)}${r.f ? " · " + r.f + "층" : ""}`; };
+  showTip(last); box.append(tip);
+  const sv = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": `거래 ${rows.length}건, 점 하나가 거래 하나` });
+  sv.append(svg("line", { x1: 0, x2: W, y1: y(avg), y2: y(avg), stroke: "var(--survey)", "stroke-width": 1, "stroke-dasharray": "3 3", opacity: .55 }));
+  sv.append(svg("text", { x: 2, y: y(avg) - 5, "font-size": 10, "font-weight": 700, fill: "var(--survey)" }, "평균 " + won(avg)));
+  for (const r of rows) {
+    const me = r === last, c = svg("circle", { cx: x(r.d), cy: y(r.a), r: me ? 6 : 4.2, fill: "var(--survey)", "fill-opacity": me ? 1 : .3, stroke: me ? "var(--sheet)" : "none", "stroke-width": 2 });
+    c.append(svg("title", {}, `${r.d} · ${won(r.a)}${r.f ? " · " + r.f + "층" : ""}`));
+    c.addEventListener("mouseenter", () => showTip(r)); c.addEventListener("click", () => showTip(r));
+    sv.append(c);
+  }
+  const ax = el("div", "dax"), ym = d => d ? d.slice(0, 7).replace("-", ".") : "";
+  ax.append(el("span", null, ym(deals.from || rows[rows.length - 1].d)), el("span", null, "점 하나 = 거래 하나"), el("span", null, ym(deals.to || last.d)));
+  box.append(sv, ax);
+  return box;
+}
+
+// 비율 규칙 계산기: 「넣을 값 | 단위 | 곱할 수 | 결과 이름」
+function calcEl(line) {
+  const [label, unit, mult, result] = cells2(line), k = parseFloat(mult);
+  if (!label || !isFinite(k)) return null;
+  const box = el("div", "calc"), row = el("div", "crow"), id = "c" + Math.random().toString(36).slice(2, 8);
+  const lb = el("label", null, label); lb.htmlFor = id;
+  const inp = el("input", "cin"); inp.id = id; inp.inputMode = "decimal"; inp.placeholder = "0";
+  const res = el("div", "cres"), rv = el("b", null, "-");
+  res.append(el("span", null, result || "결과"), rv);
+  const show = () => {
+    const n = parseFloat(inp.value.replace(/,/g, "")) * k;
+    if (!isFinite(n)) { rv.textContent = "-"; return; }
+    if (/만\s*원/.test(unit || "")) { const w = Math.round(n * 1e4), man = Math.floor(w / 1e4), rest = w % 1e4; rv.textContent = nf.format(man) + "만" + (rest ? " " + nf.format(rest) + "원" : " 원"); }
+    else rv.textContent = nf.format(Math.round(n * 100) / 100) + (unit ? " " + unit : "");
+  };
+  inp.addEventListener("input", show);
+  row.append(lb, inp, el("span", null, unit ? unit + "이면" : ""));
+  box.append(row, res); return box;
+}
+
+// 범위 밖 질문: 지금 있는 것 · 아직 없는 것
+const HAVE = ["강남구 아파트 · 오피스텔 · 연립다세대 실거래", "용도지역 · 건축 행위제한", "부동산 법령 21개 원문"];
+function scopeEl(missing) {
+  const box = el("div", "cov");
+  const col = (title, items, ok) => {
+    const c = el("div", "col" + (ok ? "" : " no")); c.append(el("b", null, title));
+    for (const t of items) { const r = el("div", "ci"); r.append(ok ? CHECK() : el("i", null, "–"), el("span", null, t)); c.append(r); }
+    return c;
+  };
+  box.append(col("지금 있는 것", HAVE, true), col("아직 없는 것", missing.map(bullet).filter(Boolean), false));
+  return box;
+}
+
+// 숫자 칸(짧은 값이 있는 더보기 앞 3개)과 「열기」 줄(나머지 더보기 · 엔진이 고른 바로 볼 것 · 아직 안 가리킨 원자료)
+function moreEls(item, rows) {
+  const strip = el("div", "strip"), list = el("div", "more-rows"), used = new Set();
+  const parsed = rows.map(cells2).map(c => c.length >= 4 ? { label: c[0], value: c[1], text: c[2], ref: refOf(c[3]) } : { label: c[0], value: "", text: c[1], ref: refOf(c[2]) }).filter(r => r.label);
+  for (const r of parsed) {
+    if (r.ref) used.add(r.ref);
+    const open = () => openDrawer(item, r.ref, { label: r.label, text: r.text });
+    if (r.value && strip.children.length < 3) { const b = btn("cell", null, open); b.append(el("span", null, r.label), el("b", null, r.value)); strip.append(b); }
+    else { const b = btn("mrow", null, open); b.append(el("span", null, r.label), el("small", null, r.value || "열기 ›")); list.append(b); }
   }
   for (const n of (item.next || []).slice(0, 2)) {
-    const b = row(n.label, "바로 ›", async () => {
+    const b = btn("mrow", null, async () => {
       b.classList.add("busy");
       const ref = Math.max(0, ...item.blocks.map(x => x.ref || 0)) + 1;
       try {
@@ -603,12 +686,14 @@ function moreEl(item, rows) {
         if (!r.ok) throw new Error(j.error);
         item.blocks.push(j.block); item.next = item.next.filter(x => x !== n); saveItem();
         renderAnswer(item, item.el); openDrawer(item, ref);
-      } catch (e) { b.classList.remove("busy"); alertLine(box, "열지 못했습니다: " + e.message); }
+      } catch (e) { b.classList.remove("busy"); alertLine(list, "열지 못했습니다: " + e.message); }
     });
+    b.append(el("span", null, n.label), el("small", null, "바로 ›")); list.append(b);
   }
   const rest = item.blocks.filter(b => !used.has(b.ref));
-  if (rest.length) row(rest.length === 1 ? rest[0].title : `원자료 ${rest.length}개 · ${rest[0].title} 외`, "원자료 ›", () => openDrawer(item, rest[0].ref));
-  return box.children.length ? box : null;
+  if (rest.length) { const b = btn("mrow", null, () => openDrawer(item, rest[0].ref)); b.append(el("span", null, rest.length === 1 ? rest[0].title : `원자료 ${rest.length}개`), el("small", null, "원자료 ›")); list.append(b); }
+  if (strip.children.length) strip.style.gridTemplateColumns = `repeat(${strip.children.length},minmax(0,1fr))`;
+  return [strip.children.length ? strip : null, list.children.length ? list : null];
 }
 function gapsFold(lines) {
   const d = el("details", "gapd"), sm = el("summary"), ul = el("ul");
@@ -616,7 +701,7 @@ function gapsFold(lines) {
   for (const l of lines) ul.append(inline(el("li"), bullet(l)));
   d.append(sm, ul); return d;
 }
-// 누르면 그 글로 바로 물음(질문 모드로)
+// 누르면 그 글로 바로 물음(질문 모드로). big: 범위 밖 답에서는 큰 선택지 카드로
 function askChips(lines, cls) {
   const row = el("div", "qchips " + (cls || ""));
   for (const l of lines.slice(0, 5)) { const t = bullet(l); if (t) row.append(btn("qchip", t, () => { if (busy) return; setMode("ask"); send(t); })); }
@@ -628,22 +713,34 @@ function renderAnswer(item, box) {
   if (item.choices) return box.append(choicesEl(item));
   if (item.kind === "report") return renderReport(item, box);
   if (item.kind === "compare") return renderCompare(item, box);
-  const p = splitAnswer(item.answer);
+  const p = splitAnswer(item.answer), vis = item.visual || {};
   citeHandler = n => item.blocks.some(b => b.ref === n) ? () => openDrawer(item, n) : null;
   checks = (item.verify && item.verify.items) || [];
   const prose = md(p.prose);
   if (prose.firstElementChild && prose.firstElementChild.tagName === "P") prose.firstElementChild.classList.add("lead");
   box.append(prose);
   citeHandler = null; checks = [];
-  const pick = askChips(p.고르기, "pick"); if (pick) box.append(pick);
+  const pick = askChips(p.고르기, "pick"); if (pick) { box.append(pick); return; }
+  if (p["범위 밖"].length) box.append(scopeEl(p["범위 밖"]));
   const card = el("div", "anscard");
-  if (p.핵심.length) card.append(keyEl(p.핵심[0], item));
-  else if (!pick) { const st = stampChip(item); if (st) card.append(st); }
-  const more = pick ? null : moreEl(item, p.더보기); if (more) card.append(more);
+  if (p.핵심.length) {
+    const sj = subjRow(vis.subject); if (sj) card.append(sj);
+    const [label, value, note, ref] = cells2(p.핵심[0]), key = el("div", "key");
+    if (label) key.append(el("div", "kl", label));
+    key.append(bigValue(value));
+    if (note) key.append(el("div", "ks", note));
+    card.append(key);
+    const ch = dealsChart(vis.deals); if (ch) card.append(ch);
+    const st = stampChip(item, refOf(ref), ch && vis.deals.rows.length); if (st) card.append(st);
+  } else { const st = stampChip(item); if (st) card.append(st); }
+  for (const l of p.계산.slice(0, 1)) { const c = calcEl(l); if (c) card.append(c); }
+  const [strip, list] = moreEls(item, p.더보기);
+  if (strip) card.append(strip);
+  if (list) card.append(list);
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
   if (item.blocks.some(b => b.tool === "q_law_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
-  const nx = askChips(p.다음); if (nx) box.append(nx);
+  const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
 }
 
 // ------------------------------------------------------------ 필지 리포트 · 두 단지 비교(모델 없이 마트 함수만, 요금 없음)
@@ -831,7 +928,7 @@ async function send(text) {
         if (e.type === "start") conv.sid = e.sid;
         else if (e.type === "tool") { pending.classList.add("done"); pending = step(e.label); }
         else if (e.type === "block") { item.blocks.push(e.block); }
-        else if (e.type === "answer") { item.answer = e.answer; item.footer = e.footer; item.verify = e.verify; item.next = e.next; done = true; }
+        else if (e.type === "answer") { item.answer = e.answer; item.footer = e.footer; item.verify = e.verify; item.next = e.next; item.visual = e.visual; done = true; }
         else if (e.type === "error") { item.error = e.error; done = true; }
       }
     }
