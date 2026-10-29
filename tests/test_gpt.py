@@ -33,7 +33,7 @@ class Tools(unittest.TestCase):
         self.assertEqual({t["name"] for t in tools.specs()},
                          {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
                           "q_building_filter", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_market_series",
-                          "q_auction_discount", "q_auction_checklist", "q_parcel_map"})
+                          "q_auction_discount", "q_auction_checklist", "q_parcel_map", "q_policy_events", "q_policy_impact"})
         for t in tools.TOOLS:
             self.assertTrue(t["sql"].startswith("SELECT * FROM mart."), "도구는 mart 함수만 부름")
 

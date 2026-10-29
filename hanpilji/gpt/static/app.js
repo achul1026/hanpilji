@@ -13,6 +13,7 @@ const EXAMPLES = [
   ["법령", "전월세 재계약 때 5% 상한 조문 찾아줘"],
   ["공시지가", "래미안대치팰리스 공시지가 몇 년 동안 얼마나 올랐어?"],
   ["지표", "기준금리랑 서울 아파트 매매가격지수 최근 2년"],
+  ["정책", "10·15 대책 전후로 강남구 아파트 거래와 가격은 어떻게 달라졌어?"],
 ];
 
 // ------------------------------------------------------------ 저장(이 브라우저에만)
@@ -214,6 +215,12 @@ function chartEl(b, which, narrow) {
   }
   const ticks = rows.length <= 6 ? rows.map((_, i) => i) : [0, Math.round((rows.length - 1) / 3), Math.round((rows.length - 1) * 2 / 3), rows.length - 1];
   for (const i of ticks) s.append(svg("text", { x: x(i), y: B + 20, "text-anchor": i === 0 ? "start" : i === rows.length - 1 ? "end" : "middle", "font-size": 11, fill: "var(--muted)", "font-family": "var(--mono)" }, fmt(b.x_fmt, rows[i][b.x])));
+  // 정책 발표 같은 표시선: 그 달 자리에 세로 점선과 이름
+  for (const m of b.markers || []) {
+    const i = rows.findIndex(r => String(r[b.x]) === String(m.x)); if (i < 0) continue;
+    s.append(svg("line", { x1: x(i), x2: x(i), y1: T, y2: B, stroke: "var(--ink2)", "stroke-width": 1.2, "stroke-dasharray": "4 3" }));
+    s.append(svg("text", { x: x(i) + 4, y: T + 10, "font-size": 11, fill: "var(--ink2)", "font-family": "var(--mono)" }, m.label));
+  }
   const maxCount = b.count ? Math.max(1, ...rows.map(r => +r[b.count] || 0)) : 1;
   series.forEach((ser, k) => {
     const color = COLORS[(which ?? k) % COLORS.length], pts = [];
@@ -344,9 +351,55 @@ function docsEl(b, short) {
     // 본문 첫 줄은 「제7조(제목)」 반복이라 뺌
     const body = it.body.replace(/^제\d+조(의\d+)?\([^)]*\)\s*\n?/, "");
     d.append(highlight(el("div", "body"), body, b.highlight));
-    if (!short && it.url) { const a = el("a", "link", "법제처 원문 ↗"); a.href = it.url; a.target = "_blank"; a.rel = "noopener"; d.append(a); }
+    if (!short && it.url) { const a = el("a", "link", it.link || "법제처 원문 ↗"); a.href = it.url; a.target = "_blank"; a.rel = "noopener"; d.append(a); }
     box.append(d);
   }
+  return box;
+}
+
+// 정책 전후 비교: 정책 머리 · 지수 그래프(발표 표시선) · 전후 맞댄 표. 짧게(inline)면 핵심 줄만
+const day = p => String(p || "").replace(/(\d{2})(\d{2})-(\d{2})-(\d{2})/g, "$2.$3.$4");   // 2025-07-17 → 25.07.17
+const signed = (f, v) => v == null ? "-" : (v > 0 ? "+" : "") + fmt(f, v);
+function policyEl(b, short) {
+  const box = el("div", "policy");
+  if (b.head) {
+    const h = el("div", "phead"), note = String(b.head.note || ""), url = (note.match(/https?:\/\/\S+$/) || [])[0];
+    const [body, when] = (url ? note.slice(0, -url.length).replace(/[ ·]+$/, "") : note).split(/ (?=발표 \d{4}-)/);
+    h.append(el("p", "law", b.head.name), el("div", "meta", [b.head.scope, when].filter(Boolean).join(" · ")));
+    h.append(el("div", "body", body));
+    if (url && !short) { const a = el("a", "link", "발표 · 보도 원문 ↗"); a.href = url; a.target = "_blank"; a.rel = "noopener"; h.append(a); }
+    box.append(h);
+  }
+  for (const c of (b.charts || []).slice(0, short ? 1 : 9)) { if (!short) box.append(el("p", "ptitle", c.title)); box.append(chartEl({ ...c, title: b.title + " " + c.title }, null, !short)); }
+  const rows = (b.rows || []).filter(r => !short || ["실거래", "같은 단지", "지정 동", "겹친 정책"].includes(r.section) || /상승률 차/.test(r.metric));
+  const t = el("table", "ptable"), hr = el("tr");
+  for (const [lbl, n] of [["항목", 0], ["전", 1], ["후", 1], ["변화", 1]]) hr.append(el("th", n ? "n" : null, lbl));
+  t.append(hr);
+  let last = null;
+  for (const r of rows.slice(0, short ? 12 : rows.length)) {
+    if (r.section !== last) {   // 날짜 기간(실거래)은 묶음 머리에 한 번만
+      const tr = el("tr", "grp"), td = el("td", null, r.section), range = /~/.test(r.before_period || "");
+      if (range) td.append(el("small", null, " 전 " + day(r.before_period) + " · 후 " + day(r.after_period)));
+      td.colSpan = 4; tr.append(td); t.append(tr); last = r.section;
+    }
+    const tr = el("tr"), name = el("td", "wrap");
+    name.append(el("span", null, r.metric));
+    if (r.scope) name.append(el("small", null, " " + r.scope));
+    if (r.partial) name.append(el("span", "pill mid", "잠정"));
+    if (r.note && (!short || r.section === "겹친 정책")) name.append(el("div", "pnote", r.note));
+    const cell = (per, v, n) => {
+      const td = el("td", "n"), sub = [/^\d{6}$/.test(per || "") && fmt("ym", per), n != null && nf.format(n) + "건"].filter(Boolean).join(" · ");
+      td.append(el("span", null, v == null ? "-" : fmt(r.fmt, v))); if (sub) td.append(el("small", null, sub)); return td;
+    };
+    const ch = el("td", "n chg");
+    ch.textContent = r.section === "겹친 정책" ? (r.change ?? 0) + "건"
+      : (r.unit === "%p" || (r.unit === "%" && r.change_pct == null)) ? fmt("pp", r.change)
+      : signed("pct", r.change_pct);
+    tr.append(name, cell(r.before_period, r.before_value, r.n_before), cell(r.after_period, r.after_value, r.n_after), ch);
+    t.append(tr);
+  }
+  const w = el("div", "tw"); w.append(t); box.append(w);
+  box.append(el("p", "pnote", "발표 전후를 맞댄 값입니다. 같은 시기의 금리 · 다른 정책 · 계절도 함께 움직여 정책 하나의 효과로 나눌 수 없습니다."));
   return box;
 }
 
@@ -398,6 +451,7 @@ function blockEl(item, idx, inlineMode) {
     else if (b.kind === "document") { bd.className = ""; bd.append(docsEl(b, inlineMode)); }
     else if (b.kind === "card") { bd.className = "bd"; bd.append(cardEl(b, inlineMode)); }
     else if (b.kind === "map") { bd.className = "bd"; bd.append(mapEl(b, !inlineMode || !wide())); }
+    else if (b.kind === "policy") { bd.className = "bd"; bd.append(policyEl(b, inlineMode)); }
   };
   if (which != null) {
     const seg = el("div", "seg"); seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "보기");
@@ -422,10 +476,11 @@ function blockEl(item, idx, inlineMode) {
     }
     tools.append(seg);
   }
-  if (b.kind === "table" && (b.rows || []).length) tools.append(btn("tbtn", "CSV", () => csv(b), b.title + " CSV로 받기"));
+  if ((b.kind === "table" || b.kind === "policy") && (b.rows || []).length) tools.append(btn("tbtn", "CSV", () => csv(b), b.title + " CSV로 받기"));
   wrap.append(hd, bd); draw();
-  if (inlineMode && ((b.kind === "table" && (b.rows || []).length > 6) || b.kind === "document" || (b.kind === "card" && b.rows && b.rows.length))) {
-    wrap.append(btn("more", b.kind === "table" ? `${b.rows.length}줄 모두 보기` : b.kind === "document" ? "조문 원문 전체 보기" : "단지 기록 전체 보기", () => openDrawer(item, b.ref)));
+  if (inlineMode && ((b.kind === "table" && (b.rows || []).length > 6) || b.kind === "document" || b.kind === "policy" || (b.kind === "card" && b.rows && b.rows.length))) {
+    const more = { table: `${(b.rows || []).length}줄 모두 보기`, document: b.tool === "q_policy_events" ? "정책 목록 전체 보기" : "조문 원문 전체 보기", policy: "전후 비교 전체 보기 · 그래프" };
+    wrap.append(btn("more", more[b.kind] || "단지 기록 전체 보기", () => openDrawer(item, b.ref)));
   }
   const ft = el("div", "ft", sourceLine(b)); wrap.append(ft);
   return wrap;
