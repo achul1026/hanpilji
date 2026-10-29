@@ -493,9 +493,14 @@ function subjectEl(item) {
 }
 // 이어서 볼 것: 엔진이 고른 조회를 모델 없이 바로 엶. 연 블록은 이 답의 근거에 새 번호로 붙음
 function nextEl(item) {
-  if (!(item.next || []).length) return null;
+  if (!(item.next || []).length && !cardRow(item)) return null;
   const box = el("div", "next"), row = el("div", "row");
   box.append(el("span", "lbl", "이어서 볼 것 · 모델 요금 없이 바로 열림"));
+  const r = cardRow(item);
+  if (r && r.complex_name) {   // 같은 단지를 인쇄용 한 장으로
+    const b = btn("nx", r.complex_name + " 필지 리포트", () => { setMode("report"); send(r.complex_name); });
+    b.append(el("i", null, "바로")); row.append(b);
+  }
   for (const n of item.next) {
     const b = btn("nx", n.label, async () => {
       b.classList.add("busy");
@@ -525,6 +530,9 @@ function inlinePicks(blocks, skipCard) {
 function renderAnswer(item, box) {
   box.textContent = ""; item.el = box;
   if (item.error) { box.append(el("div", "err-msg", item.error)); return; }
+  if (item.choices) return box.append(choicesEl(item));
+  if (item.kind === "report") return renderReport(item, box);
+  if (item.kind === "compare") return renderCompare(item, box);
   const head = subjectEl(item); if (head) box.append(head);
   citeHandler = n => item.blocks.some(b => b.ref === n) ? () => openDrawer(item, n) : null;
   checks = (item.verify && item.verify.items) || [];
@@ -534,6 +542,130 @@ function renderAnswer(item, box) {
   if (inl.children.length) box.append(inl);
   const nx = nextEl(item); if (nx) box.append(nx);
   box.append(stampEl(item));
+}
+
+// ------------------------------------------------------------ 필지 리포트 · 두 단지 비교(모델 없이 마트 함수만, 요금 없음)
+let mode = "ask";
+const MODES = {
+  ask: ["질문", "단지 이름, 주소, 번지, 법 조문 무엇이든. 예: 도곡렉슬 84㎡ 최근 시세와 땅 규제"],
+  report: ["필지 리포트", "단지 이름이나 「동 지번」 하나. 예: 도곡렉슬, 도곡동 527"],
+  compare: ["두 단지 비교", "두 단지를 쉼표로 나눠서. 예: 도곡렉슬, 래미안대치팰리스"],
+};
+function setMode(m) {
+  mode = m;
+  for (const b of $("modes").children) { const on = b.dataset.mode === m; b.classList.toggle("on", on); b.setAttribute("aria-selected", on); }
+  q.placeholder = MODES[m][1];
+}
+for (const m in MODES) { const b = btn("", MODES[m][0], () => { setMode(m); q.focus(); }); b.dataset.mode = m; b.setAttribute("role", "tab"); $("modes").append(b); }
+const splitPair = t => { const p = t.split(/\s*(?:,|\/|·|\s+vs\.?\s+|\s+와\s+|\s+과\s+)\s*/i).map(x => x.trim()).filter(Boolean); return p.length === 2 ? p : null; };
+
+async function lookup(item, text, m) {
+  let url;
+  if (m === "report") url = "/api/report?q=" + encodeURIComponent(text);
+  else {
+    const p = splitPair(text);
+    if (!p) throw new Error("두 단지를 쉼표로 나눠 넣어 주세요. 예: 도곡렉슬, 래미안대치팰리스");
+    url = "/api/compare?a=" + encodeURIComponent(p[0]) + "&b=" + encodeURIComponent(p[1]); item.pair = p;
+  }
+  const r = await fetch(url, { headers: { "X-Token": token } }), j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "연결 오류 " + r.status);
+  item.kind = m;
+  if (j.choices) { item.choices = j.choices; item.choiceFor = j.query; return; }
+  item.blocks = j.blocks || []; item.subjects = j.subjects || [j.subject];
+}
+// 이름이 여러 단지에 맞거나 하나도 없을 때: 고르면 같은 방식으로 다시 엶
+function choicesEl(item) {
+  const box = el("div", "gap");
+  if (!item.choices.length) { box.append(el("b", null, "맞는 단지가 없어요"), el("p", null, `「${item.choiceFor}」에 맞는 단지를 찾지 못했어요. 지금 데이터는 서울 강남구 아파트만 있어요.`)); return box; }
+  box.append(el("b", null, `「${item.choiceFor}」에 맞는 단지가 여럿이에요. 하나를 고르세요`));
+  const row = el("div", "row"); row.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin-top:8px";
+  for (const c of item.choices) row.append(btn("nx", c, () => {
+    setMode(item.kind);
+    send(item.kind === "compare" ? item.pair.map(x => x === item.choiceFor ? c : x).join(", ") : c);
+  }));
+  box.append(row); return box;
+}
+const cardRow = (item, k) => { const rows = (item.blocks.filter(b => b.kind === "card")[k || 0] || { rows: [] }).rows || []; return rows.length === 1 ? rows[0] : undefined; };
+function fact(label, value, note, open) {
+  const f = el("div", "fig"), s = el("span", "s");
+  f.append(el("span", "l", label), el("span", "v" + (value.length > 9 ? " long" : ""), value));
+  s.append(cite(1, open), " ", note || "");
+  s.append(el("br"), el("span", "chk ok", "원자료 그대로")); f.append(s); return f;
+}
+function reportTools(item, title) {
+  const bar = el("div", "rbar");
+  bar.append(el("span", null, title + " · 모델 없이 공공기록만으로 만듦 · " + new Date().toISOString().slice(0, 10)));
+  bar.append(btn("tbtn", "인쇄 · PDF로 저장", () => {
+    item.el.classList.add("print-me"); app.classList.add("printing");
+    const done = () => { app.classList.remove("printing"); item.el.classList.remove("print-me"); removeEventListener("afterprint", done); };
+    addEventListener("afterprint", done); print();
+  }));
+  return bar;
+}
+function renderReport(item, box) {
+  const r = cardRow(item), one = () => openDrawer(item, 1);
+  const head = subjectEl(item); if (head) box.append(head);
+  box.append(reportTools(item, "필지 리포트"));
+  if (r) {
+    const g = el("div", "figs"), zone = (r.zones || "").split(", ").filter(z => /지역$/.test(z)).join(", ");
+    if (r.trade_count) g.append(fact("평당 매매가 · 최근 12개월", won(r.trade_per_pyeong), `매매 ${r.trade_count}건`, one));
+    if (r.trade_last_amount) g.append(fact("마지막 매매", won(r.trade_last_amount), `${r.trade_last_date} · ${r.trade_last_area}㎡`, one));
+    if (r.jeonse_ratio != null) g.append(fact("전세가율", r.jeonse_ratio + "%", `${r.jeonse_ratio_area}㎡ 같은 면적끼리 · 전세 ${r.jeonse_count}건`, one));
+    if (r.land_price_per_m2) g.append(fact(`개별공시지가 · ${r.land_price_year}`, won(r.land_price_per_m2, "/㎡"), `필지 ${r.land_parcel_count}개 · ${r.land_category || "-"}`, one));
+    if (zone) g.append(fact("용도지역", zone, `행위제한 규칙 ${r.zone_rule_count || 0}개`, one));
+    if (r.bld_vl_rat != null) g.append(fact("용적률 · 건폐율", r.bld_vl_rat + "% · " + r.bld_bc_rat + "%", `건축물대장 · 주차 ${nf.format(r.bld_parking || 0)}대`, one));
+    box.append(g);
+  }
+  const inl = el("div", "inline a");
+  item.blocks.forEach((b, i) => { if (b.kind !== "card") inl.append(blockEl(item, i, true)); });
+  box.append(inl);
+  const miss = [...((r && r.missing) || []).map(m => m + ": 아직 수집 전이에요."),
+    ...(r && r.bld_violation == null ? ["위반건축물 여부: 건축물대장에 이 항목 데이터가 아직 없어요."] : []),
+    "근저당 · 가압류 같은 권리관계: 등기부는 모으지 않아요.", "지금 나온 매물 호가: 매물 데이터는 없어요. 실거래만 봤어요."];
+  box.append(gaps(miss));
+  box.append(stampEl(item));
+}
+// 두 단지 비교 표. 넷째 값이 차이 셈법: rel(오른쪽이 몇 % 높은지) · pp(%p 차) · yr(해 차) · 없음(면적이 달라 견주지 않음 등)
+const CMP = [
+  ["준공", r => r.build_year, v => v + "년", "yr"], ["세대", r => r.bld_households, v => nf.format(v) + "세대", "rel"],
+  ["최고층", r => r.bld_floors_above, v => v + "층", "rel"], ["용적률", r => r.bld_vl_rat, v => v + "%", "pp"],
+  ["평당 매매가 · 12개월", r => r.trade_count ? r.trade_per_pyeong : null, v => won(v), "rel"],
+  ["매매 건수 · 12개월", r => r.trade_count, v => v + "건", "rel"],
+  ["마지막 매매", r => r.trade_last_amount, (v, r) => won(v) + " (" + r.trade_last_area + "㎡ · " + r.trade_last_date + ")"],
+  ["전세 평균 · 12개월", r => r.jeonse_avg, v => won(v), "rel"], ["전세가율", r => r.jeonse_ratio, (v, r) => v + "% (" + r.jeonse_ratio_area + "㎡)", "pp"],
+  ["공시지가 ㎡당", r => r.land_price_per_m2, (v, r) => won(v) + " (" + r.land_price_year + ")", "rel"],
+  ["세대당 주차", r => r.bld_parking && r.bld_households ? Math.round(r.bld_parking / r.bld_households * 100) / 100 : null, v => v + "대", "rel"],
+  ["용도지역", r => (r.zones || "").split(", ").filter(z => /지역$/.test(z)).join(", ") || null, v => v],
+];
+const sign = x => (x > 0 ? "+" : "") + x;
+function diff(kind, a, b) {
+  if (typeof a !== "number" || typeof b !== "number") return "";
+  if (kind === "yr") return sign(b - a) + "년";
+  if (kind === "pp") return sign(Math.round((b - a) * 10) / 10) + "%p";
+  if (kind === "rel" && a) return sign(Math.round((b / a - 1) * 1000) / 10) + "%";
+  return "";
+}
+function renderCompare(item, box) {
+  const a = cardRow(item, 0), b = cardRow(item, 1);
+  const h = el("div", "subject"), nm = el("div", "nm");
+  nm.append(el("h2", null, (item.subjects || []).join("  ·  ")), el("span", "ad", [a && a.address, b && b.address].filter(Boolean).join("  |  ")));
+  h.append(nm); box.append(h, reportTools(item, "두 단지 비교"));
+  if (a && b) {
+    const t = el("table", "cmp"), hr = el("tr");
+    hr.append(el("th", null, "항목"), el("th", null, a.complex_name), el("th", null, b.complex_name), el("th", "n", "차이"));
+    t.append(hr);
+    for (const [label, get, show, kind] of CMP) {
+      const va = get(a), vb = get(b); if (va == null && vb == null) continue;
+      const tr = el("tr");
+      tr.append(el("th", null, label), el("td", null, va == null ? "-" : show(va, a)), el("td", null, vb == null ? "-" : show(vb, b)), el("td", "n", diff(kind, va, vb)));
+      t.append(tr);
+    }
+    const w = el("div", "tw cmpw"); w.append(t); box.append(w);
+    box.append(el("p", "fine left", "차이 = 오른쪽 단지가 왼쪽보다 몇 % 높은지(비율 항목은 %p). 마지막 매매는 면적이 달라 견주지 않아요. 모두 같은 마트 함수(단지 종합 카드 [1] [2])의 원자료 그대로예요."));
+  }
+  const inl = el("div", "inline a");
+  item.blocks.forEach((bl, i) => { if (bl.kind !== "card") inl.append(blockEl(item, i, true)); });
+  box.append(inl, stampEl(item));
 }
 
 // ------------------------------------------------------------ 대화
@@ -574,12 +706,15 @@ async function send(text) {
   if (!cur) cur = newConv(text.length > 40 ? text.slice(0, 40) + "…" : text);
   const conv = cur;   // 답을 기다리는 사이 다른 대화를 열어도 이 대화에 남김
   showLog(true); $("topTitle").textContent = cur.title; renderConvs();
-  addQuestion(text);
-  const item = { q: text, answer: "", footer: "", blocks: [] }, box = el("div", "a"), steps = el("ul", "steps");
+  const m = mode, qtext = m === "ask" ? text : MODES[m][0] + " · " + text;
+  addQuestion(qtext);
+  const item = { q: qtext, answer: "", footer: "", blocks: [] }, box = el("div", "a"), steps = el("ul", "steps");
   box.append(steps); log.append(box);
   const step = label => { const li = el("li", null, label); steps.append(li); box.scrollIntoView({ block: "end", behavior: "smooth" }); return li; };
-  let pending = step("질문을 읽는 중");
-  try {
+  let pending = step(m === "ask" ? "질문을 읽는 중" : "공공기록을 모으는 중(모델 없이)");
+  if (m !== "ask") {
+    try { await lookup(item, text, m); } catch (e) { item.error = String(e.message || e); }
+  } else try {
     const r = await fetch("/api/ask/stream", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": token }, body: JSON.stringify({ q: text, sid: conv.sid }) });
     if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "연결 오류 " + r.status); }
     const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "", done = false;

@@ -24,7 +24,7 @@ from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hanpilji import config as config_mod
-from hanpilji.gpt import blocks, engine, llm, tools, verify
+from hanpilji.gpt import blocks, engine, llm, report, tools, verify
 
 MAX_SESSIONS = 200
 MAX_QUESTION = 1000
@@ -116,8 +116,11 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 return self._json(200, map_config())
             if not self._allowed():
                 return self._json(403, {"error": "토큰이 필요합니다"})
+            qs = {k: v[0].strip()[:report.MAX_QUERY] for k, v in parse_qs(url.query).items()}
             if url.path == "/api/card":
-                self._card(parse_qs(url.query).get("q", [""])[0].strip()[:100])
+                self._card(qs.get("q", ""))
+            elif url.path in ("/api/report", "/api/compare"):
+                self._report(url.path, qs)
             else:
                 self._json(404, {"error": "없는 주소"})
 
@@ -131,6 +134,25 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             except Exception as e:
                 print(f"오류: {e!r}", file=sys.stderr)
                 return self._json(500, {"error": "카드를 만드는 중 오류가 났습니다."})
+            self._json(200, out)
+
+        def _report(self, path, qs):
+            """필지 리포트 · 두 단지 비교(모델 없이 마트 함수만, 요금 없음)."""
+            if path == "/api/report" and not qs.get("q"):
+                return self._json(400, {"error": "단지명이나 주소를 넣어 주세요"})
+            if path == "/api/compare" and not (qs.get("a") and qs.get("b")):
+                return self._json(400, {"error": "비교할 단지 두 곳을 넣어 주세요"})
+            if not self._rate_ok("tool", tool_per_hour):
+                return self._json(429, {"error": "너무 자주 열었습니다. 잠시 뒤 다시 해 주세요."})
+            try:
+                with engine.connect(cfg) as conn:
+                    out = (report.report(conn, qs["q"]) if path == "/api/report"
+                           else report.compare(conn, qs["a"], qs["b"]))
+            except report.NotOne as e:
+                return self._json(200, {"query": e.query, "choices": e.choices[:5]})
+            except Exception as e:
+                print(f"오류: {e!r}", file=sys.stderr)
+                return self._json(500, {"error": "리포트를 만드는 중 오류가 났습니다."})
             self._json(200, out)
 
         def _body(self):

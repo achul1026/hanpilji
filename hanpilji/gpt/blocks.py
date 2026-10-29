@@ -45,7 +45,7 @@ TOOL_DOING = {
 }
 
 COL = {   # 열 이름 → (보이는 이름, 형식)
-    "rank": ("순위", "int"), "complex_name": ("단지", "text"), "emd": ("동", "text"), "build_year": ("준공", "int"),
+    "rank": ("순위", "int"), "complex_name": ("단지", "text"), "emd": ("동", "text"), "build_year": ("준공", "text"),
     "area_m2": ("전용", "m2"), "kind": ("구분", "text"), "contract_date": ("계약일", "date"), "floor": ("층", "int"),
     "amount": ("금액", "won"), "monthly_rent": ("월세", "won"), "contract_kind": ("계약", "text"),
     "trade_count": ("매매 건수", "int"), "trade_avg": ("매매 평균", "won"), "trade_per_m2": ("매매 ㎡당", "won_m2"),
@@ -163,7 +163,7 @@ def _shape(out):
                            {"key": "jeonse_median_per_m2", "label": "전세 ㎡당 중위가", "fmt": "won_m2"}],
                 "note": rows[0].get("scope") or ""}
     if tool == "q_land_price_trend" and rows:
-        return {"kind": "chart", "x": "base_year", "x_fmt": "int", "rows": rows, "count": "parcel_count",
+        return {"kind": "chart", "x": "base_year", "x_fmt": "text", "rows": rows, "count": "parcel_count",
                 "series": [{"key": "median_per_m2", "label": "공시지가 ㎡당 중위", "fmt": "won_m2"}],
                 "note": rows[0].get("scope") or ""}
     if tool == "q_market_series" and rows:
