@@ -36,6 +36,16 @@ ALTER TABLE core.dim_building ADD COLUMN IF NOT EXISTS is_main boolean;         
 ALTER TABLE core.dim_building ADD COLUMN IF NOT EXISTS households integer;            -- 세대 수
 ALTER TABLE core.dim_building ADD COLUMN IF NOT EXISTS site_area numeric(14, 2);      -- 대지면적(집합건물 동은 0으로 와서 비움)
 
+-- 블록 단지(택지지구에서 지번이 아직 안 매겨진 단지. 실거래가 지번 「BL」)의 용도지역 · 지구.
+-- 필지(PNU)가 없어 단지에 바로 붙임. 블록 대장(「자곡동 블록」)의 지역지구에서 옴(collectors/bld.py)
+CREATE TABLE IF NOT EXISTS core.bridge_complex_zone (
+    complex_id     text NOT NULL REFERENCES core.dim_complex,
+    zone_cd        text NOT NULL REFERENCES core.dim_zone,
+    source         text NOT NULL,
+    asof           date NOT NULL,
+    PRIMARY KEY (complex_id, zone_cd)
+);
+
 -- PNU 19자리 = 법정동 10 + 대장 구분 1(일반 1 · 산 2) + 본번 4 + 부번 4. 「527」 「12-3」 「산 4-1」 꼴만, 「BL」(블록) 등은 NULL
 CREATE OR REPLACE FUNCTION core.make_pnu(p_lawd text, p_jibun text) RETURNS varchar
 LANGUAGE sql IMMUTABLE AS $$
@@ -164,6 +174,8 @@ LANGUAGE sql STABLE AS $$
         WHERE bz.overlap <> '접함'
           AND (bz.source = 'V-World 토지이용계획' OR NOT EXISTS (
                    SELECT 1 FROM core.bridge_parcel_zone v WHERE v.pnu = bz.pnu AND v.source = 'V-World 토지이용계획'))
+        UNION ALL   -- 필지가 없는 블록 단지는 단지에 바로 붙은 용도지역
+        SELECT cz.complex_id, cz.zone_cd, cz.source, cz.asof FROM c JOIN core.bridge_complex_zone cz USING (complex_id)
     ), zone AS (
         SELECT pz.complex_id, string_agg(DISTINCT z.zone_name, ', ') AS zones, max(pz.asof) AS asof,
                string_agg(DISTINCT pz.source, ' · ') AS src,

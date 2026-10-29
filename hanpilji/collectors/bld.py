@@ -30,6 +30,7 @@ from hanpilji import datagokr, ingest
 SOURCE = "dg_bld_hub"
 SOURCE_LABEL = "건축HUB 건축물대장"
 ZONE_LABEL = "건축물대장 지역지구"
+BLOCK_ZONE_LABEL = "건축물대장 지역지구(블록)"
 OPS = ("getBrRecapTitleInfo", "getBrTitleInfo", "getBrJijiguInfo", "getBrAtchJibunInfo")
 PAGE_ROWS = 100
 
@@ -209,8 +210,10 @@ def _ensure_parcel(cur, pnu, asof):
                 (pnu, pnu[:10], jibun, "임야" if pnu[10] == "2" else "토지", SOURCE_LABEL, asof))
 
 
-def load(conn, run_id, pnu, got, asof):
-    """필지 하나의 응답 4개를 올림. 반환: (건물 수, 제외 수)."""
+def load(conn, run_id, pnu, got, asof, complexes=None, block=False):
+    """필지 하나의 응답 4개를 올림. 반환: (건물 수, 제외 수).
+    complexes를 주면 그 단지에 건물을 붙임(기본: 단지 PNU가 이 필지인 단지).
+    block=True는 지번이 없는 블록 대장(pnu는 stg 열쇠로만 씀): 건물은 필지 없이 단지에 붙이고 용도지역도 단지에 붙임."""
     loaded = rejected = 0
     with conn.cursor() as cur:
         for op, rows in got.items():
@@ -219,18 +222,21 @@ def load(conn, run_id, pnu, got, asof):
                    ON CONFLICT (pnu, op) DO UPDATE SET run_id = excluded.run_id, row_data = excluded.row_data,
                        loaded_at = now()""",
                 (run_id, pnu, op, json.dumps(rows, ensure_ascii=False)))
-        _ensure_parcel(cur, pnu, asof)
-        complexes = [r[0] for r in cur.execute("SELECT complex_id FROM core.dim_complex WHERE pnu = %s", (pnu,))]
+        if not block:
+            _ensure_parcel(cur, pnu, asof)
+        if complexes is None:
+            complexes = [r[0] for r in cur.execute("SELECT complex_id FROM core.dim_complex WHERE pnu = %s", (pnu,))]
 
         # 표제부: 동마다 건물 하나
         blds = []
         for row in got.get("getBrTitleInfo", []):
             b = to_building(row)
-            if not b["bld_pk"] or not b["pnu"]:
+            if not b["bld_pk"] or not (b["pnu"] or block):
                 ingest.reject(conn, run_id, SOURCE, "core.dim_building", "건물 번호 · 지번 없음", row)
                 rejected += 1
                 continue
-            _ensure_parcel(cur, b["pnu"], asof)
+            if b["pnu"]:
+                _ensure_parcel(cur, b["pnu"], asof)
             cur.execute(
                 """INSERT INTO core.dim_building (bld_pk, pnu, name, main_use, structure, approval_date, floors_above,
                        floors_below, total_area, bc_rat, vl_rat, has_elevator, parking_count, is_main, households,
@@ -247,11 +253,12 @@ def load(conn, run_id, pnu, got, asof):
                        households = excluded.households, site_area = excluded.site_area,
                        source = excluded.source, asof = excluded.asof""",
                 {**b, "src": SOURCE_LABEL, "asof": asof})
-            cur.execute(
-                """INSERT INTO core.bridge_parcel_building (pnu, bld_pk, is_main_lot, source, asof)
-                   VALUES (%s, %s, true, %s, %s)
-                   ON CONFLICT (pnu, bld_pk) DO UPDATE SET is_main_lot = true, asof = excluded.asof""",
-                (b["pnu"], b["bld_pk"], SOURCE_LABEL, asof))
+            if b["pnu"]:
+                cur.execute(
+                    """INSERT INTO core.bridge_parcel_building (pnu, bld_pk, is_main_lot, source, asof)
+                       VALUES (%s, %s, true, %s, %s)
+                       ON CONFLICT (pnu, bld_pk) DO UPDATE SET is_main_lot = true, asof = excluded.asof""",
+                    (b["pnu"], b["bld_pk"], SOURCE_LABEL, asof))
             for cid in complexes:
                 cur.execute(
                     """INSERT INTO core.bridge_complex_building (complex_id, bld_pk, dong_name, source, asof)
@@ -283,12 +290,16 @@ def load(conn, run_id, pnu, got, asof):
         cur.execute(
             """UPDATE core.dim_complex SET site_area_m2 = %s, parking_total = %s, bc_rat = %s, vl_rat = %s,
                    households = coalesce(%s, households), dong_count = coalesce(%s, dong_count)
-               WHERE pnu = %s""",
+               WHERE pnu = %s OR complex_id = ANY(%s)""",
             (rc.get("site_area"), rc.get("parking"), rc.get("bc_rat"), rc.get("vl_rat"),
-             rc.get("households"), rc.get("dong_count"), pnu))
+             rc.get("households"), rc.get("dong_count"), None if block else pnu, complexes))
 
         # 지역지구: 이 필지의 용도지역 · 지구. 이름으로 UQ 코드에 맞추고, 없는 이름은 건축물대장 코드로 새로 둠
-        cur.execute("DELETE FROM core.bridge_parcel_zone WHERE pnu = %s AND source = %s", (pnu, ZONE_LABEL))
+        if block:
+            cur.execute("DELETE FROM core.bridge_complex_zone WHERE complex_id = ANY(%s) AND source = %s",
+                        (complexes, BLOCK_ZONE_LABEL))
+        else:
+            cur.execute("DELETE FROM core.bridge_parcel_zone WHERE pnu = %s AND source = %s", (pnu, ZONE_LABEL))
         for code, name, kind in pick_zones(got.get("getBrJijiguInfo", [])):
             hit = cur.execute("SELECT zone_cd FROM core.dim_zone WHERE code_system = 'uq' AND zone_name = %s",
                               (name,)).fetchone()
@@ -298,12 +309,87 @@ def load(conn, run_id, pnu, got, asof):
                     """INSERT INTO core.dim_zone (zone_cd, code_system, zone_name, law_basis, source, asof)
                        VALUES (%s, 'bld_jijigu', %s, %s, %s, %s) ON CONFLICT (zone_cd) DO NOTHING""",
                     (zone_cd, name, kind or None, ZONE_LABEL, asof))
+            if block:
+                for cid in complexes:
+                    cur.execute(
+                        """INSERT INTO core.bridge_complex_zone (complex_id, zone_cd, source, asof)
+                           VALUES (%s, %s, %s, %s)
+                           ON CONFLICT (complex_id, zone_cd) DO UPDATE SET source = excluded.source,
+                               asof = excluded.asof""",
+                        (cid, zone_cd, BLOCK_ZONE_LABEL, asof))
+                continue
             cur.execute(
                 """INSERT INTO core.bridge_parcel_zone (pnu, zone_cd, overlap, source, asof)
                    VALUES (%s, %s, '포함', %s, %s)
                    ON CONFLICT (pnu, zone_cd) DO UPDATE SET source = excluded.source, asof = excluded.asof""",
                 (pnu, zone_cd, ZONE_LABEL, asof))
     return loaded, rejected
+
+
+# ── 단지 PNU로 대장이 안 나오는 단지 ──
+# 실거래가 지번이 대장과 다른 신축 단지가 있음(2026-10-29 실측, 강남구 아파트 4곳):
+#   - 재건축 · 합필로 지번이 바뀜: 「도곡동 893-1」 → 대장은 도곡동 973(도곡 월드메르디앙)
+#   - 택지지구 블록: 실거래가 지번이 「BL」이라 PNU가 없음. 대장은 「자곡동 블록」(대지구분 2, 번 · 지 0000)으로
+#     법정동의 블록 단지가 한데 오고, 도로명주소(newPlatPlc)로 단지를 가림
+#   - 아직 대장이 없는 단지(아크로삼성, 2025 준공)는 그대로 둠
+# 지번이 바뀐 단지는 도로명주소 건물(core.geo_building: 도로명 · 건물번호 → 가장 많이 겹치는 지적도 필지)로 새 필지를 찾음
+
+def road_key(addr):
+    """「서울특별시 강남구 밤고개로 165 (자곡동)」 · 「밤고개로 165」 → 「밤고개로165」(도로명 + 건물번호)."""
+    m = re.search(r"(\S+(?:로|길))\s*(\d+(?:-\d+)?)(?:\s|\(|$)", re.sub(r"\([^()]*\)\s*$", "", addr or "").strip() + " ")
+    return f"{m[1]}{m[2]}" if m else None
+
+
+def unmatched(conn, sigungus):
+    """단지 PNU가 없거나 그 PNU의 표제부가 빈 단지. [(단지, 법정동, 도로명주소)]
+    한 번 찾은 단지도 늘 다시 찾음(몇 번의 호출로 끝나고, 그래야 대장이 바뀌면 따라감)."""
+    return conn.execute(
+        """SELECT c.complex_id, c.lawd_cd, c.road_addr FROM core.dim_complex c
+           WHERE left(c.lawd_cd, 5) = ANY(%s) AND c.road_addr IS NOT NULL
+             AND (c.pnu IS NULL OR EXISTS (SELECT 1 FROM stg.bld_raw s WHERE s.pnu = c.pnu
+                                           AND s.op = 'getBrTitleInfo' AND s.row_data = '[]'::jsonb))
+           ORDER BY 1""", (sigungus,)).fetchall()
+
+
+def geo_lot(conn, road_addr, lawd_cd):
+    """도로명주소 건물이 가장 많이 선 지적도 필지. 지적도 표가 없으면 None."""
+    key = road_key(road_addr)
+    if not key or not conn.execute("SELECT to_regclass('core.geo_building')").fetchone()[0]:
+        return None
+    rd, no = re.fullmatch(r"(.+?(?:로|길))(\d+(?:-\d+)?)", key).groups()
+    hit = conn.execute(
+        """SELECT pnu FROM core.geo_building
+           WHERE props->>'rd_nm' = %s AND props->>'buld_no' = %s AND left(pnu, 5) = %s AND pnu IS NOT NULL
+           GROUP BY pnu ORDER BY count(*) DESC, max(floors_above) DESC NULLS LAST, pnu LIMIT 1""",
+        (rd, no, lawd_cd[:5])).fetchone()
+    return hit[0] if hit else None
+
+
+def resolve_unmatched(conn, caller, run_id, sigungus, asof, log=print):
+    """단지 PNU로 대장이 안 나오는 단지를 블록 대장 · 바뀐 지번으로 다시 찾아 올림. 반환: 찾은 단지 수."""
+    found, blocks = 0, {}
+    for cid, lawd, road in unmatched(conn, sigungus):
+        key = road_key(road)
+        if lawd not in blocks:   # 법정동 하나의 블록 대장(대지구분 2, 번 · 지 0000)은 한 번만 받음
+            bp = f"{lawd}3{'0' * 8}"   # params()가 대지구분 2로 바꿈
+            blocks[lawd] = {op: caller.all_items(op, bp) for op in OPS}
+        got = {op: [r for r in rows if road_key(_s(r, "newPlatPlc")) == key] for op, rows in blocks[lawd].items()}
+        if key and got["getBrTitleInfo"]:
+            n, _ = load(conn, run_id, f"{lawd}블록{key}"[:25], got, asof, complexes=[cid], block=True)
+            log(f"{cid}  블록 대장 {n}동 ({road})")
+            found += 1
+            continue
+        lot = geo_lot(conn, road, lawd)
+        if lot and not conn.execute("SELECT 1 FROM core.dim_complex WHERE complex_id = %s AND pnu = %s",
+                                    (cid, lot)).fetchone():
+            got = {op: caller.all_items(op, lot) for op in OPS}
+            if got["getBrTitleInfo"]:
+                n, _ = load(conn, run_id, lot, got, asof, complexes=[cid])
+                log(f"{cid}  바뀐 지번 {lot} {n}동 ({road})")
+                found += 1
+                continue
+        log(f"{cid}  대장 못 찾음 ({road})")
+    return found
 
 
 def main(argv=None, fetch=datagokr.fetch):
@@ -371,9 +457,21 @@ def main(argv=None, fetch=datagokr.fetch):
                     if datagokr.is_fatal(e):  # 키 · 하루 한도 문제는 다음 호출도 똑같이 실패하므로 멈춤
                         note = f"멈춤: {e}"[:500]
                         break
-            # 더는 어느 필지에도 걸리지 않은 건축물대장 지역지구 코드는 지움(정리 규칙이 바뀌었을 때 남는 것)
+            if not args.from_stg and not args.pnu and note is None:
+                try:
+                    resolve_unmatched(conn, caller, run_id, sigungus, today)
+                    conn.commit()
+                except Budget:
+                    conn.rollback()
+                    note = f"호출 한도 {max_calls}회에 닿아 블록 · 바뀐 지번 단지는 건너뜀"
+                except Exception as e:  # 보정이 실패해도 앞에서 받은 필지는 그대로 둠
+                    conn.rollback()
+                    failed += 1
+                    print(f"failed 블록 · 바뀐 지번 단지: {e}", file=sys.stderr)
+            # 더는 어느 필지 · 단지에도 걸리지 않은 건축물대장 지역지구 코드는 지움(정리 규칙이 바뀌었을 때 남는 것)
             conn.execute("""DELETE FROM core.dim_zone z WHERE z.code_system = 'bld_jijigu'
-                            AND NOT EXISTS (SELECT 1 FROM core.bridge_parcel_zone b WHERE b.zone_cd = z.zone_cd)""")
+                            AND NOT EXISTS (SELECT 1 FROM core.bridge_parcel_zone b WHERE b.zone_cd = z.zone_cd)
+                            AND NOT EXISTS (SELECT 1 FROM core.bridge_complex_zone b WHERE b.zone_cd = z.zone_cd)""")
             conn.commit()
             left = len(pnus) - done - skipped
             print(f"필지 {len(pnus)}개 중 이번에 {done}개 · 이미 받음 {skipped}개 · 남음 {left}개 · 호출 {caller.calls}회")

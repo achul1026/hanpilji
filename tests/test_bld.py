@@ -2,7 +2,8 @@
 
 tests/fixtures/bld_*_real.xml 은 실제 응답(2026-10-27 수집). 표제부는 일원동 우성7차(일원동 615) 17동 중 2동,
 지역지구는 같은 필지의 응답에서 겹치는 줄을 뺀 것, 부속지번은 도곡렉슬(도곡동 527) 응답 중 2줄만 남겨 줄였고
-항목 내용은 그대로임. DB 시험은 HANPILJI_TEST_DSN이 있을 때만 돎.
+항목 내용은 그대로임. bld_block_*_real.xml 은 「자곡동 블록」 대장 응답(2026-10-29 수집)에서 단지마다 몇 줄만 남긴 것.
+DB 시험은 HANPILJI_TEST_DSN이 있을 때만 돎.
 """
 import os
 import tempfile
@@ -30,7 +31,30 @@ def fixture_fetch(path, params):
     return data, datagokr.parse(data)
 
 
+BLOCK = {"getBrTitleInfo": "bld_block_title_real.xml", "getBrRecapTitleInfo": "bld_block_recap_real.xml",
+         "getBrJijiguInfo": "bld_block_jijigu_real.xml"}
+
+
+def block_fetch(path, params):
+    """블록 대장(대지구분 2)은 저장한 블록 응답, 일원동 615는 우성7 응답, 나머지는 빈 응답."""
+    op = path.split("/")[-1]
+    if params["platGbCd"] == "2" and op in BLOCK:
+        data = (FIX / BLOCK[op]).read_bytes()
+    elif (params["bjdongCd"], params["bun"]) == ("11400", "0615"):
+        data = (FIX / FILES[op]).read_bytes()
+    else:
+        data = (FIX / "bld_block_title_real.xml").read_bytes().split(b"<items>")[0] + b"<items></items></body></response>"
+    return data, datagokr.parse(data)
+
+
 class Parse(unittest.TestCase):
+    def test_road_key(self):
+        self.assertEqual(bld.road_key("서울특별시 강남구 밤고개로 165 (자곡동)"), "밤고개로165")
+        self.assertEqual(bld.road_key("영동대로128길 15"), "영동대로128길15")
+        self.assertEqual(bld.road_key("테헤란로 152-1"), "테헤란로152-1")
+        self.assertIsNone(bld.road_key(None))
+        self.assertEqual(bld.params("1168011200300000000")["platGbCd"], "2", "블록 대장")
+
     def test_params_and_pnu(self):
         self.assertEqual(bld.params("1168011800105270000"),
                          {"sigunguCd": "11680", "bjdongCd": "11800", "platGbCd": "0", "bun": "0527", "ji": "0000"})
@@ -117,10 +141,11 @@ class Load(unittest.TestCase):
             c.execute("DELETE FROM core.bridge_complex_building WHERE source = %s", (src,))
             c.execute("DELETE FROM core.bridge_parcel_building WHERE source = %s", (src,))
             c.execute("DELETE FROM core.bridge_parcel_zone WHERE source = %s", (bld.ZONE_LABEL,))
+            c.execute("DELETE FROM core.bridge_complex_zone WHERE source = %s", (bld.BLOCK_ZONE_LABEL,))
             c.execute("DELETE FROM core.dim_building WHERE source = %s", (src,))
             c.execute("DELETE FROM core.dim_parcel WHERE source = %s", (src,))
             c.execute("DELETE FROM core.dim_zone WHERE code_system = 'bld_jijigu'")
-            c.execute("DELETE FROM core.dim_complex WHERE complex_id = 't-bld'")
+            c.execute("DELETE FROM core.dim_complex WHERE complex_id LIKE 't-bld%%'")
             c.execute("DELETE FROM stg.bld_raw")
             c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s", (bld.SOURCE,))
             c.execute("DELETE FROM ops.reject_estate WHERE source_id = %s", (bld.SOURCE,))
@@ -170,6 +195,40 @@ class Load(unittest.TestCase):
             self.assertEqual([t[0] for t in tasks].count("failed"), 1, "한도 오류가 나면 다음 필지는 부르지 않음")
         finally:
             self.q("DELETE FROM core.dim_complex WHERE complex_id = 't-bld2'")
+
+
+    def test_4_block_and_renumbered(self):
+        """실거래가 지번이 「BL」인 블록 단지와, 지번이 바뀌어 단지 PNU로 대장이 안 나오는 단지(2026-10-29 실측 모양)."""
+        # 실제로는 도곡동 893-1(실거래가) → 대장 · 지적도 도곡동 973. 시험은 저장해 둔 우성7(일원동 615) 응답으로 대신함
+        old = "1168011800108930001"
+        self.q("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, road_addr, pnu, source, asof) VALUES "
+               "('t-bld-bl', '시험수서1', '1168011200', 'BL', '밤고개로 165', NULL, 't', '2026-10-29'), "
+               "('t-bld-new', '시험893', '1168011800', '893-1', '도곡로18길 59', %s, 't', '2026-10-29')", old)
+        self.q("CREATE TABLE IF NOT EXISTS core.geo_building (bld_id text PRIMARY KEY, pnu varchar(25), "
+               "floors_above int, props jsonb NOT NULL DEFAULT '{}')")   # 지적도 표만 흉내(PostGIS 없이)
+        self.q("""INSERT INTO core.geo_building (bld_id, pnu, floors_above, props) VALUES
+                  ('t1', '1168011400106150000', 18, '{"rd_nm": "도곡로18길", "buld_no": "59"}'),
+                  ('t2', '1168011400106150000', 18, '{"rd_nm": "도곡로18길", "buld_no": "59"}'),
+                  ('t3', '1168011800108930001', 1, '{"rd_nm": "도곡로18길", "buld_no": "59"}')
+                  ON CONFLICT DO NOTHING""")
+        try:
+            self.assertEqual(bld.main(["--config", self.cfg, "--refresh"], fetch=block_fetch), 0)
+            zones = self.q("SELECT zones, bld_households, land_area_m2 FROM mart.q_property_card('11680', '시험수서1')")
+            self.assertEqual(zones, [("공공주택지구, 제3종일반주거지역, 지구단위계획구역", 830, 19297)],
+                             "밤고개로 165 줄만 골라 단지에 붙임(같은 블록 대장의 다른 단지 줄은 뺌). 세대 · 대지는 총괄표제부")
+            self.assertEqual(self.q("SELECT count(*) FROM core.bridge_complex_building WHERE complex_id = 't-bld-bl'")[0][0], 2,
+                             "필지 없는 블록 건물도 단지에 붙음")
+            self.assertEqual(self.q("SELECT count(*) FROM core.bridge_complex_building WHERE complex_id = 't-bld-new'")[0][0], 2,
+                             "도로명주소 건물이 가장 많이 선 필지의 대장 건물을 붙임")
+            self.assertEqual(self.q("SELECT zones FROM mart.q_property_card('11680', '시험893')")[0][0],
+                             "제3종일반주거지역, 지구단위계획구역")
+            self.assertEqual(bld.main(["--config", self.cfg, "--refresh"], fetch=block_fetch), 0)
+            self.assertEqual(self.q("SELECT count(*) FROM core.bridge_complex_zone WHERE complex_id = 't-bld-bl'")[0][0], 3,
+                             "다시 돌려도 같음")
+        finally:
+            self.q("DELETE FROM core.bridge_complex_zone WHERE complex_id LIKE 't-bld%%'")
+            self.q("DELETE FROM core.bridge_complex_building WHERE complex_id LIKE 't-bld%%'")
+            self.q("DROP TABLE core.geo_building")
 
 
 if __name__ == "__main__":
