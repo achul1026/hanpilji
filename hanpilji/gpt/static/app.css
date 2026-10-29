@@ -112,7 +112,7 @@ a{color:var(--survey)}
 .md>*{margin:0 0 10px}.md>*:last-child{margin-bottom:0}
 .md{font-size:16px;line-height:1.8}
 .md h3,.md h4,.md h5,.md h6{font-size:16px;margin-top:14px;font-weight:700}.md h5,.md h6{font-size:15px}
-.md>p.lead{font-size:20px;line-height:1.55;font-weight:650;letter-spacing:-.015em;margin-bottom:16px}
+.md>p.lead{font-size:18.5px;line-height:1.55;font-weight:650;letter-spacing:-.015em;margin-bottom:16px}
 .md ul,.md ol{padding-left:22px}.md li{margin-bottom:2px}
 .md code{font:.9em var(--mono);background:var(--paper);border-radius:4px;padding:0 4px}
 .md .tw table{min-width:60%}
@@ -230,6 +230,38 @@ tr:last-child td{border-bottom:0}
 .verify.part{color:var(--warn)}
 .verify small{display:block;font-weight:400;color:var(--muted)}
 
+/* 핵심만 보이는 답: 결론 한 줄 · 핵심 값 하나 · 출처 도장 · 「열기」 줄 · 이어 물을 칩. 부가정보는 눌러야 서랍(휴대폰은 아래 시트)에서 열림 */
+.anscard{background:var(--sheet);border:1px solid var(--line);border-radius:16px;padding:16px 18px 6px;display:flex;flex-direction:column;gap:2px;max-width:560px}
+.anscard:not(:has(.key)){padding-top:12px}
+.key{display:flex;flex-direction:column;gap:4px;padding-bottom:10px}
+.key .kl{font-size:13px;font-weight:600;color:var(--muted);line-height:1.45}
+.key .kv{font-size:32px;font-weight:800;letter-spacing:-.03em;line-height:1.2}
+.key .kv.long{font-size:24px}
+.key .ks{font-size:14px;color:var(--ink2);line-height:1.55}
+.schip{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;border:1px solid color-mix(in srgb,var(--seal) 30%,var(--line));background:var(--seal-soft);color:var(--seal);border-radius:8px;padding:5px 10px;font-size:12.5px;font-weight:600;margin:6px 0 4px;text-align:left;max-width:100%}
+.schip span{overflow:hidden;text-overflow:ellipsis}
+.schip svg{flex:none}
+.more-rows{display:flex;flex-direction:column;border-top:1px solid var(--grid)}
+.mrow{display:flex;justify-content:space-between;align-items:center;gap:12px;border:0;border-bottom:1px solid var(--grid);background:none;padding:11px 2px;min-height:44px;text-align:left;font-size:14.5px;color:var(--ink)}
+.mrow:last-child{border-bottom:0}
+.mrow small{flex:none;color:var(--muted);font-size:13px}
+.mrow:hover span{color:var(--survey)}
+.mrow.busy{opacity:.55;pointer-events:none}
+.gapd{border-top:1px solid var(--grid);padding:10px 2px 8px;font-size:14px}
+.gapd summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;color:var(--warn);font-weight:600;min-height:28px}
+.gapd summary::-webkit-details-marker{display:none}
+.gapd summary small{color:var(--muted);font-weight:400;font-size:13px}
+.gapd[open] summary small{visibility:hidden}
+.gapd ul{margin:6px 0 4px;padding-left:18px;line-height:1.7;color:var(--ink2)}
+.qchips{display:flex;flex-wrap:wrap;gap:8px}
+.qchip{border:1px solid color-mix(in srgb,var(--survey) 30%,var(--line));background:var(--sheet);color:var(--survey);border-radius:999px;padding:8px 14px;min-height:40px;font-size:14px;font-weight:600;text-align:left}
+.qchip:hover{background:var(--survey-soft)}
+.qchips.pick .qchip{border-radius:12px}
+.afine{margin:-6px 0 0;font-size:12px;color:var(--muted)}
+.detail{background:var(--sheet);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:15px;line-height:1.7}
+.detail b{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.detail p{margin:0}
+
 /* 필지 리포트 · 두 단지 비교 */
 .modes{max-width:800px;margin:0 auto 8px;display:flex;gap:4px}
 .modes button{border:0;background:none;color:var(--ink2);border-radius:8px;padding:6px 12px;font-size:13px;font-weight:500}
@@ -298,6 +330,8 @@ table.cmp td.n{color:var(--survey);font-weight:600}
   .figs{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .fig{padding:11px 12px}.fig .v{font-size:18px}
   .md>p.lead{font-size:18px}
+  .key .kv{font-size:28px}.key .kv.long{font-size:21px}
+  .anscard{padding:14px 14px 4px}
   .subject h2{font-size:22px}
   .examples .ex:nth-child(n+5){display:none}
   table.cmp th,table.cmp td{padding:8px 9px;font-size:13px}

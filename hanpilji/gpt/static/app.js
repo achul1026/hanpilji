@@ -495,9 +495,10 @@ function refreshTwin(item, idx, inlineMode) {
 
 // ------------------------------------------------------------ 근거 서랍
 let drawerItem = null, activeRef = null;
-function renderDrawer(item, ref) {
+function renderDrawer(item, ref, detail) {
   drawerItem = item; activeRef = ref;
   const tabs = $("tabs"), body = $("dbody"); tabs.textContent = ""; body.textContent = "";
+  if (detail) { const d = el("div", "detail"); d.append(el("b", null, detail.label)); if (detail.text) d.append(inline(el("p"), detail.text)); body.append(d); }
   item.blocks.forEach((b, i) => {
     const t = btn("tab" + (b.ref === ref ? " on" : ""), null, () => renderDrawer(item, b.ref));
     t.setAttribute("role", "tab"); t.setAttribute("aria-selected", b.ref === ref);
@@ -507,9 +508,10 @@ function renderDrawer(item, ref) {
   document.querySelectorAll(".a .cite.on").forEach(c => c.classList.remove("on"));
   if (item.el) item.el.querySelectorAll(".cite").forEach(c => { if (c.textContent === String(ref)) c.classList.add("on"); });
 }
-function openDrawer(item, ref) {
-  if (!item.blocks.some(b => b.ref === ref)) return;
-  renderDrawer(item, ref);
+// detail: 「더보기」 줄의 이름과 내용. 가리킨 원자료가 없으면 내용만 엶
+function openDrawer(item, ref, detail) {
+  if (!item.blocks.some(b => b.ref === ref)) { if (!detail) return; ref = null; }
+  renderDrawer(item, ref, detail);
   app.classList.remove("nodrawer");
   if (!wide()) { app.classList.add("sheet"); $("scrim").hidden = false; }
 }
@@ -546,18 +548,53 @@ function subjectEl(item) {
   for (const t of [r.build_year && r.build_year + "년 준공", r.bld_households && nf.format(r.bld_households) + "세대", r.bld_floors_above && "최고 " + r.bld_floors_above + "층"]) if (t) chips.append(el("span", null, t));
   h.append(nm, chips); return h;
 }
-// 이어서 볼 것: 엔진이 고른 조회를 모델 없이 바로 엶. 연 블록은 이 답의 근거에 새 번호로 붙음
-function nextEl(item) {
-  if (!(item.next || []).length && !cardRow(item)) return null;
-  const box = el("div", "next"), row = el("div", "row");
-  box.append(el("span", "lbl", "이어서 볼 것 · 모델 요금 없이 바로 열림"));
-  const r = cardRow(item);
-  if (r && r.complex_name) {   // 같은 단지를 인쇄용 한 장으로
-    const b = btn("nx", r.complex_name + " 필지 리포트", () => { setMode("report"); send(r.complex_name); });
-    b.append(el("i", null, "바로")); row.append(b);
+// 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기는 글에서 빼서 따로 그림.
+// 예전 답의 「:::숫자」는 글에 남겨 md()가 그대로 그림
+const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기)\s*$/;
+function splitAnswer(text) {
+  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [] }, lines = String(text || "").replace(/\r/g, "").split("\n");
+  for (let i = 0; i < lines.length; i++) {
+    const m = lines[i].match(PARTS);
+    if (!m) { out.prose.push(lines[i]); continue; }
+    for (i++; i < lines.length && !FENCE_END.test(lines[i]); i++) if (lines[i].trim()) out[m[1]].push(lines[i].trim());
   }
-  for (const n of item.next) {
-    const b = btn("nx", n.label, async () => {
+  out.prose = out.prose.join("\n");
+  return out;
+}
+const bullet = t => t.replace(/^\s*[-*•]\s*/, "").trim();
+const refOf = t => parseInt(String(t || "").replace(/\D/g, ""), 10) || null;
+// 출처 도장 한 줄: 첫 원자료의 기관 · 검산 결과. 누르면 그 원자료가 열림
+function stampChip(item, ref) {
+  const b = item.blocks.find(x => x.ref === ref) || item.blocks[0];
+  if (!b) return null;
+  const src = (((b.source || {}).sources || [])[0] || b.title).replace(/\s*\(MST \d+\)/, ""), more = item.blocks.length > 1 ? ` 외 ${item.blocks.length - 1}` : "";
+  // 숫자를 모두 원자료에서 찾았을 때만 「원자료 일치」. 계산값 · 조문 속 숫자는 못 찾을 수 있어 일부 일치는 표시하지 않음
+  const v = item.verify, ok = v && v.checked && v.matched === v.checked ? "원자료 일치" : "";
+  const c = btn("schip", null, () => openDrawer(item, b.ref), "출처 보기");
+  if (ok) { const sv = svg("svg", { width: 12, height: 12, viewBox: "0 0 12 12", "aria-hidden": "true" }); sv.append(svg("path", { d: "M2 6.5l2.5 2.5L10 3.5", fill: "none", stroke: "currentColor", "stroke-width": 2 })); c.append(sv); }
+  c.append(el("span", null, [src + more, ok].filter(Boolean).join(" · ")));
+  return c;
+}
+function keyEl(line, item) {
+  const [label, value, note, ref] = line.split("|").map(x => x.trim()), card = el("div", "key");
+  if (label) card.append(el("div", "kl", label));
+  card.append(el("div", "kv" + (String(value || "").length > 14 ? " long" : ""), value || "-"));
+  if (note) card.append(el("div", "ks", note));
+  const st = stampChip(item, refOf(ref)); if (st) card.append(st);
+  return card;
+}
+// 「열기」 줄: 모델이 고른 더보기(내용 + 원자료) · 엔진이 고른 바로 볼 것(모델 요금 없음) · 아직 안 가리킨 원자료
+function moreEl(item, rows) {
+  const box = el("div", "more-rows"), used = new Set();
+  const row = (label, hint, onclick) => { const b = btn("mrow", null, onclick); b.append(el("span", null, label), el("small", null, hint || "열기 ›")); box.append(b); return b; };
+  for (const line of rows) {
+    const [label, text, ref] = line.split("|").map(x => x.trim()), n = refOf(ref);
+    if (!label) continue;
+    if (n) used.add(n);
+    row(label, "열기 ›", () => openDrawer(item, n, { label, text }));
+  }
+  for (const n of (item.next || []).slice(0, 2)) {
+    const b = row(n.label, "바로 ›", async () => {
       b.classList.add("busy");
       const ref = Math.max(0, ...item.blocks.map(x => x.ref || 0)) + 1;
       try {
@@ -568,19 +605,22 @@ function nextEl(item) {
         renderAnswer(item, item.el); openDrawer(item, ref);
       } catch (e) { b.classList.remove("busy"); alertLine(box, "열지 못했습니다: " + e.message); }
     });
-    b.append(el("i", null, "바로")); row.append(b);
   }
-  box.append(row); return box;
+  const rest = item.blocks.filter(b => !used.has(b.ref));
+  if (rest.length) row(rest.length === 1 ? rest[0].title : `원자료 ${rest.length}개 · ${rest[0].title} 외`, "원자료 ›", () => openDrawer(item, rest[0].ref));
+  return box.children.length ? box : null;
 }
-// 답 안에 바로 보일 블록: 카드 · 그래프 · 표는 앞에서 3개까지, 조문은 2개까지 짧게. 나머지는 근거 도장에서 서랍으로
-// 단지 머리(subjectEl)를 그린 답이면 같은 내용인 단지 카드는 서랍에만 둠
-function inlinePicks(blocks, skipCard) {
-  const out = [], docs = [];
-  blocks.forEach((b, i) => {
-    if (skipCard && b.kind === "card") return;
-    if (b.kind === "document") { if (docs.length < 2) docs.push(i); } else if (out.length < 3 && (b.rows || b.features || []).length) out.push(i);
-  });
-  return [...out, ...docs];
+function gapsFold(lines) {
+  const d = el("details", "gapd"), sm = el("summary"), ul = el("ul");
+  sm.append(el("span", null, `확인 못 한 것 ${lines.length}개`), el("small", null, "펼치기"));
+  for (const l of lines) ul.append(inline(el("li"), bullet(l)));
+  d.append(sm, ul); return d;
+}
+// 누르면 그 글로 바로 물음(질문 모드로)
+function askChips(lines, cls) {
+  const row = el("div", "qchips " + (cls || ""));
+  for (const l of lines.slice(0, 5)) { const t = bullet(l); if (t) row.append(btn("qchip", t, () => { if (busy) return; setMode("ask"); send(t); })); }
+  return row.children.length ? row : null;
 }
 function renderAnswer(item, box) {
   box.textContent = ""; item.el = box;
@@ -588,15 +628,22 @@ function renderAnswer(item, box) {
   if (item.choices) return box.append(choicesEl(item));
   if (item.kind === "report") return renderReport(item, box);
   if (item.kind === "compare") return renderCompare(item, box);
-  const head = subjectEl(item); if (head) box.append(head);
+  const p = splitAnswer(item.answer);
   citeHandler = n => item.blocks.some(b => b.ref === n) ? () => openDrawer(item, n) : null;
   checks = (item.verify && item.verify.items) || [];
-  box.append(md(item.answer || ""));
+  const prose = md(p.prose);
+  if (prose.firstElementChild && prose.firstElementChild.tagName === "P") prose.firstElementChild.classList.add("lead");
+  box.append(prose);
   citeHandler = null; checks = [];
-  const inl = el("div", "inline a"); for (const i of inlinePicks(item.blocks, !!head)) inl.append(blockEl(item, i, true));
-  if (inl.children.length) box.append(inl);
-  const nx = nextEl(item); if (nx) box.append(nx);
-  box.append(stampEl(item));
+  const pick = askChips(p.고르기, "pick"); if (pick) box.append(pick);
+  const card = el("div", "anscard");
+  if (p.핵심.length) card.append(keyEl(p.핵심[0], item));
+  else if (!pick) { const st = stampChip(item); if (st) card.append(st); }
+  const more = pick ? null : moreEl(item, p.더보기); if (more) card.append(more);
+  if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
+  if (card.children.length) box.append(card);
+  if (item.blocks.some(b => b.tool === "q_law_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
+  const nx = askChips(p.다음); if (nx) box.append(nx);
 }
 
 // ------------------------------------------------------------ 필지 리포트 · 두 단지 비교(모델 없이 마트 함수만, 요금 없음)
@@ -746,7 +793,7 @@ function openConv(c) {
   cur = c; log.textContent = ""; showLog(true); $("topTitle").textContent = c.title;
   for (const it of c.items) { addQuestion(it.q); const box = el("div", "a"); log.append(box); renderAnswer(it, box); }
   const last = c.items[c.items.length - 1];
-  if (last && last.blocks.length && wide()) openDrawer(last, last.blocks[0].ref); else clearDrawer();
+  clearDrawer();
   renderConvs(); scroll.scrollTop = scroll.scrollHeight;
 }
 const wide = () => !matchMedia("(max-width:1020px)").matches;
@@ -792,7 +839,7 @@ async function send(text) {
   } catch (e) { item.error = String(e.message || e); }
   renderAnswer(item, box);
   conv.items.push(item); conv.at = Date.now(); save(); renderConvs();
-  if (cur === conv && item.blocks.length && wide()) openDrawer(item, item.blocks[0].ref);
+  if (cur === conv && (item.kind === "report" || item.kind === "compare") && item.blocks.length && wide()) openDrawer(item, item.blocks[0].ref);
   busy = false; go.disabled = !q.value.trim(); q.focus();
 }
 

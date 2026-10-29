@@ -105,6 +105,8 @@ class Engine(unittest.TestCase):
         self.assertIn("- [2] q_law_search", ans.footer)
         self.assertIn("화면 안내", bot.seen[0]["system"])
         self.assertNotIn("화면 안내", engine.SYSTEM)
+        for part in (":::핵심", ":::더보기", ":::확인 못 함", ":::다음", ":::고르기"):   # 웹 화면이 나눠 그리는 칸
+            self.assertIn(part, bot.seen[0]["system"])
 
     def test_partial_rows_in_footer(self):
         out = {**PRICE_OUT, "tool": "q_law_search", "args": {"query": "5% 증액"}, "shown": 10, "row_total": 39}
