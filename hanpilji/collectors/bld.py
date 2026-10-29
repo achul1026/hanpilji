@@ -2,7 +2,8 @@
 
     DATA_GO_KR_KEY=... python -m hanpilji.collectors.bld [--sigungu 11680] [--pnu 1168011800105270000] [--max-calls 900]
 
-실거래가로 만든 단지 PNU(core.dim_complex.pnu)마다 기능 4개를 부름:
+실거래가로 만든 단지 PNU(core.dim_complex.pnu)마다 기능 4개를 부름(연립다세대는 건물이 수천 동이라 아직 뺌:
+한 달 최신화 시간 · 하루 한도를 넘김. 필요하면 --pnu로 몇 곳만):
   총괄표제부(단지 한 장: 대지면적 · 세대 · 주차 · 건폐율 · 용적률), 표제부(동마다 한 장),
   지역지구(그 필지의 용도지역 · 지구), 부속지번(단지가 걸친 다른 필지).
 필지 하나를 다 받으면 커서에 날짜를 남김. 하루 한도에 걸리거나 --max-calls에 닿으면 멈추고,
@@ -414,7 +415,7 @@ def main(argv=None, fetch=datagokr.fetch):
     with psycopg.connect(cfg["db"]["dsn"]) as conn:
         pnus = args.pnu or [r[0] for r in conn.execute(
             """SELECT DISTINCT pnu FROM core.dim_complex WHERE pnu IS NOT NULL AND left(pnu, 5) = ANY(%s)
-               ORDER BY pnu""", (sigungus,)).fetchall()]
+                 AND kind <> '연립다세대' ORDER BY pnu""", (sigungus,)).fetchall()]
         run_id = ingest.start_run(conn, SOURCE)
         loaded = rejected = failed = done = skipped = 0
         note, finished = None, False

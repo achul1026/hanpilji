@@ -66,7 +66,7 @@ $$;
 -- 평균 대신 중위값: 비싼 단지가 몰린 달에 값이 튀지 않게. 단가는 전용면적 ㎡당
 -- 실거래 신고 기한이 계약 후 30일이라 「달 끝 + 30일」이 기준일보다 뒤인 달은 아직 덜 들어온 달(partial = true)
 -- 범위: p_name(단지) > p_emd(동) > 구 전체. 0건인 달도 줄을 냄(값은 비움)
--- 동 · 구 전체는 아파트만(오피스텔 단가를 섞으면 중위값이 흔들림). 단지를 주면 그 단지의 종류(아파트 · 오피스텔) 그대로
+-- 동 · 구 전체는 아파트만(오피스텔 · 빌라 단가를 섞으면 중위값이 흔들림). 단지를 주면 그 단지의 종류(아파트 · 오피스텔 · 연립다세대) 그대로
 DROP FUNCTION IF EXISTS mart.q_price_trend(text, int, text, text, numeric, numeric);
 CREATE FUNCTION mart.q_price_trend(p_sigungu text, p_months int DEFAULT 24, p_emd text DEFAULT NULL,
                                    p_name text DEFAULT NULL, p_area numeric DEFAULT NULL, p_area_tol numeric DEFAULT 3)

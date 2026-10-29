@@ -68,8 +68,9 @@ python -m hanpilji.collectors.eum_rule 행위제한.csv    # 토지이음에서 
 # 공공데이터포털 인증키가 있으면 (키는 환경변수로만)
 export DATA_GO_KR_KEY=...
 python -m hanpilji.collectors.luinfo                  # 행위제한 API → core.reg_rule (조례 기준)
-python -m hanpilji.collectors.rtms                    # 아파트 · 오피스텔 매매 · 전월세 36개월 → core.fact_deal · fact_rent
+python -m hanpilji.collectors.rtms                    # 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 36개월 → core.fact_deal · fact_rent
 python -m hanpilji.collectors.rtms --only offi_trade --only offi_rent   # 오피스텔만(API 2개를 따로 활용신청)
+python -m hanpilji.collectors.rtms --only rh_trade --only rh_rent       # 연립다세대만(API 2개를 따로 활용신청)
 python -m hanpilji.collectors.bld                     # 단지 필지마다 건축물대장 → core.dim_building · 용도지역 (강남구 2~3시간)
 python -m hanpilji.collectors.vworld                  # 필지마다 V-World → 지목 · 토지 면적 · 개별공시지가 · 토지이용계획 (키: VWORLD_KEY)
 # V-World는 해외(클라우드) IP를 끊음 → 국내 PC에서 받기만 하고 클라우드에서 적재
@@ -472,7 +473,9 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [ ] 경매 법령 4개 Supabase 적재
 - [x] 오피스텔 실거래 수집기 · 공매 할인율 오피스텔 비교(같은 필지 주상복합도 종류별로) · 매일 최신화 (2026-10-28)
 - [x] 오피스텔 API 2개 활용신청 → 실제 응답 항목 이름 확인 · 강남구 36개월 로컬 적재: 매매 2,890건 · 전월세 12,047건 · 225단지 (2026-10-29)
-- [ ] 오피스텔 실거래 Supabase 반영
+- [x] 오피스텔 실거래 Supabase 반영 (2026-10-29)
+- [x] 연립다세대 실거래 수집기 · 공매 할인율 다세대 비교 · 매일 최신화 (2026-10-29)
+- [ ] 연립다세대 강남구 36개월 적재 · Supabase 반영
 - [ ] 연립다세대 실거래 수집(강남구 공매에 다세대 1건)
 - [ ] 새 공매 물건 · 유찰로 값이 내려간 물건 알림(매주, 웹사이트가 생기면)
 - [ ] 법원경매 물건: 공식 API가 생기거나 제휴 데이터가 정해지면
@@ -492,7 +495,7 @@ hanpilji/
 │   │   ├── law.py           # 법제처 → core.doc_law
 │   │   ├── eum_rule.py      # 토지이음 CSV → core.reg_rule
 │   │   ├── luinfo.py        # 행위제한 API → core.reg_rule
-│   │   ├── rtms.py          # 아파트 · 오피스텔 매매 · 전월세 → core.fact_deal · fact_rent
+│   │   ├── rtms.py          # 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 → core.fact_deal · fact_rent
 │   │   ├── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
 │   │   ├── vworld.py        # V-World 토지특성 · 토지이용계획 → dim_parcel 지목 · fact_land_price · bridge_parcel_zone
 │   │   ├── vworld_geom.py   # V-World 연속지적도 · 도로명주소 건물(국내 PC에서 받은 zip) → core.geo_parcel · geo_building
