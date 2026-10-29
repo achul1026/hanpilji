@@ -11,7 +11,8 @@
 그때 주소는 http://서버:8000/?token=정한값 . 토큰이 있어도 접속 주소(IP)마다 시간당 질문 수를 제한함.
 누구나 쓰게 공개하려면(Cloud Run 등) 토큰 대신 HANPILJI_WEB_PUBLIC=1. 그때는 전체 질문 수를 24시간에
 HANPILJI_WEB_DAILY_LIMIT개(기본 50)로 막아 요금이 한도 밖으로 나가지 않게 함. 포트는 환경변수 PORT가 있으면 그것.
-앞에 프록시가 있으면 HANPILJI_TRUST_PROXY=1로 X-Forwarded-For의 마지막 주소를 접속 주소로 씀(Cloud Run이 덧붙이는 값).
+앞에 프록시가 있으면 HANPILJI_TRUST_PROXY=N으로 X-Forwarded-For의 끝에서 N번째 주소를 접속 주소로 씀
+(프록시가 덧붙인 값. Cloud Run은 1, 앞에 부하분산기를 두면 그것이 자기 주소를 하나 더 붙여 2).
 """
 import argparse
 import hmac
@@ -82,7 +83,7 @@ def page(name):
 
 
 def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hour=TOOL_PER_HOUR,
-                 daily_limit=None, trust_proxy=False):
+                 daily_limit=None, trust_proxy=0):
     sessions, lock = {}, threading.Lock()   # sid → {"messages", "lock"}
     hits = {}                               # (종류, 접속 주소) → 최근 1시간 요청 시각들
     asked = []                              # 모든 방문자의 최근 24시간 질문 시각(daily_limit용)
@@ -110,8 +111,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             headers = getattr(self, "headers", None)   # 요청 줄이 깨지면 머리글을 읽기 전에 기록부터 남김
             if trust_proxy and headers is not None:
                 fwd = [a.strip() for a in (headers.get("X-Forwarded-For") or "").split(",") if a.strip()]
-                if fwd:   # 앞쪽은 방문자가 마음대로 넣을 수 있어 프록시가 붙인 마지막 값만 믿음
-                    return fwd[-1]
+                if fwd:   # 앞쪽은 방문자가 마음대로 넣을 수 있어 프록시가 붙인 끝쪽 값만 믿음
+                    return fwd[-min(trust_proxy, len(fwd))]
             return self.client_address[0]
 
         def _rate_ok(self, kind="ask", limit=None):
@@ -308,8 +309,9 @@ def main(argv=None):
     public = os.environ.get(PUBLIC_ENV) == "1"
     try:
         daily = int(os.environ.get(DAILY_ENV) or DAILY_LIMIT) if public else None
+        hops = int(os.environ.get(PROXY_ENV) or 0)
     except ValueError:
-        print(f"{DAILY_ENV}는 숫자여야 합니다.", file=sys.stderr)
+        print(f"{DAILY_ENV} · {PROXY_ENV}는 숫자여야 합니다.", file=sys.stderr)
         return 2
     if token is None and not public and not _loopback(a.host):
         print(f"{a.host}로 열려면 환경변수 {TOKEN_ENV}를 정하거나, 누구나 쓰게 하려면 {PUBLIC_ENV}=1"
@@ -325,7 +327,7 @@ def main(argv=None):
         print(e, file=sys.stderr)
         return 2
     server = ThreadingHTTPServer((a.host, a.port), make_handler(cfg, model, rounds, token, daily_limit=daily,
-                                                                trust_proxy=os.environ.get(PROXY_ENV) == "1"))
+                                                                trust_proxy=hops))
     print(f"http://{a.host}:{a.port} 에서 열었습니다 (끄려면 Ctrl+C)", file=sys.stderr)
     try:
         server.serve_forever()

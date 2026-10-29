@@ -530,7 +530,7 @@ class Web(unittest.TestCase):
         self.assertEqual([self.post({"q": "a"}, {"X-Token": "s3cret"})[0] for _ in range(3)], [200, 200, 429])
 
     def test_daily_limit_and_proxy_address(self):
-        self.serve(per_hour=1, daily_limit=2, trust_proxy=True)
+        self.serve(per_hour=1, daily_limit=2, trust_proxy=1)
         ip = lambda a: {"X-Forwarded-For": a}
         self.assertEqual(self.post({"q": "a"}, ip("9.9.9.9, 1.1.1.1"))[0], 200)
         self.assertEqual(self.post({"q": "a"}, ip("8.8.8.8, 1.1.1.1"))[0], 429, "앞쪽 주소를 바꿔도 같은 방문자")
@@ -538,6 +538,13 @@ class Web(unittest.TestCase):
         code, got = self.post({"q": "a"}, ip("3.3.3.3"))
         self.assertEqual(code, 429)
         self.assertIn("오늘", got["error"], "모든 방문자를 합친 하루 한도")
+
+    def test_proxy_hops(self):
+        self.serve(per_hour=1, trust_proxy=2)
+        lb = lambda a: {"X-Forwarded-For": a + ", 130.211.0.1"}
+        self.assertEqual(self.post({"q": "a"}, lb("9.9.9.9"))[0], 200)
+        self.assertEqual(self.post({"q": "a"}, lb("7.7.7.7, 9.9.9.9"))[0], 429, "부하분산기 주소 앞이 방문자")
+        self.assertEqual(self.post({"q": "a"}, lb("6.6.6.6"))[0], 200, "부하분산기 주소는 모두 같아도 방문자별로 셈")
 
     def test_public_mode_needs_no_token(self):
         from hanpilji.gpt import web

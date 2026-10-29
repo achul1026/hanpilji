@@ -89,6 +89,8 @@
      | `HANPILJI_VWORLD_MAP_KEY` | V-World 운영키가 나오면 추가(없으면 지도는 선만 그림) |
 
      `HANPILJI_WEB_PUBLIC=1`, `HANPILJI_TRUST_PROXY=1`은 Dockerfile에 이미 들어 있습니다.
+     (방문자별 한도를 셀 때 구글이 붙여 주는 방문자 주소를 씀. 올린 뒤 「로그」에서 서로 다른 사람의 접속이
+     모두 같은 주소로 찍히면 알려 주세요. `HANPILJI_TRUST_PROXY=2`로 바꾸면 됩니다.)
      (더 조심하려면 키 두 개는 「보안 비밀 참조」로 Secret Manager에 넣어도 됩니다. 비밀 6개까지 무료)
 6. 「만들기」. 빌드가 끝나면 위쪽에 `https://hanpilji-xxxxxxxx.asia-northeast3.run.app` 주소가 나옵니다.
 7. 휴대폰으로 그 주소를 열고 「도곡렉슬 84㎡ 최근 1년 매매가」를 물어 봅니다.
