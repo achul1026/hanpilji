@@ -182,6 +182,21 @@ class Load(unittest.TestCase):
         self.assertEqual(missing, ["토지 지목", "토지 면적", "공시지가"])
         self.assertEqual(self.q("SELECT count(*) FROM ops.reject_estate WHERE source_id = %s", bld.SOURCE)[0][0], 0)
 
+    def test_2b_keeps_vworld_zone(self):
+        """V-World 토지이용계획에 이미 있는 용도지역은 건축물대장이 덮지 않음(덮으면 카드에서 빠짐, 2026-10-29 도곡동 973)."""
+        self.q("INSERT INTO core.bridge_parcel_zone (pnu, zone_cd, overlap, source, asof) "
+               "SELECT %s, zone_cd, '포함', 'V-World 토지이용계획', '2026-10-28' FROM core.dim_zone "
+               "WHERE code_system = 'uq' AND zone_name = '제3종일반주거지역' "
+               "ON CONFLICT (pnu, zone_cd) DO UPDATE SET source = excluded.source", PNU)
+        try:
+            bld.main(["--config", self.cfg, "--pnu", PNU, "--refresh"], fetch=fixture_fetch)
+            self.assertEqual(self.card()[2], "제3종일반주거지역")
+            self.assertEqual(self.q("SELECT b.source FROM core.bridge_parcel_zone b JOIN core.dim_zone z USING (zone_cd) "
+                                    "WHERE b.pnu = %s AND z.zone_name = '제3종일반주거지역'", PNU),
+                             [("V-World 토지이용계획",)])
+        finally:
+            self.q("DELETE FROM core.bridge_parcel_zone WHERE source = 'V-World 토지이용계획' AND pnu = %s", PNU)
+
     def test_3_quota_stops(self):
         def over(path, params):
             raise datagokr.ApiError("22 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR")

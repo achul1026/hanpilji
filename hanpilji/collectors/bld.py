@@ -295,6 +295,7 @@ def load(conn, run_id, pnu, got, asof, complexes=None, block=False):
              rc.get("households"), rc.get("dong_count"), None if block else pnu, complexes))
 
         # 지역지구: 이 필지의 용도지역 · 지구. 이름으로 UQ 코드에 맞추고, 없는 이름은 건축물대장 코드로 새로 둠
+        # 같은 용도지역이 V-World 토지이용계획으로 이미 있으면 그 줄을 건드리지 않음(덮으면 카드가 V-World 줄만 골라 빠짐)
         if block:
             cur.execute("DELETE FROM core.bridge_complex_zone WHERE complex_id = ANY(%s) AND source = %s",
                         (complexes, BLOCK_ZONE_LABEL))
@@ -321,7 +322,8 @@ def load(conn, run_id, pnu, got, asof, complexes=None, block=False):
             cur.execute(
                 """INSERT INTO core.bridge_parcel_zone (pnu, zone_cd, overlap, source, asof)
                    VALUES (%s, %s, '포함', %s, %s)
-                   ON CONFLICT (pnu, zone_cd) DO UPDATE SET source = excluded.source, asof = excluded.asof""",
+                   ON CONFLICT (pnu, zone_cd) DO UPDATE SET asof = excluded.asof
+                   WHERE core.bridge_parcel_zone.source = excluded.source""",
                 (pnu, zone_cd, ZONE_LABEL, asof))
     return loaded, rejected
 
