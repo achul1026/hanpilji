@@ -1,4 +1,4 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 14개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수 16개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
@@ -29,6 +29,16 @@ def _sigungu(v):
 
 def _months(a):
     return max(1, min(int(a.get("months") or 12), 36))
+
+
+def _date(v):
+    """YYYY-MM-DD만 받음. 틀린 모양이면 ToolError(모델에게 오류로 돌려줌)."""
+    if v in (None, ""):
+        return None
+    try:
+        return datetime.date.fromisoformat(str(v).strip())
+    except ValueError:
+        raise ToolError(f"날짜는 YYYY-MM-DD: {v}") from None
 
 
 TOOLS = [
@@ -351,6 +361,54 @@ TOOLS = [
         },
         "sql": "SELECT * FROM mart.q_parcel_map(%s::text, %s::text)",
         "args": lambda a: (_sigungu(a.get("sigungu")), str(a["query"]).strip()),
+    },
+    {
+        "name": "q_policy_events",
+        "description": (
+            "부동산 정책 · 규제 변화 목록(2017년부터): 토지거래허가구역 지정 · 해제, 규제지역(투기과열지구 · 조정대상지역), "
+            "대출 규제(LTV · DSR · 주담대 한도), 세제, 공급 대책, 그리고 기준금리가 바뀐 달(ECOS에서 찾음). "
+            "줄마다 event_id · 이름 · 발표일 · 시행일 · 종류 · 강화/완화 · 적용 지역 · 내용 요약 · 근거 조문 · 출처 주소(source_url). "
+            "최근 것부터. 「요즘 어떤 규제가 있었어」 「토허제 언제 바뀌었어」를 물을 때, 그리고 q_policy_impact에 넣을 event_id를 찾을 때 부름. "
+            "목록은 한필지가 정부 발표 · 보도로 정리한 것이라 모든 정책을 담지는 않음. 지금 적용 중인지 판단하지 말고 날짜와 내용만 말할 것."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "이름 · 내용 · 지역 일부. 예: 토지거래허가, 10·15, 대치동, 주담대"},
+                "kind": {"type": "string", "enum": ["토지거래허가", "규제지역", "대출", "세제", "공급", "금리"],
+                         "description": "종류 하나만. 없으면 전부"},
+                "from_date": {"type": "string", "description": "이 날짜(YYYY-MM-DD) 뒤에 발표된 것만"},
+            },
+            "required": [],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_policy_events(%s::text, %s::text, %s::date)",
+        "args": lambda a: (a.get("query") or None, a.get("kind") or None, _date(a.get("from_date"))),
+    },
+    {
+        "name": "q_policy_impact",
+        "description": (
+            "정책 하나의 발표 전후 비교. 발표일 앞 days일 대 뒤 days일(기본 90)의 강남구 아파트 매매 · 전세 건수(30일 환산)와 "
+            "㎡당 중위 단가, 두 기간 모두 거래된 같은 단지 · 같은 면적의 단가 변화율(중위), 정책이 일부 동에만 적용됐으면 그 동과 나머지 동, "
+            "R-ONE 매매 · 전세가격지수의 직전 months개월 · 이후 months개월(기본 6) 변화율(강남구 · 서울 · 전국)과 강남구 - 서울 상승률 차(%p), "
+            "같은 기간 기준금리 · 주담대 금리, 앞뒤 days일 안에 겹친 다른 정책을 줌. section으로 묶여 있음. "
+            "partial=true면 기간이 다 지나지 않았거나 신고 기한 중이라 값이 바뀔 수 있음. 실거래는 2023-11부터라 그 앞 정책은 지수만 있음(note에 이유). "
+            "답할 때 지킬 것: ① 전후 비교일 뿐 인과가 아니라고 한 줄 밝힐 것(같은 시기 금리 · 다른 정책 · 계절이 함께 움직임), "
+            "② 겹친 정책 줄이 0건이 아니면 그 정책들을 함께 말할 것, ③ 건수 변화와 가격 변화를 나눠 말하고 같은 단지 비교를 우선 근거로 쓸 것, "
+            "④ 앞으로 오를지 · 내릴지, 사야 할지는 말하지 않음. 정책 이름을 모르면 q_policy_events로 event_id를 먼저 찾음."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "event": {"type": "string", "description": "event_id(예: 2025-10-15, rate-202410) 또는 정책 이름 일부(예: 10·15, 토지거래허가구역 해제)"},
+                "days": {"type": "integer", "description": "실거래를 비교할 발표 앞뒤 일수. 기본 90, 30~180"},
+                "months": {"type": "integer", "description": "가격지수 · 금리를 비교할 앞뒤 개월 수. 기본 6, 1~24"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["event"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_policy_impact(%s::text, %s::text, %s::int, %s::int)",
+        "args": lambda a: (str(a["event"]).strip(), _sigungu(a.get("sigungu")),
+                           max(30, min(int(a.get("days") or 90), 180)), max(1, min(int(a.get("months") or 6), 24))),
     },
 ]
 BY_NAME = {t["name"]: t for t in TOOLS}

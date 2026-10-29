@@ -8,6 +8,8 @@
   chart    : "x", "series": [{"key", "label", "fmt"}], "count" (점 크기에 쓸 건수 열), "partial" (잠정 표시 열), "rows"
   document : "items": [{"title", "subtitle", "body", "meta", "url"}], "highlight": [낱말]
   card     : "rows" (q_property_card 줄 그대로)
+  policy   : "head": {"name", "note"}, "charts": [chart 모양 블록 + "markers": [{"x", "label"}]], "columns", "rows"
+             (정책 전후 비교. 줄마다 "fmt"가 있어 단위에 맞게 보임)
   map      : "features": [{"layer", "pnu", "label", "jibun", "jimok", "area_m2", "floors_above", "lon", "lat", "geometry"}],
              "note". layer는 대상 필지 · 이웃 필지 · 건물, geometry는 경위도 GeoJSON
 fmt: won(원 → 억 · 만) · won_m2 · won_py · int · pct · pp · m2 · num · date · ym · text · allowed
@@ -30,7 +32,7 @@ TOOL_LABEL = {
     "q_building_filter": "건축물대장 검색", "q_price_trend": "월별 시세 추이", "q_land_price_trend": "공시지가 추이",
     "q_price_vs_official": "공시지가 대비 실거래가", "q_market_series": "시장 지표",
     "q_auction_discount": "공매 물건 · 실거래 대비", "q_auction_checklist": "입찰 전 권리 확인 항목",
-    "q_parcel_map": "지적도 · 건물 윤곽",
+    "q_parcel_map": "지적도 · 건물 윤곽", "q_policy_events": "정책 · 규제 변화", "q_policy_impact": "정책 전후 비교",
 }
 
 # 진행 표시 문구(도구를 부르는 동안 화면에 보임)
@@ -42,6 +44,7 @@ TOOL_DOING = {
     "q_land_price_trend": "공시지가 추이를 만드는 중", "q_price_vs_official": "공시지가와 실거래가를 맞대는 중",
     "q_market_series": "시장 지표를 찾는 중", "q_auction_discount": "공매 물건을 실거래와 맞대는 중",
     "q_auction_checklist": "입찰 전 확인 항목을 찾는 중", "q_parcel_map": "지적도를 펼치는 중",
+    "q_policy_events": "정책 · 규제 변화를 찾는 중", "q_policy_impact": "정책 전후 거래와 가격을 맞대는 중",
 }
 
 COL = {   # 열 이름 → (보이는 이름, 형식)
@@ -99,6 +102,9 @@ def _title(out):
         return f"{a.get('zone', '')} · {a.get('act', '')} {label}"
     if tool == "q_law_search":
         return " · ".join(x for x in (a.get("law_name") or "법령 조문", a.get("query")) if x)
+    if tool == "q_policy_impact":
+        name = next((r.get("metric") for r in rows if r.get("section") == "정책"), None)
+        return f"{name or a.get('event', '')} {label}".strip()
     if tool == "q_market_series":
         names = list(dict.fromkeys(r.get("stat_name") for r in rows if r.get("stat_name")))
         return names[0] if len(names) == 1 else label
@@ -134,6 +140,58 @@ def _market(out):
             "note": rows[0].get("note") or ""}
 
 
+def _policy_events(out):
+    items = []
+    for r in out["rows"]:
+        when = " · ".join(x for x in (r.get("announce_date") and f"발표 {r['announce_date']}",
+                                      r.get("effective_date") and f"시행 {r['effective_date']}") if x)
+        law = " ".join(x for x in (r.get("law_name"), r.get("article_no")) if x)
+        if law and r.get("article_title"):
+            law += f"({r['article_title']})"
+        kind = r.get("kind") or ""
+        tag = kind if r.get("direction") in (None, kind) else f"{kind} {r['direction']}"
+        items.append({"title": r.get("name") or "", "subtitle": " · ".join(x for x in (tag, r.get("region_scope")) if x),
+                      "body": r.get("summary") or "", "meta": " · ".join(x for x in (when, law and f"근거 {law}") if x),
+                      "url": r.get("source_url"), "link": "발표 · 보도 원문 ↗"})
+    return {"kind": "document", "items": items, "highlight": []}
+
+
+# 정책 전후 비교 줄의 단위 → 화면 형식
+POLICY_FMT = {"원/㎡": "won_m2", "건": "num", "지수": "num", "%": "pct", "%p": "pp"}
+POLICY_COLS = [("section", "구분", "text"), ("metric", "항목", "text"), ("scope", "범위", "text"),
+               ("before_period", "전 기간", "text"), ("before_value", "전", "num"), ("after_period", "후 기간", "text"),
+               ("after_value", "후", "num"), ("change", "차이", "num"), ("change_pct", "변화율(%)", "num"),
+               ("n_before", "전 건수", "int"), ("n_after", "후 건수", "int"), ("partial", "잠정", "text"), ("note", "비고", "text")]
+
+
+def _policy_impact(out):
+    rows = out["rows"]
+    head = next((r for r in rows if r.get("section") == "정책"), None)
+    table = [{**r, "fmt": POLICY_FMT.get(r.get("unit"), "num")} for r in rows
+             if not r.get("screen_only") and r.get("section") != "정책"]
+    charts = []
+    for unit, label in (("지수", "매매가격지수(발표 전달 = 100)"), ("건", "아파트 매매 건수(월)")):
+        pts = [r for r in rows if r.get("screen_only") and r.get("unit") == unit]
+        if not pts:
+            continue
+        names = list(dict.fromkeys(r["metric"] for r in pts))
+        pivot = {}
+        for r in pts:
+            p = pivot.setdefault(r["before_period"], {"period": r["before_period"]})
+            p[f"v{names.index(r['metric'])}"] = r.get("before_value")
+            if r.get("partial"):
+                p["partial"] = True
+        base = (head or {}).get("base_date") or (rows[0].get("base_date") if rows else None)
+        marks = [{"x": str(base)[:7].replace("-", ""), "label": "발표"}] if base else []
+        charts.append({"kind": "chart", "title": label, "x": "period", "x_fmt": "ym", "rows": [pivot[k] for k in sorted(pivot)],
+                       "partial": "partial" if unit == "건" else None, "markers": marks,
+                       "series": [{"key": f"v{i}", "label": n.replace(" 매매가격지수(발표 전달 = 100)", ""),
+                                   "fmt": "num" if unit == "지수" else "int"} for i, n in enumerate(names)]})
+    return {"kind": "policy", "head": {"name": head.get("metric"), "scope": head.get("scope"), "note": head.get("note")} if head else None,
+            "charts": charts, "rows": table,
+            "columns": [{"key": k, "label": lbl, "fmt": f} for k, lbl, f in POLICY_COLS]}
+
+
 MAP_NOTE = "연속지적도는 참고용 도면이라 측량 · 경계 확정에 쓸 수 없음"
 
 
@@ -157,6 +215,10 @@ def _shape(out):
         return {"kind": "card", "rows": rows}
     if tool == "q_parcel_map":
         return _map(out)
+    if tool == "q_policy_events":
+        return _policy_events(out)
+    if tool == "q_policy_impact" and rows:
+        return _policy_impact(out)
     if tool == "q_price_trend" and rows:
         return {"kind": "chart", "x": "month", "x_fmt": "ym", "rows": rows, "count": "trade_count", "partial": "partial",
                 "series": [{"key": "trade_median_per_pyeong", "label": "매매 평당 중위가", "fmt": "won_py"},
@@ -190,7 +252,7 @@ def blocks(results):
 
 # 답 아래 「이어서 볼 것」. 모델 없이 마트 함수 하나만 부르는 것(요금 없음)이라 /api/tool로 바로 엶
 FOLLOW_TOOLS = {"q_property_card", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_parcel_map",
-                "q_deal_list"}
+                "q_deal_list", "q_policy_impact", "q_policy_events"}
 
 
 def _subject(results):
@@ -206,11 +268,25 @@ def _subject(results):
     return None
 
 
+def _policy_steps(results, limit):
+    """정책을 다룬 답이면: 목록에서 본 정책의 전후 비교, 또는 전후 비교를 본 정책 앞뒤의 다른 정책 목록."""
+    done = {(out["tool"], str((out.get("args") or {}).get("event", ""))) for out in results}
+    steps = []
+    for out in results:
+        if out["tool"] == "q_policy_events":
+            for r in out.get("rows") or []:
+                if r.get("kind") != "금리" and ("q_policy_impact", r["event_id"]) not in done:
+                    steps.append({"label": f"{r['name']} 전후 비교", "tool": "q_policy_impact", "args": {"event": r["event_id"]}})
+        elif out["tool"] == "q_policy_impact" and not any(o["tool"] == "q_policy_events" for o in results):
+            steps.append({"label": "정책 · 규제 변화 전체 목록", "tool": "q_policy_events", "args": {}})
+    return steps[:limit]
+
+
 def next_steps(results, limit=4):
-    """답에서 다룬 단지로 바로 열 수 있는 다음 조회 몇 개. [{"label", "tool", "args"}]"""
+    """답에서 다룬 단지(없으면 정책)로 바로 열 수 있는 다음 조회 몇 개. [{"label", "tool", "args"}]"""
     name = _subject(results)
     if not name:
-        return []
+        return _policy_steps(results, limit)
     done = {out["tool"] for out in results}
     steps = [
         ("q_property_card", f"{name} 종합 카드", {"query": name}),
