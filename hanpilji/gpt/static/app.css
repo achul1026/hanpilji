@@ -112,7 +112,7 @@ a{color:var(--survey)}
 .md>*{margin:0 0 10px}.md>*:last-child{margin-bottom:0}
 .md{font-size:16px;line-height:1.8}
 .md h3,.md h4,.md h5,.md h6{font-size:16px;margin-top:14px;font-weight:700}.md h5,.md h6{font-size:15px}
-.md>p.lead{font-size:20px;line-height:1.55;font-weight:650;letter-spacing:-.015em;margin-bottom:16px}
+.md>p.lead{font-size:18.5px;line-height:1.55;font-weight:650;letter-spacing:-.015em;margin-bottom:16px}
 .md ul,.md ol{padding-left:22px}.md li{margin-bottom:2px}
 .md code{font:.9em var(--mono);background:var(--paper);border-radius:4px;padding:0 4px}
 .md .tw table{min-width:60%}
@@ -230,6 +230,71 @@ tr:last-child td{border-bottom:0}
 .verify.part{color:var(--warn)}
 .verify small{display:block;font-weight:400;color:var(--muted)}
 
+/* 핵심만 보이는 답(2026-10-29 v2): 결론 한 줄 · 단지(필지 모양) · 큰 값 · 거래 점 그래프 · 출처 알약 · 숫자 칸 · 「열기」 줄 · 이어 물을 칩.
+   부가정보는 눌러야 서랍(휴대폰은 아래 시트)에서 열림. 레퍼런스: Perplexity 위젯 · Google AI Mode 차트 · Robinhood Digests · 근거 알약 */
+.anscard{display:flex;flex-direction:column;gap:14px;max-width:520px}
+.subj{display:flex;align-items:center;gap:11px}
+.subj .thumb{width:50px;height:38px;flex:none;border-radius:9px;background:var(--survey-soft);display:grid;place-items:center;padding:4px}
+.subj .thumb svg{width:100%;height:100%}
+.subj .st{display:flex;flex-direction:column;min-width:0}
+.subj .st b{font-size:15px;font-weight:700;line-height:1.35}
+.subj .st span{font-size:12.5px;color:var(--muted)}
+.key{display:flex;flex-direction:column}
+.key .kl{font-size:14px;font-weight:600;color:var(--muted);line-height:1.45}
+.key .kv{font-size:42px;font-weight:850;letter-spacing:-.045em;line-height:1.1;margin-top:2px;font-variant-numeric:tabular-nums}
+.key .kv small{font-size:.58em;font-weight:750;margin-left:2px;letter-spacing:-.02em}
+.key .kv.long{font-size:28px}
+.key .ks{font-size:14px;color:var(--ink2);line-height:1.55;margin-top:6px}
+.dchart{border:1px solid var(--line);border-radius:16px;padding:12px 12px 8px}
+.dchart svg{display:block;width:100%;height:auto;overflow:visible}
+.dchart circle{cursor:pointer}
+.dtip{display:inline-block;font-size:12px;font-weight:700;color:var(--survey);background:var(--survey-soft);border-radius:6px;padding:3px 8px;margin-bottom:6px;font-variant-numeric:tabular-nums}
+.dax{display:flex;justify-content:space-between;font-size:11.5px;color:var(--muted);margin-top:2px}
+.schip{align-self:flex-start;display:inline-flex;align-items:center;gap:6px;border:1px solid color-mix(in srgb,var(--seal) 28%,var(--line));background:var(--seal-soft);color:var(--seal);border-radius:999px;padding:6px 12px;font-size:12.5px;font-weight:700;text-align:left;max-width:100%}
+.schip span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.schip svg{flex:none}
+.strip{display:grid;border:1px solid var(--line);border-radius:14px;overflow:hidden}
+.strip .cell{border:0;border-right:1px solid var(--line);background:var(--sheet);padding:10px 12px;min-height:58px;display:flex;flex-direction:column;gap:2px;text-align:left}
+.strip .cell:last-child{border-right:0}
+.strip .cell span{font-size:12px;font-weight:600;color:var(--muted)}
+.strip .cell b{font-size:16px;font-weight:800;letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.strip .cell:hover{background:var(--survey-soft)}
+.more-rows{display:flex;flex-direction:column;border-top:1px solid var(--grid)}
+.mrow{display:flex;justify-content:space-between;align-items:center;gap:12px;border:0;border-bottom:1px solid var(--grid);background:none;padding:11px 2px;min-height:44px;text-align:left;font-size:14.5px;color:var(--ink)}
+.mrow small{flex:none;color:var(--muted);font-size:13px}
+.mrow:hover span{color:var(--survey)}
+.mrow.busy{opacity:.55;pointer-events:none}
+.calc{border:1px solid var(--line);border-radius:16px;padding:14px;display:flex;flex-direction:column;gap:10px}
+.crow{display:flex;align-items:center;gap:8px;font-size:14.5px;flex-wrap:wrap}
+.crow label{color:var(--ink2);font-weight:600}
+.cin{width:96px;border:1.5px solid var(--survey);border-radius:10px;padding:8px 10px;font:700 16px/1.2 var(--body);text-align:right;color:var(--ink);background:var(--sheet)}
+.cres{display:flex;justify-content:space-between;align-items:baseline;gap:10px;background:var(--survey-soft);border-radius:10px;padding:10px 12px}
+.cres span{font-size:13px;color:var(--survey);font-weight:600}
+.cres b{font-size:20px;font-weight:850;color:var(--survey);letter-spacing:-.02em;font-variant-numeric:tabular-nums}
+.cov{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--line);border-radius:16px;overflow:hidden;max-width:520px}
+.cov .col{padding:12px 14px;display:flex;flex-direction:column;gap:7px;font-size:13.5px}
+.cov .col.no{border-left:1px solid var(--line);background:var(--paper);color:var(--muted)}
+.cov .col b{font-size:12px;font-weight:700;color:var(--muted)}
+.cov .ci{display:flex;gap:6px;align-items:flex-start;line-height:1.45}
+.cov .ci svg{flex:none;margin-top:4px;color:var(--ok)}
+.cov .ci i{font-style:normal;flex:none;width:12px;text-align:center}
+.gapd{border-top:1px solid var(--grid);padding:10px 2px 2px;font-size:14px}
+.gapd summary{display:flex;justify-content:space-between;align-items:center;cursor:pointer;list-style:none;color:var(--warn);font-weight:600;min-height:28px}
+.gapd summary::-webkit-details-marker{display:none}
+.gapd summary small{color:var(--muted);font-weight:400;font-size:13px}
+.gapd[open] summary small{visibility:hidden}
+.gapd ul{margin:6px 0 4px;padding-left:18px;line-height:1.7;color:var(--ink2)}
+.qchips{display:flex;flex-wrap:wrap;gap:8px}
+.qchip{border:1px solid var(--line);background:var(--sheet);color:var(--ink2);border-radius:999px;padding:8px 15px;min-height:40px;font-size:14px;font-weight:600;text-align:left}
+.qchip:hover{border-color:var(--survey);color:var(--survey)}
+.qchips.pick .qchip{border-color:color-mix(in srgb,var(--survey) 35%,var(--line));color:var(--survey);border-radius:12px;padding:10px 16px;font-size:15px}
+.qchips.big{flex-direction:column;max-width:520px}
+.qchips.big .qchip{border-radius:14px;padding:13px 16px;font-size:14.5px;color:var(--ink);font-weight:700}
+.afine{margin:-6px 0 0;font-size:12px;color:var(--muted)}
+.detail{background:var(--sheet);border:1px solid var(--line);border-radius:12px;padding:14px 16px;font-size:15px;line-height:1.7}
+.detail b{display:block;font-size:13px;color:var(--muted);margin-bottom:4px}
+.detail p{margin:0}
+
 /* 필지 리포트 · 두 단지 비교 */
 .modes{max-width:800px;margin:0 auto 8px;display:flex;gap:4px}
 .modes button{border:0;background:none;color:var(--ink2);border-radius:8px;padding:6px 12px;font-size:13px;font-weight:500}
@@ -298,9 +363,11 @@ table.cmp td.n{color:var(--survey);font-weight:600}
   .figs{grid-template-columns:repeat(2,minmax(0,1fr));gap:8px}
   .fig{padding:11px 12px}.fig .v{font-size:18px}
   .md>p.lead{font-size:18px}
+  .key .kv{font-size:36px}.key .kv.long{font-size:24px}
   .subject h2{font-size:22px}
   .examples .ex:nth-child(n+5){display:none}
   table.cmp th,table.cmp td{padding:8px 9px;font-size:13px}
   .log{padding-top:18px}
 }
 @media (prefers-reduced-motion:reduce){.side,.drawer{transition:none}}
+.a:has(.key) .md>p.lead{font-size:16px;font-weight:500;color:var(--ink2);margin-bottom:0}
