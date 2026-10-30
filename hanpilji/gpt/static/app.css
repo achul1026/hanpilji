@@ -103,6 +103,8 @@ a{color:var(--survey)}
 .md .tw table{min-width:60%}
 .cite{display:inline-grid;place-items:center;min-width:18px;height:18px;padding:0 5px;margin:0 1px;border:0;border-radius:5px;background:var(--survey-soft);color:var(--survey);font:600 11px/1 var(--mono);vertical-align:2px;cursor:pointer}
 .cite:hover,.cite.on{background:var(--survey);color:var(--sheet)}
+.fn{font:600 10px/1 var(--mono);color:var(--survey);margin-left:3px;vertical-align:4px}
+.ks .cite{vertical-align:0;margin-left:4px}
 .cite.dead{background:var(--grid);color:var(--muted);cursor:default}
 
 /* 블록 */
@@ -137,6 +139,13 @@ tr:last-child td{border-bottom:0}
 .map svg{display:block;width:100%;height:auto;border:1px solid var(--line);border-radius:6px}
 .map svg path.m-nb:hover,.map svg path.m-bd:hover{stroke:var(--survey);stroke-opacity:1}
 .map .tiles{opacity:.9}
+.mapw{position:relative}
+.mapf{overflow:hidden;border-radius:6px;touch-action:none;cursor:grab;user-select:none}
+.mapf:active{cursor:grabbing}
+.mapz{position:absolute;top:8px;left:8px;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;background:var(--sheet);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.12)}
+.mapz button{width:32px;height:32px;border:0;background:none;font-size:17px;line-height:1;color:var(--ink)}
+.mapz button+button{border-top:1px solid var(--line)}
+.mapz button:hover{background:var(--grid)}
 .legend i.mk{width:12px;height:10px;border-radius:2px}
 .legend i.mk-tg{background:var(--survey-soft);border:2px solid var(--survey)}
 .legend i.mk-nb{background:transparent;border:1px solid var(--muted)}
@@ -285,10 +294,13 @@ tr:last-child td{border-bottom:0}
 /* 필지 리포트 · 두 단지 비교 */
 .rbar{display:flex;justify-content:space-between;align-items:center;gap:8px;flex-wrap:wrap;font-size:12.5px;color:var(--muted);margin:-4px 0 4px}
 .cmpw{border:1px solid var(--line);border-radius:12px;background:var(--sheet)}
-table.cmp th,table.cmp td{padding:9px 12px;font-size:14px;white-space:nowrap}
+table.cmp{width:100%;table-layout:fixed}
+table.cmp th,table.cmp td{padding:9px 12px;font-size:14px;white-space:pre-line;word-break:keep-all;overflow-wrap:anywhere;vertical-align:top;text-align:left}
+table.cmp col.c-l{width:24%}table.cmp col.c-n{width:15%}
+table.cmp td small{display:block;font-size:12px;color:var(--muted);font-weight:400}
 table.cmp tr:first-child th{font-size:14px;color:var(--ink);font-weight:700}
-table.cmp th:first-child{color:var(--muted);font-weight:500;font-size:13px;white-space:nowrap}
-table.cmp td.n{color:var(--survey);font-weight:600}
+table.cmp th:first-child{color:var(--muted);font-weight:500;font-size:13px}
+table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .fine.left{text-align:left;margin:0}
 @media print{
   body,.main{background:#fff}
@@ -348,7 +360,9 @@ table.cmp td.n{color:var(--survey);font-weight:600}
   .md>p.lead{font-size:18px}
   .key .kv{font-size:25px}.key .kv.long{font-size:20px}
   .subject h2{font-size:22px}
-  table.cmp th,table.cmp td{padding:8px 9px;font-size:13px}
+  table.cmp th,table.cmp td{padding:8px 7px;font-size:13px}
+  table.cmp col.c-l{width:26%}table.cmp col.c-n{width:19%}
+  table.cmp td.n{font-size:12px}
   .log{padding-top:18px}
 }
 @media (prefers-reduced-motion:reduce){.side,.drawer{transition:none}}
