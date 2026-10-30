@@ -418,13 +418,18 @@ function cardEl(b, compact) {
     g.append(sec("거래 · 최근 12개월", [[r.trade_count ? "전용 평당 " + won(r.trade_per_pyeong) : "매매 없음", "big"],
       ["매매 " + r.trade_count + "건" + (r.trade_last_date ? " · 마지막 " + r.trade_last_date + " " + won(r.trade_last_amount) : "")],
       ["전세 " + r.jeonse_count + "건 평균 " + won(r.jeonse_avg) + (r.jeonse_ratio != null ? " · 전세가율 " + r.jeonse_ratio + "%" : "")],
-      ...(r.chg_1y_pct != null || r.chg_3y_pct != null ? [[[r.chg_1y_pct != null && "1년 " + pct(r.chg_1y_pct), r.chg_3y_pct != null && "3년 " + pct(r.chg_3y_pct)].filter(Boolean).join(" · ") + " (같은 면적 ㎡당)"]] : [])]));
+      ...[[r.chg_1y_pct, r.chg_1y_basis, "1년"], [r.chg_3y_pct, r.chg_3y_basis, "3년"]].filter(([v]) => v != null).map(([v, basis, n]) => [n + " 변동 " + pct(v) + " · " + basis, "fine"])]));
     g.append(sec("토지 · 공시지가", [["공시지가 " + (r.land_price_per_m2 ? won(r.land_price_per_m2, "/㎡") + " (" + r.land_price_year + ")" : "-"), "big"],
       ["필지 " + (r.land_parcel_count || 0) + "개 · " + (r.land_category || "-") + " · " + (r.land_area_m2 != null ? nf.format(r.land_area_m2) + "㎡" : "-")]],
       !has("토지 지목") && !has("토지 면적") && !has("공시지가")));
     g.append(sec("용도지역 · 규제", [[(r.zones || "-").split(", ").filter(z => /지역$/.test(z)).join(", ") || "-", "big"], ["행위제한 규칙 " + (r.zone_rule_count || 0) + "개"],
-      [(r.zones || "").split(", ").filter(z => z && !/지역$/.test(z)).slice(0, 4).join(" · ")],
-      ...(r.permit_to ? [["토지거래허가 " + r.permit_from + " ~ " + r.permit_to + " · 산 뒤 2년 실거주"]] : [])], !has("용도지역")));
+      [(r.zones || "").split(", ").filter(z => z && !/지역$/.test(z)).slice(0, 4).join(" · ")]], !has("용도지역")));
+    // 토지거래허가는 용도지역 수집과 따로 정리한 표라 용도지역이 비어도 보임
+    if (r.permit_to) {
+      const s = sec("토지거래허가구역", [[r.permit_from + " ~ " + r.permit_to, "big"], [r.permit_name], [r.permit_rule]]);
+      if (r.permit_url) { const a = el("a", "src", "출처 보기"); a.href = r.permit_url; a.target = "_blank"; a.rel = "noopener"; s.append(a); }
+      g.append(s);
+    }
     g.append(sec("건물 · 건축물대장", [[(r.bld_households != null ? nf.format(r.bld_households) + "세대" : "-") + " · " + (r.bld_floors_above || "-") + "층", "big"],
       ["준공 " + (r.build_year || "-") + " · 주차 " + (r.bld_parking != null ? nf.format(r.bld_parking) : "-") + "대" + (r.bld_parking_per_household != null ? " (세대당 " + r.bld_parking_per_household + "대)" : "")],
       ["건폐율 " + (r.bld_bc_rat != null ? r.bld_bc_rat + "%" : "-") + " · 용적률 " + (r.bld_vl_rat != null ? r.bld_vl_rat + "%" : "-")]], !has("건축물대장")));
@@ -826,7 +831,7 @@ function renderReport(item, box) {
     if (zone) g.append(fact("용도지역", zone, `행위제한 규칙 ${r.zone_rule_count || 0}개`, one));
     if (r.bld_vl_rat != null) g.append(fact("용적률 · 건폐율", r.bld_vl_rat + "% · " + r.bld_bc_rat + "%", `건축물대장 · 주차 ${nf.format(r.bld_parking || 0)}대`, one));
     if (r.bld_parking_per_household != null) g.append(fact("세대당 주차", r.bld_parking_per_household + "대", `${nf.format(r.bld_households)}세대 · 주차 ${nf.format(r.bld_parking)}대`, one));
-    if (r.permit_to) g.append(fact("토지거래허가구역", "~" + r.permit_to, `${r.permit_from}부터 · 허가 후 2년 실거주`, one));
+    if (r.permit_to) g.append(fact("토지거래허가구역", "~" + r.permit_to, `${r.permit_from}부터 · ${r.permit_rule}`, one));
     box.append(g);
   }
   const inl = el("div", "inline a");
@@ -849,6 +854,7 @@ const CMP = [
   ["전세 평균 · 12개월", r => r.jeonse_avg, v => won(v), "rel"], ["전세가율", r => r.jeonse_ratio, (v, r) => v + "% (" + r.jeonse_ratio_area + "㎡)", "pp"],
   ["공시지가 ㎡당", r => r.land_price_per_m2, (v, r) => won(v) + " (" + r.land_price_year + ")", "rel"],
   ["세대당 주차", r => r.bld_parking_per_household, v => v + "대", "rel"],
+  ["토지거래허가", r => r.permit_to, (v, r) => r.permit_from + " ~ " + v + " · " + r.permit_rule],
   ["용도지역", r => (r.zones || "").split(", ").filter(z => /지역$/.test(z)).join(", ") || null, v => v],
 ];
 const sign = x => (x > 0 ? "+" : "") + x;

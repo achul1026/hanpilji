@@ -8,8 +8,13 @@
 -- 세대 · 주차 · 건폐율 · 용적률도 총괄표제부(dim_complex)가 먼저, 없으면 동별 표제부를 합침. 동 수는 주건축물만
 -- 세대당 주차 = 주차대수 ÷ 세대수. trade_top_*는 기간 안 매매가 가장 많은 전용면적 하나의 평균
 -- 변동률(chg_1y · chg_3y)은 최근 6개월을 1년 전 · 3년 전(가진 데이터의 가장 앞) 6개월과 같은 면적끼리 ㎡당 평균으로 맞댐. basis에 창 · 건수
--- permit_*는 오늘 효력이 있는 토지거래허가구역(core.ref_permit_zone)의 기간과 뜻. 아파트 단지만
+-- permit_*는 오늘 효력이 있는 토지거래허가구역(core.ref_permit_zone)의 기간 · 뜻 · 출처 주소. 아파트 단지만.
+--   지정이 여럿 겹치면 이름 · 뜻 · 주소는 가장 먼저 시작한 지정 것이고, permit_from은 그 시작일(줄마다 한 덩어리 기간이고
+--   오늘도 유효하니 그날부터 오늘까지 끊김 없이 걸려 있음), permit_to는 가장 늦게 끝나는 날
+-- trade_top_*는 p_months개월(기본 12) 안에서 셈
 -- 아직 수집 전이라 비어 있는 칸은 missing에 적음. 같은 이름의 단지가 여럿이면 최대 5줄
+-- 열이 바뀌어 DROP · CREATE가 필요함. 그 사이 함수가 비지 않게 한 트랜잭션으로
+BEGIN;
 DROP FUNCTION IF EXISTS mart.q_property_card(text, text, int);
 CREATE FUNCTION mart.q_property_card(p_sigungu text, p_query text, p_months int DEFAULT 12)
 RETURNS TABLE (complex_name text, address text, road_addr text, pnu varchar, build_year int,
@@ -24,7 +29,7 @@ RETURNS TABLE (complex_name text, address text, road_addr text, pnu varchar, bui
                bld_parking_per_household numeric,
                trade_top_area numeric, trade_top_count bigint, trade_top_avg bigint,
                chg_1y_pct numeric, chg_1y_basis text, chg_3y_pct numeric, chg_3y_basis text,
-               permit_name text, permit_from date, permit_to date, permit_rule text,
+               permit_name text, permit_from date, permit_to date, permit_rule text, permit_url text,
                missing text[], period_from date, period_to date, source text, asof date, row_total bigint)
 LANGUAGE sql STABLE AS $$
     WITH q AS (
@@ -89,8 +94,10 @@ LANGUAGE sql STABLE AS $$
         FROM cd r JOIN cd b ON b.complex_id = r.complex_id AND b.at = r.at AND b.w IN ('a', 'b')
         WHERE r.w = 'r' GROUP BY 1, 2
     ), permit AS (   -- 오늘 효력이 있는 토지거래허가구역(아파트 단지만). 여럿이면 가장 이른 시작 · 가장 늦은 끝
-        SELECT c.complex_id, string_agg(z.name, ' · ' ORDER BY z.start_date) AS name,
+        SELECT c.complex_id, (array_agg(z.name ORDER BY z.start_date))[1]
+                                 || CASE WHEN count(*) > 1 THEN format(' 외 %s건', count(*) - 1) ELSE '' END AS name,
                min(z.start_date) AS d_from, max(z.end_date) AS d_to, (array_agg(z.rule ORDER BY z.start_date))[1] AS rule,
+               (array_agg(z.source_url ORDER BY z.start_date))[1] AS url,
                string_agg(DISTINCT z.source, ' · ') AS src, max(z.asof) AS asof
         FROM c JOIN core.ref_permit_zone z ON p_sigungu = ANY (z.sigungu) AND (z.emd IS NULL OR c.emd = ANY (z.emd))
         WHERE c.kind = z.target AND current_date BETWEEN z.start_date AND z.end_date
@@ -171,7 +178,7 @@ LANGUAGE sql STABLE AS $$
            CASE WHEN c3.complex_id IS NULL OR c3.rn < 3 OR c3.bn < 3 THEN '거래가 적어 셈하지 않음'
                 ELSE format('최근 6개월(%s~) 매매 %s건과 3년 전 6개월(%s~%s) %s건을 같은 전용면적끼리 ㎡당 평균으로 비교',
                             cw.r_from, c3.rn, cw.b_from, cw.b_to, c3.bn) END,
-           permit.name, permit.d_from, permit.d_to, permit.rule,
+           permit.name, permit.d_from, permit.d_to, permit.rule, permit.url,
            -- 토지 칸은 지목(토지대장)과 면적을 따로 셈: 건축물대장 대지면적만 있어도 면적은 채움
            array_remove(ARRAY[
                CASE WHEN c.pnu IS NULL THEN '지번(PNU)' END,
@@ -183,7 +190,7 @@ LANGUAGE sql STABLE AS $$
            win.d_from, win.d_to,
            concat_ws(' · ', '국토교통부 ' || c.kind || ' 매매 · 전월세 실거래가', land.src,
                      CASE WHEN price.price IS NOT NULL THEN '공시지가' END, zone.src, bld.src, permit.src),
-           greatest(t.asof, j.asof, c.asof, land.asof, price.asof, zone.asof, bld.asof),
+           greatest(t.asof, j.asof, c.asof, land.asof, price.asof, zone.asof, bld.asof, permit.asof),
            c.n_match
     FROM c LEFT JOIN t USING (complex_id) LEFT JOIN j USING (complex_id) LEFT JOIN ratio USING (complex_id)
          LEFT JOIN types USING (complex_id) LEFT JOIN land USING (complex_id) LEFT JOIN price USING (complex_id)
@@ -197,3 +204,4 @@ ALTER FUNCTION mart.q_property_card(text, text, int) SECURITY DEFINER;
 ALTER FUNCTION mart.q_property_card(text, text, int) SET search_path = pg_catalog, public;
 REVOKE EXECUTE ON FUNCTION mart.q_property_card(text, text, int) FROM PUBLIC;
 GRANT EXECUTE ON FUNCTION mart.q_property_card(text, text, int) TO hanpilji_gpt;
+COMMIT;

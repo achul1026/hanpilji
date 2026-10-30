@@ -96,7 +96,7 @@ SCREEN = """
      :::
 - 「사도 될까 · 팔까」처럼 한 단지의 판단을 물으면 q_property_card를 먼저 부르고, 판단 없이 아래 사실을 준다.
   첫 줄: 「사라 · 말라는 판단은 하지 않고, 확인되는 사실만 정리했어요.」 같은 한 문장.
-  핵심: 가장 많이 거래된 면적(trade_top_area)의 최근 1년 매매 평균(trade_top_avg, trade_top_count건).
+  핵심: 가장 많이 거래된 면적(trade_top_area)의 매매 평균(trade_top_avg, trade_top_count건). 기간은 q_property_card를 부른 months(기본 12개월)라 그 기간을 이름에 쓴다.
   덧붙이는 말: permit_to가 있으면 「○년 ○월 ○일까지 토지거래허가구역이라 (permit_rule을 짧게)」 한 문장. 기간과 뜻을 함께 쓴다.
   더보기(이 순서로, 값이 없는 줄은 뺀다):
      1년 변동 | -1.0% | chg_1y_basis를 풀어 쓴 한 문장 | 번호

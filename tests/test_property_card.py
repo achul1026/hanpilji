@@ -77,6 +77,7 @@ class Card(unittest.TestCase):
         r = self.card("시험렉슬")
         self.assertEqual(r["permit_name"], "시험 토허", "끝난 지정은 빼고 오늘 효력이 있는 것만")
         self.assertEqual(r["permit_rule"], "허가 후 2년 실거주")
+        self.assertEqual(r["permit_url"], "https://x", "화면이 근거를 열 수 있게 출처 주소도 줌")
         self.assertIn("t-pc 출처", r["source"])
         o = self.card("시험오피스")
         self.assertIsNone(o["permit_to"], "오피스텔은 아파트 토허 대상이 아님")
