@@ -262,9 +262,14 @@ function mapEl(b, narrow) {
   let x0 = 1, y0 = 1, x1 = 0, y1 = 0;
   for (const f of target) for (const p of polys(f.geometry)) for (const [lon, lat] of p[0]) { const [x, y] = merc(lon, lat); x0 = Math.min(x0, x); x1 = Math.max(x1, x); y0 = Math.min(y0, y); y1 = Math.max(y1, y); }
   const fit = Math.min(W * .62 / Math.max(x1 - x0, 1e-9), H * .62 / Math.max(y1 - y0, 1e-9)) / 256;
-  let z = Math.min(Math.log2(fit), tiles ? tiles.max_zoom || 19 : 20.5);
+  const zMax = tiles ? tiles.max_zoom || 19 : 21.5, z0 = Math.min(Math.log2(fit), tiles ? tiles.max_zoom || 19 : 20.5);
+  // 확대 · 축소 · 끌어 옮기기: 단계(dz)와 가운데(mx, my: 메르카토르 0~1)만 바꾸고 다시 그림
+  const view = { dz: 0, mx: (x0 + x1) / 2, my: (y0 + y1) / 2 }, home = { ...view };
+  const frame = el("div", "mapf");
+  const draw = () => {
+  let z = Math.max(12, Math.min(z0 + view.dz, zMax));
   if (tiles) z = Math.floor(z);
-  const S = 256 * Math.pow(2, z), cx = (x0 + x1) / 2 * S, cy = (y0 + y1) / 2 * S;
+  const S = 256 * Math.pow(2, z), cx = view.mx * S, cy = view.my * S;
   const px = (lon, lat) => { const [x, y] = merc(lon, lat); return [x * S - cx + W / 2, y * S - cy + H / 2]; };
   const path = g => polys(g).map(p => p.map(r => r.map(([lon, lat], i) => { const [x, y] = px(lon, lat); return (i ? "L" : "M") + x.toFixed(1) + " " + y.toFixed(1); }).join("") + "Z").join("")).join("");
   const s = svg("svg", { viewBox: `0 0 ${W} ${H}`, role: "img", "aria-label": b.title + " 지도" });
@@ -321,7 +326,29 @@ function mapEl(b, narrow) {
   sc.append(svg("text", { x: W - 16, y: 22, "text-anchor": "middle", "font-weight": 600 }, "N"));
   sc.append(svg("path", { d: `M${W - 16} 26l-4 10h8z`, fill: "var(--ink)" }));
   s.append(sc);
-  box.append(s);
+  frame.textContent = ""; frame.append(s); view.S = S;
+  };
+  draw();
+  const zoomBy = d => { view.dz = Math.max(12 - z0, Math.min(zMax - z0, view.dz + d)); draw(); };
+  const zb = el("div", "mapz");
+  zb.append(btn("", "+", () => zoomBy(1), "지도 확대"), btn("", "−", () => zoomBy(-1), "지도 축소"),
+    btn("", "⟲", () => { Object.assign(view, home); draw(); }, "처음 크기로"));
+  // 끌어서 옮기기(손가락 · 마우스). 두 번 누르면 그 자리로 확대
+  let drag = null;
+  frame.addEventListener("pointerdown", e => { if (e.button) return; drag = { x: e.clientX, y: e.clientY, mx: view.mx, my: view.my, k: W / frame.clientWidth }; frame.setPointerCapture(e.pointerId); });
+  frame.addEventListener("pointermove", e => {
+    if (!drag) return;
+    const dx = (e.clientX - drag.x) * drag.k, dy = (e.clientY - drag.y) * drag.k;
+    frame.firstChild.style.transform = `translate(${dx / drag.k}px,${dy / drag.k}px)`;
+    drag.dx = dx; drag.dy = dy;
+  });
+  const drop = () => { if (!drag) return; if (drag.dx || drag.dy) { view.mx = drag.mx - drag.dx / view.S; view.my = drag.my - drag.dy / view.S; draw(); } drag = null; };
+  frame.addEventListener("pointerup", drop); frame.addEventListener("pointercancel", drop);
+  frame.addEventListener("dblclick", e => {
+    const r = frame.getBoundingClientRect(), k = W / r.width;
+    view.mx += ((e.clientX - r.left) * k - W / 2) / view.S; view.my += ((e.clientY - r.top) * k - H / 2) / view.S; zoomBy(1);
+  });
+  const wrap = el("div", "mapw"); wrap.append(frame, zb); box.append(wrap);
   const lg = el("div", "legend");
   const key = (cls, label) => { const sp = el("span"), i = el("i", "mk mk-" + cls); sp.append(i, label); lg.append(sp); };
   key("tg", "대상 필지 " + target.length + "개");
@@ -679,8 +706,9 @@ function moreEls(item, rows) {
   for (const r of parsed) {
     if (r.ref) used.add(r.ref);
     const open = () => openDrawer(item, r.ref, { label: r.label, text: r.text });
-    if (r.value && strip.children.length < 3) { const b = btn("cell", null, open); b.append(el("span", null, r.label), el("b", null, r.value)); strip.append(b); }
-    else { const b = btn("mrow", null, open); b.append(el("span", null, r.label), el("small", null, r.value || "열기 ›")); list.append(b); }
+    const fn = () => r.ref ? el("sup", "fn", String(r.ref)) : "";   // 각주 번호(줄 전체가 버튼이라 표시만)
+    if (r.value && strip.children.length < 3) { const b = btn("cell", null, open), l = el("span", null, r.label); l.append(fn()); b.append(l, el("b", null, r.value)); strip.append(b); }
+    else { const b = btn("mrow", null, open), l = el("span", null, r.label); l.append(fn()); b.append(l, el("small", null, r.value || "열기 ›")); list.append(b); }
   }
   for (const n of (item.next || []).slice(0, 2)) {
     const b = btn("mrow", null, async () => {
@@ -742,7 +770,9 @@ function renderAnswer(item, box) {
     const [label, value, note, ref] = cells2(p.핵심[0]), key = el("div", "key");
     if (label) key.append(el("div", "kl", label));
     key.append(bigValue(value));
-    if (note) key.append(el("div", "ks", note));
+    const kn = refOf(ref), ks = el("div", "ks", note || "");
+    if (kn && item.blocks.some(b => b.ref === kn)) ks.append(cite(kn, () => openDrawer(item, kn)));   // 각주
+    if (ks.childNodes.length) key.append(ks);
     card.append(key);
     const ch = dealsChart(vis.deals); if (ch) card.append(ch);
     const st = stampChip(item, refOf(ref), ch && vis.deals.rows.length); if (st) card.append(st);
@@ -842,6 +872,23 @@ function renderReport(item, box) {
     "근저당 · 가압류 같은 권리관계: 등기부는 모으지 않아요.", "지금 나온 매물 호가: 매물 데이터는 없어요. 실거래만 봤어요."];
   box.append(gaps(miss));
   box.append(stampEl(item));
+  const nx = askChips(followUps(item)); if (nx) box.append(nx);
+}
+// 리포트 · 비교 뒤에 이어 물을 것(모델 없이): 본 것에서 한 걸음 더. 값을 묻는 말이라 모델이 답함
+function followUps(item) {
+  const [a, b] = [cardRow(item, 0), cardRow(item, 1)];
+  if (item.kind === "compare" && a && b) {
+    const A = a.complex_name, B = b.complex_name;
+    const c = A.charCodeAt(A.length - 1) - 0xAC00, wa = c >= 0 && c < 11172 && c % 28 ? "과" : "와";   // 받침 있으면 「과」
+    return [`${A}${wa} ${B} 같은 면적 시세 비교`, `${A} 최근 1년 시세`, `${B} 최근 1년 시세`];
+  }
+  if (!a) return [];
+  const N = a.complex_name || a.address, out = [`${N} 최근 1년 시세`];
+  if (a.jeonse_ratio != null) out.push(`${N} 전세가율 추이`);
+  if (a.permit_to) out.push(`${N} 토지거래허가 조건`);
+  else out.push(`${N} 용도지역 규제`);
+  out.push(`${N} 대출 한도`);
+  return out.slice(0, 3);
 }
 // 두 단지 비교 표. 넷째 값이 차이 셈법: rel(오른쪽이 몇 % 높은지) · pp(%p 차) · yr(해 차) · 없음(면적이 달라 견주지 않음 등)
 const CMP = [
@@ -850,11 +897,11 @@ const CMP = [
   ["전용 평당 매매가 · 12개월", r => r.trade_count ? r.trade_per_pyeong : null, v => won(v), "rel"],
   ["매매가 1년 변동", r => r.chg_1y_pct, v => pct(v), "pp"], ["매매가 3년 변동", r => r.chg_3y_pct, v => pct(v), "pp"],
   ["매매 건수 · 12개월", r => r.trade_count, v => v + "건", "rel"],
-  ["마지막 매매", r => r.trade_last_amount, (v, r) => won(v) + " (" + r.trade_last_area + "㎡ · " + r.trade_last_date + ")"],
-  ["전세 평균 · 12개월", r => r.jeonse_avg, v => won(v), "rel"], ["전세가율", r => r.jeonse_ratio, (v, r) => v + "% (" + r.jeonse_ratio_area + "㎡)", "pp"],
-  ["공시지가 ㎡당", r => r.land_price_per_m2, (v, r) => won(v) + " (" + r.land_price_year + ")", "rel"],
+  ["마지막 매매", r => r.trade_last_amount, (v, r) => [won(v), r.trade_last_area + "㎡ · " + r.trade_last_date]],
+  ["전세 평균 · 12개월", r => r.jeonse_avg, v => won(v), "rel"], ["전세가율", r => r.jeonse_ratio, (v, r) => [v + "%", r.jeonse_ratio_area + "㎡ 같은 면적끼리"], "pp"],
+  ["공시지가 ㎡당", r => r.land_price_per_m2, (v, r) => [won(v), r.land_price_year + "년"], "rel"],
   ["세대당 주차", r => r.bld_parking_per_household, v => v + "대", "rel"],
-  ["토지거래허가", r => r.permit_to, (v, r) => r.permit_from + " ~ " + v + " · " + r.permit_rule],
+  ["토지거래허가", r => r.permit_to, (v, r) => ["~" + v, r.permit_from + "부터 · " + r.permit_rule]],
   ["용도지역", r => (r.zones || "").split(", ").filter(z => /지역$/.test(z)).join(", ") || null, v => v],
 ];
 const sign = x => (x > 0 ? "+" : "") + x;
@@ -871,13 +918,17 @@ function renderCompare(item, box) {
   nm.append(el("h2", null, (item.subjects || []).join("  ·  ")), el("span", "ad", [a && a.address, b && b.address].filter(Boolean).join("  |  ")));
   h.append(nm); box.append(h, reportTools(item, "두 단지 비교"));
   if (a && b) {
-    const t = el("table", "cmp"), hr = el("tr");
+    const t = el("table", "cmp"), hr = el("tr"), cg = el("colgroup");
+    cg.append(el("col", "c-l"), el("col"), el("col"), el("col", "c-n")); t.append(cg);
+    // 값이 [큰 값, 덧붙임]이면 덧붙임은 아래 작은 글씨로(표가 옆으로 길어지지 않게)
+    const td = (v, r, show) => { const c = el("td"); if (v == null) { c.textContent = "-"; return c; } const o = show(v, r);
+      if (Array.isArray(o)) c.append(o[0], el("small", null, o[1])); else c.textContent = o; return c; };
     hr.append(el("th", null, "항목"), el("th", null, a.complex_name), el("th", null, b.complex_name), el("th", "n", "차이"));
     t.append(hr);
     for (const [label, get, show, kind] of CMP) {
       const va = get(a), vb = get(b); if (va == null && vb == null) continue;
       const tr = el("tr");
-      tr.append(el("th", null, label), el("td", null, va == null ? "-" : show(va, a)), el("td", null, vb == null ? "-" : show(vb, b)), el("td", "n", diff(kind, va, vb)));
+      tr.append(el("th", null, label), td(va, a, show), td(vb, b, show), el("td", "n", diff(kind, va, vb)));
       t.append(tr);
     }
     const w = el("div", "tw cmpw"); w.append(t); box.append(w);
@@ -886,6 +937,7 @@ function renderCompare(item, box) {
   const inl = el("div", "inline a");
   item.blocks.forEach((bl, i) => { if (bl.kind !== "card") inl.append(blockEl(item, i, true)); });
   box.append(inl, stampEl(item));
+  const nx = askChips(followUps(item)); if (nx) box.append(nx);
 }
 
 // ------------------------------------------------------------ 대화
