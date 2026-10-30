@@ -136,6 +136,8 @@ class WithDb(unittest.TestCase):
     def test_3_one_unit_and_block_lot_by_name(self):
         rows = self.q("SELECT dong, ho, official_median FROM mart.q_house_price(%s, '은마', NULL, '1동', '1401호')", self.SGG)
         self.assertEqual(rows, [("1", "1401", 2358000000)])
+        rows = self.q("SELECT ho, trade_count FROM mart.q_house_price(%s, '은마', NULL, NULL, '101')", self.SGG)
+        self.assertEqual(rows, [("101", 2)], "호마다 줄이 여럿이어도 매매 건수는 한 번만 셈")
         rows = self.q("SELECT complex_name, unit_count, official_median, trade_count, official_ratio "
                       "FROM mart.q_house_price(%s, '디아크리온')", self.SGG)
         self.assertEqual(rows, [("디아크리온 강남", 2, 607000000, 0, None)], "PNU가 없는 블럭지번은 이름으로 맞춤")

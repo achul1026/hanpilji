@@ -105,7 +105,7 @@ LANGUAGE sql STABLE AS $$
         SELECT (current_date - make_interval(months => p_months))::date AS d_from, current_date AS d_to
     ), t AS (
         SELECT one.complex_id, one.area_m2, count(d.*) AS n, avg(d.amount)::bigint AS avg_amt
-        FROM one CROSS JOIN win
+        FROM (SELECT DISTINCT complex_id, area_m2 FROM one) one CROSS JOIN win
         LEFT JOIN core.fact_deal d
           ON d.complex_id = one.complex_id AND NOT d.is_cancelled AND d.contract_date >= win.d_from
          AND abs(d.area - one.area_m2) <= p_area_tol
