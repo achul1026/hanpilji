@@ -8,7 +8,7 @@ on:
   schedule:
     - cron: '17 19 * * *'    # 매일 04:17 KST: 아파트 · 오피스텔 · 연립다세대 실거래 매매 · 전월세(최근 3개월 다시) · 공매 물건(온비드)
     - cron: '7 20 * * 0'     # 매주 월 05:07 KST: 법령(개정된 것만) · 시장 지표(최근 12개월)
-    - cron: '37 20 1 * *'    # 매월 2일 05:37 KST: 건축물대장 · 행위제한
+    - cron: '37 20 1 * *'    # 매월 2일 05:37 KST: 건축물대장 · 행위제한 · 주택 공시가격(새 파일이 있을 때만)
   workflow_dispatch:
     inputs:
       what:
@@ -88,6 +88,11 @@ jobs:
         if: ${{ !cancelled() && env.WHAT == 'monthly' }}
         timeout-minutes: 60
         run: python -m hanpilji.collectors.luinfo --refresh
+      # 해마다 한 번(4월 말 공시, 포털 파일은 가을께) 올라오는 전국 파일. 새 파일이 없으면 받지 않고 바로 끝남
+      - name: 주택 공시가격
+        if: ${{ !cancelled() && env.WHAT == 'monthly' }}
+        timeout-minutes: 30
+        run: python -m hanpilji.collectors.house_price
 
       - name: 수집처별 마지막 성공
         if: ${{ !cancelled() }}
