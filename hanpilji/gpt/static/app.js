@@ -5,15 +5,11 @@ const app = $("app"), log = $("log"), welcome = $("welcome"), q = $("q"), go = $
 const SVG = "http://www.w3.org/2000/svg";
 const STORE = "hanpilji.convs.v1", MAX_CONVS = 40;
 
-const EXAMPLES = [
-  ["단지", "도곡렉슬 종합해서 알려줘"],
-  ["시세", "은마 76㎡ 최근 6개월 최고가"],
-  ["추이", "대치동 아파트 시세 2년 추이"],
-  ["규제", "제2종일반주거지역에 휴게음식점 지을 수 있어?"],
-  ["법령", "전월세 재계약 때 5% 상한 조문 찾아줘"],
-  ["공시지가", "래미안대치팰리스 공시지가 몇 년 동안 얼마나 올랐어?"],
-  ["지표", "기준금리랑 서울 아파트 매매가격지수 최근 2년"],
-  ["정책", "10·15 대책 전후로 강남구 아파트 거래와 가격은 어떻게 달라졌어?"],
+const EXAMPLES = [   // 첫 화면 예시: 시세 · 법 · 규제 · 거래 한 개씩
+  "도곡렉슬 시세 알려줘",
+  "월세 얼마까지 올릴 수 있어?",
+  "제2종일반주거지역에 카페 지을 수 있어?",
+  "은마 최근 최고가",
 ];
 
 // ------------------------------------------------------------ 저장(이 브라우저에만)
@@ -899,6 +895,13 @@ const emptyDrawer = $("dbody").firstElementChild.cloneNode(true);
 function reset() { cur = null; log.textContent = ""; showLog(false); $("topTitle").textContent = "한필지"; clearDrawer(); renderConvs(); q.focus(); }
 $("newChat").onclick = () => { reset(); closeSheets(); };
 
+// 쓰는 중인 답: 아직 닫히지 않은 칸(:::핵심 등)은 다 쓰인 뒤에 한 번에 보이도록 잘라 냄
+function settled(text) {
+  const lines = text.replace(/\r/g, "").split("\n"); let open = -1;
+  lines.forEach((l, i) => { if (open < 0 ? PARTS.test(l) : FENCE_END.test(l)) open = open < 0 ? i : -1; });
+  return open < 0 ? text : lines.slice(0, open).join("\n");
+}
+
 async function send(text) {
   text = (text ?? q.value).trim(); if (!text || busy) return;
   busy = true; go.disabled = true; q.value = ""; grow();
@@ -917,6 +920,14 @@ async function send(text) {
     const r = await fetch("/api/ask/stream", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": token }, body: JSON.stringify({ q: text, sid: conv.sid }) });
     if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "연결 오류 " + r.status); }
     const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "", done = false;
+    // 답 글은 쓰이는 대로 그림(한 화면에 한 번씩만 다시 그림). 조회 전에 쓴 글은 조회가 시작되면 지움
+    let partial = "", live = null, queued = false;
+    const paint = () => {
+      queued = false; if (done || !partial) return;
+      if (!live) { live = el("div", "live"); box.append(live); pending.classList.add("done"); }
+      renderAnswer({ answer: settled(partial), blocks: [] }, live);
+      box.scrollIntoView({ block: "end" });
+    };
     while (!done) {
       const { value, done: end } = await reader.read(); if (end) break;
       buf += dec.decode(value, { stream: true });
@@ -926,7 +937,8 @@ async function send(text) {
         if (!chunk.startsWith("data: ")) continue;
         const e = JSON.parse(chunk.slice(6));
         if (e.type === "start") conv.sid = e.sid;
-        else if (e.type === "tool") { pending.classList.add("done"); pending = step(e.label); }
+        else if (e.type === "tool") { pending.classList.add("done"); pending = step(e.label); partial = ""; if (live) { live.remove(); live = null; } }
+        else if (e.type === "text") { partial += e.delta; if (!queued) { queued = true; requestAnimationFrame(paint); } }
         else if (e.type === "block") { item.blocks.push(e.block); }
         else if (e.type === "answer") { item.answer = e.answer; item.footer = e.footer; item.verify = e.verify; item.next = e.next; item.visual = e.visual; done = true; }
         else if (e.type === "error") { item.error = e.error; done = true; }
@@ -945,6 +957,6 @@ function grow() { q.style.height = "auto"; q.style.height = Math.min(q.scrollHei
 q.addEventListener("input", grow);
 q.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.isComposing) { e.preventDefault(); send(); } });
 $("form").onsubmit = e => { e.preventDefault(); send(); };
-for (const [k, t] of EXAMPLES) { const b = btn("ex", null, () => send(t)); b.append(el("small", null, k), el("span", null, t)); $("examples").append(b); }
+for (const t of EXAMPLES) $("examples").append(btn("ex", t, () => send(t)));
 renderConvs(); showLog(false); grow();
 if (wide()) app.classList.add("nodrawer");

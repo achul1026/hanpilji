@@ -98,7 +98,10 @@ class Engine(unittest.TestCase):
                                                          {**PRICE_OUT, "tool": "q_law_search"}]):
             ans = engine.ask("x", bot, conn=None, on_event=events.append, screen=True)
         self.assertEqual([r["ref"] for r in ans.results], [1, 2], "오류 난 호출은 번호를 받지 않음")
-        self.assertEqual([e["type"] for e in events], ["tool", "result", "tool", "tool", "result"])
+        self.assertEqual([e["type"] for e in events if e["type"] != "text"], ["tool", "result", "tool", "tool", "result"])
+        self.assertEqual("".join(e["delta"] for e in events if e["type"] == "text"), "21건 [1], 조문 [2]",
+                         "화면이 있으면 답 글을 조각으로 흘려보냄")
+        self.assertEqual(events[-1]["type"], "text", "답 글은 조회가 끝난 뒤에 옴")
         sent = bot.seen[1]["messages"][-1]["results"]
         self.assertEqual([json.loads(r["content"]).get("ref") for r in sent if not r.get("is_error")], [1, 2])
         self.assertIn("- [1] q_complex_price(name=도곡렉슬, area_m2=84) → 1건", ans.footer)
@@ -229,6 +232,18 @@ class AnthropicProvider(unittest.TestCase):
         self.assertEqual(kw["messages"][1]["content"], [thinking, use], "생각 블록을 바꾸지 않고 돌려줌")
         self.assertEqual(kw["messages"][2]["content"][0]["tool_use_id"], "tu1")
         self.assertNotIn("tool_choice", kw)
+
+    def test_stream_text(self):
+        usage = block(input_tokens=10, output_tokens=5, cache_read_input_tokens=0)
+        final = block(stop_reason="end_turn", content=[block(type="text", text="답 [1]")], model="m", usage=usage)
+        stream = mock.MagicMock()
+        stream.__enter__.return_value = block(text_stream=iter(["답 ", "[1]"]), get_final_message=lambda: final)
+        client = mock.MagicMock()
+        client.beta.messages.stream.return_value = stream
+        got = []
+        r = llm.Anthropic("m", client=client).chat("s", [{"role": "user", "text": "q"}], [], on_text=got.append)
+        self.assertEqual((got, r.text, r.stop), (["답 ", "[1]"], "답 [1]", "end"))
+        client.beta.messages.create.assert_not_called()
 
     def test_refusal_and_no_fallbacks(self):
         client = self.fake_client([block(stop_reason="refusal", content=[], model="m", usage=None)])
@@ -556,6 +571,8 @@ class Web(unittest.TestCase):
             on_event = on_event or (lambda e: None)
             on_event({"type": "tool", "tool": "q_complex_price", "args": {"name": "도곡렉슬"}})
             on_event({"type": "result", "result": {**PRICE_OUT, "ref": 1}})
+            on_event({"type": "text", "delta": "답 "})
+            on_event({"type": "text", "delta": "[1]"})
             return engine.Answer("답 [1]", footer="근거", messages=[{"role": "user", "text": q}],
                                  results=[{**PRICE_OUT, "ref": 1}])
         engine.ask.side_effect = fake_ask
@@ -564,12 +581,13 @@ class Web(unittest.TestCase):
         with urllib.request.urlopen(req) as r:
             self.assertTrue(r.headers["Content-Type"].startswith("text/event-stream"))
             events = [json.loads(line[6:]) for line in r.read().decode().split("\n\n") if line.startswith("data: ")]
-        self.assertEqual([e["type"] for e in events], ["start", "tool", "block", "answer"])
+        self.assertEqual([e["type"] for e in events], ["start", "tool", "block", "text", "text", "answer"])
         self.assertEqual(events[1]["label"], "실거래가에서 시세를 셈하는 중")
         self.assertEqual((events[2]["block"]["ref"], events[2]["block"]["kind"]), (1, "table"))
-        self.assertEqual(events[3]["answer"], "답 [1]")
-        self.assertEqual(events[3]["verify"]["checked"], 0)
-        self.assertEqual(events[3]["next"][0]["tool"], "q_property_card", "다룬 단지로 이어서 볼 것")
+        self.assertEqual(events[3]["delta"] + events[4]["delta"], "답 [1]", "답 글이 쓰이는 대로 옴")
+        self.assertEqual(events[5]["answer"], "답 [1]")
+        self.assertEqual(events[5]["verify"]["checked"], 0)
+        self.assertEqual(events[5]["next"][0]["tool"], "q_property_card", "다룬 단지로 이어서 볼 것")
         code, got = self.post({"q": "또"})
         self.assertEqual(got["blocks"][0]["title"], "도곡렉슬 84㎡ 면적별 시세")
 

@@ -262,7 +262,7 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                              "blocks": blocks.blocks(ans.results), **extras(ans)})
 
         def _stream(self, question, sid, sess):
-            """진행을 Server-Sent Events로 흘려보냄: tool(조회 시작) · block(조회 결과) · answer(답) · error."""
+            """진행을 Server-Sent Events로 흘려보냄: tool(조회 시작) · block(조회 결과) · text(답 글 조각) · answer(답) · error."""
             self.send_response(200)
             self.send_header("Content-Type", "text/event-stream; charset=utf-8")
             self.send_header("Cache-Control", "no-cache")
@@ -284,6 +284,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                     send({"type": "tool", "tool": e["tool"], "label": blocks.TOOL_DOING.get(e["tool"], "자료를 찾는 중")})
                 elif e["type"] == "result":
                     send({"type": "block", "block": blocks.block(e["result"])})
+                elif e["type"] == "text":   # 답 글 조각: 쓰이는 대로 화면에 보임
+                    send({"type": "text", "delta": e["delta"]})
 
             send({"type": "start", "sid": sid})
             ans = self._answer(question, sess, on_event)

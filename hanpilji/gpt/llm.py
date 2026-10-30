@@ -5,7 +5,7 @@
   {"role": "assistant", "text": "...", "calls": [{"id", "name", "input"}], "raw": 제공자 원본, "provider": 이름}
   {"role": "tool", "results": [{"id", "content": "JSON 문자열", "is_error": bool}]}
 
-새 제공자를 붙이려면 chat(system, messages, tools) -> Reply 하나만 만들고 PROVIDERS에 등록하면 됨.
+새 제공자를 붙이려면 chat(system, messages, tools, on_text=None) -> Reply 하나만 만들고 PROVIDERS에 등록하면 됨.
 """
 import os
 from dataclasses import dataclass, field
@@ -73,8 +73,17 @@ class Anthropic:
             kw.update(fallbacks=self.fallbacks, betas=["server-side-fallback-2026-07-01"])
         return kw
 
-    def chat(self, system, messages, tools):
-        r = self.client.beta.messages.create(**self.request(system, messages, tools))
+    def chat(self, system, messages, tools, on_text=None):
+        """on_text가 있으면 스트리밍으로 받아 글 조각을 바로 넘김(웹 화면에 한 글자씩). 결과 모양은 같음.
+        도중에 다른 모델로 넘어가도(fallback) 받은 조각은 그대로 두고 이어서 옴."""
+        kw = self.request(system, messages, tools)
+        if on_text is None:
+            r = self.client.beta.messages.create(**kw)
+        else:
+            with self.client.beta.messages.stream(**kw) as stream:
+                for t in stream.text_stream:
+                    on_text(t)
+                r = stream.get_final_message()
         stop = {"end_turn": "end", "tool_use": "tool", "refusal": "refusal",
                 "max_tokens": "max_tokens"}.get(r.stop_reason, r.stop_reason or "")
         if stop == "refusal":
@@ -94,9 +103,13 @@ class Scripted:
     def __init__(self, replies):
         self.replies, self.seen = list(replies), []
 
-    def chat(self, system, messages, tools):
+    def chat(self, system, messages, tools, on_text=None):
         self.seen.append({"system": system, "messages": [dict(m) for m in messages], "tools": tools})
-        return self.replies.pop(0)
+        r = self.replies.pop(0)
+        if on_text and r.text:
+            for i in range(0, len(r.text), 8):
+                on_text(r.text[i:i + 8])
+        return r
 
 
 PROVIDERS = {"anthropic": Anthropic}
