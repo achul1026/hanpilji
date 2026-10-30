@@ -94,7 +94,7 @@ CREATE TABLE IF NOT EXISTS core.ref_permit_zone (
     zone_id     text PRIMARY KEY,
     name        text NOT NULL,                 -- 예) 강남 3구 · 용산구 아파트 토지거래허가구역
     event_id    text REFERENCES core.ref_policy_event (event_id),   -- 처음 지정을 알린 정책
-    sigungu     text[] NOT NULL,               -- 시군구 코드 5자리
+    sigungu     text[] NOT NULL,               -- 적용되는 시군구 코드 5자리 전부(서초 11650 · 강남 11680 · 송파 11710 · 용산 11170 …)
     emd         text[],                        -- 일부 동만이면 그 동 이름. 비우면 시군구 전체
     target      text NOT NULL,                 -- 대상 건물. 지금은 「아파트」만(아파트 단지에만 붙임)
     start_date  date NOT NULL,                 -- 효력 시작일
@@ -109,12 +109,12 @@ CREATE TABLE IF NOT EXISTS core.ref_permit_zone (
 
 INSERT INTO core.ref_permit_zone (zone_id, name, event_id, sigungu, emd, target, start_date, end_date, rule,
                                   law_name, article_no, source, source_url, asof) VALUES
- ('2025-03-24-gangnam3-yongsan', '강남 3구 · 용산구 아파트 토지거래허가구역', '2025-03-19', '{11680}', NULL, '아파트',
+ ('2025-03-24-gangnam3-yongsan', '강남 3구 · 용산구 아파트 토지거래허가구역', '2025-03-19', '{11650,11680,11710,11170}', NULL, '아파트',
   '2025-03-24', '2026-12-31',
   '아파트를 사려면 구청 허가를 받아야 하고, 산 뒤 2년은 직접 살아야 함(전세를 끼고 사는 갭투자 불가)',
   '부동산 거래신고 등에 관한 법률', '제10조', '뉴시스 보도(서울시 2025-09-17 연장 발표, 2026년 12월 31일까지)',
   'https://www.newsis.com/view/NISX20250917_0003333383', '2026-10-30'),
- ('2025-10-20-seoul', '서울 전역 아파트 토지거래허가구역(10·15 대책)', '2025-10-15', '{11680}', NULL, '아파트',
+ ('2025-10-20-seoul', '서울 전역 아파트 토지거래허가구역(10·15 대책)', '2025-10-15', '{11110,11140,11170,11200,11215,11230,11260,11290,11305,11320,11350,11380,11410,11440,11470,11500,11530,11545,11560,11590,11620,11650,11680,11710,11740}', NULL, '아파트',
   '2025-10-20', '2026-12-31',
   '아파트를 사려면 구청 허가를 받아야 하고, 산 뒤 2년은 직접 살아야 함(전세를 끼고 사는 갭투자 불가)',
   '부동산 거래신고 등에 관한 법률', '제10조', 'SBS Biz 보도(10·15 대책, 10월 20일부터 2026년 12월 31일까지)',
