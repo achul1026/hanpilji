@@ -173,7 +173,8 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None, on_event=No
     messages = trim(history) + [{"role": "user", "text": question}]
     calls, results_full = [], []
     for round_no in range(max_rounds + 1):
-        r = llm.chat(system, messages, specs)
+        # 화면이 있으면 답 글을 조각으로 흘려보냄(도구를 부르는 차례의 글도 오지만 화면은 도구 단계에서 지움)
+        r = llm.chat(system, messages, specs, on_text=(lambda t: emit({"type": "text", "delta": t})) if on_event else None)
         if r.stop == "refusal":
             return _ended(messages, FALLBACK_REFUSAL, calls, r.stop, r.model, results_full)
         messages.append({"role": "assistant", "text": r.text, "calls": r.calls, "raw": r.raw,
