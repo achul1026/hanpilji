@@ -37,6 +37,8 @@ function btn(cls, text, onclick, label) { const b = el("button", cls, text); b.t
 const nf = new Intl.NumberFormat("ko-KR");
 
 // 금액(원) → 「35억 6,000만」. 1억 미만은 「8,500만」, 1만 미만은 원 그대로
+// 변동률: +30.2% · -1.0%(소수 한 자리)
+function pct(v) { const n = Number(v); return (n > 0 ? "+" : "") + n.toFixed(1) + "%"; }
 function won(v, unit) {
   if (v == null || v === "") return "-";
   const n = Math.round(Number(v)), eok = Math.floor(n / 1e8), man = Math.round((n % 1e8) / 1e4);
@@ -413,16 +415,18 @@ function cardEl(b, compact) {
     box.append(head, el("p", "addr", [r.address, r.road_addr && "도로명 " + r.road_addr].filter(Boolean).join(" · ")));
     if (r.pnu) box.append(el("div", "pnu", "PNU " + r.pnu));
     const g = el("div", "grid");
-    g.append(sec("거래 · 최근 12개월", [[r.trade_count ? "평당 " + won(r.trade_per_pyeong) : "매매 없음", "big"],
+    g.append(sec("거래 · 최근 12개월", [[r.trade_count ? "전용 평당 " + won(r.trade_per_pyeong) : "매매 없음", "big"],
       ["매매 " + r.trade_count + "건" + (r.trade_last_date ? " · 마지막 " + r.trade_last_date + " " + won(r.trade_last_amount) : "")],
-      ["전세 " + r.jeonse_count + "건 평균 " + won(r.jeonse_avg) + (r.jeonse_ratio != null ? " · 전세가율 " + r.jeonse_ratio + "%" : "")]]));
+      ["전세 " + r.jeonse_count + "건 평균 " + won(r.jeonse_avg) + (r.jeonse_ratio != null ? " · 전세가율 " + r.jeonse_ratio + "%" : "")],
+      ...(r.chg_1y_pct != null || r.chg_3y_pct != null ? [[[r.chg_1y_pct != null && "1년 " + pct(r.chg_1y_pct), r.chg_3y_pct != null && "3년 " + pct(r.chg_3y_pct)].filter(Boolean).join(" · ") + " (같은 면적 ㎡당)"]] : [])]));
     g.append(sec("토지 · 공시지가", [["공시지가 " + (r.land_price_per_m2 ? won(r.land_price_per_m2, "/㎡") + " (" + r.land_price_year + ")" : "-"), "big"],
       ["필지 " + (r.land_parcel_count || 0) + "개 · " + (r.land_category || "-") + " · " + (r.land_area_m2 != null ? nf.format(r.land_area_m2) + "㎡" : "-")]],
       !has("토지 지목") && !has("토지 면적") && !has("공시지가")));
     g.append(sec("용도지역 · 규제", [[(r.zones || "-").split(", ").filter(z => /지역$/.test(z)).join(", ") || "-", "big"], ["행위제한 규칙 " + (r.zone_rule_count || 0) + "개"],
-      [(r.zones || "").split(", ").filter(z => z && !/지역$/.test(z)).slice(0, 4).join(" · ")]], !has("용도지역")));
+      [(r.zones || "").split(", ").filter(z => z && !/지역$/.test(z)).slice(0, 4).join(" · ")],
+      ...(r.permit_to ? [["토지거래허가 " + r.permit_from + " ~ " + r.permit_to + " · 산 뒤 2년 실거주"]] : [])], !has("용도지역")));
     g.append(sec("건물 · 건축물대장", [[(r.bld_households != null ? nf.format(r.bld_households) + "세대" : "-") + " · " + (r.bld_floors_above || "-") + "층", "big"],
-      ["준공 " + (r.build_year || "-") + " · 주차 " + (r.bld_parking != null ? nf.format(r.bld_parking) : "-") + "대"],
+      ["준공 " + (r.build_year || "-") + " · 주차 " + (r.bld_parking != null ? nf.format(r.bld_parking) : "-") + "대" + (r.bld_parking_per_household != null ? " (세대당 " + r.bld_parking_per_household + "대)" : "")],
       ["건폐율 " + (r.bld_bc_rat != null ? r.bld_bc_rat + "%" : "-") + " · 용적률 " + (r.bld_vl_rat != null ? r.bld_vl_rat + "%" : "-")]], !has("건축물대장")));
     box.append(g);
     if (!compact && r.recent_deals && r.recent_deals.length) {
@@ -544,11 +548,11 @@ function subjectEl(item) {
   for (const t of [r.build_year && r.build_year + "년 준공", r.bld_households && nf.format(r.bld_households) + "세대", r.bld_floors_above && "최고 " + r.bld_floors_above + "층"]) if (t) chips.append(el("span", null, t));
   h.append(nm, chips); return h;
 }
-// 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기 · 계산 · 범위 밖은 글에서 빼서 따로 그림.
+// 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기 · 계산 · 범위 밖 · 상황은 글에서 빼서 따로 그림.
 // 예전 답의 「:::숫자」는 글에 남겨 md()가 그대로 그림
-const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖)\s*$/;
+const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖|상황)\s*$/;
 function splitAnswer(text) {
-  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [] };
+  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [], 상황: [] };
   const lines = String(text || "").replace(/\r/g, "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(PARTS);
@@ -587,7 +591,8 @@ function subjRow(sub) {
     th.append(sv); row.append(th);
   }
   tx.append(el("b", null, sub.name + (sub.area_m2 ? ` · 전용 ${sub.area_m2}㎡` : "")));
-  const addr = [String(sub.address || "").replace(/^서울특별시\s*/, ""), sub.build_year && sub.build_year + "년 준공"].filter(Boolean).join(" · ");
+  const addr = [String(sub.address || "").replace(/^서울특별시\s*/, ""), sub.build_year && sub.build_year + "년 준공",
+    sub.households && nf.format(sub.households) + "세대", sub.parking_ph && "세대당 주차 " + sub.parking_ph + "대"].filter(Boolean).join(" · ");
   if (addr) tx.append(el("span", null, addr));
   row.append(tx); return row;
 }
@@ -698,6 +703,14 @@ function gapsFold(lines) {
   d.append(sm, ul); return d;
 }
 // 누르면 그 글로 바로 물음(질문 모드로). big: 범위 밖 답에서는 큰 선택지 카드로
+// 사용자 상황 되물음: 첫 줄은 물음, 「- 」 줄은 누르면 그대로 보낼 내 상황
+function situEl(lines) {
+  const ask = lines.find(l => !/^\s*[-*•]/.test(l)), opts = lines.filter(l => /^\s*[-*•]/.test(l));
+  const chips = askChips(opts, "mine"); if (!chips) return null;
+  const box = el("div", "situ");
+  if (ask) box.append(el("p", null, ask.trim()));
+  box.append(chips); return box;
+}
 function askChips(lines, cls) {
   const row = el("div", "qchips " + (cls || ""));
   for (const l of lines.slice(0, 5)) { const t = bullet(l); if (t) row.append(btn("qchip", t, () => { if (busy) return; setMode("ask"); send(t); })); }
@@ -736,6 +749,7 @@ function renderAnswer(item, box) {
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
   if (item.blocks.some(b => b.tool === "q_law_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
+  const si = situEl(p.상황); if (si) box.append(si);
   const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
 }
 
@@ -803,12 +817,16 @@ function renderReport(item, box) {
   box.append(reportTools(item, "필지 리포트"));
   if (r) {
     const g = el("div", "figs"), zone = (r.zones || "").split(", ").filter(z => /지역$/.test(z)).join(", ");
-    if (r.trade_count) g.append(fact("평당 매매가 · 최근 12개월", won(r.trade_per_pyeong), `매매 ${r.trade_count}건`, one));
+    if (r.trade_count) g.append(fact("전용 평당 매매가 · 최근 12개월", won(r.trade_per_pyeong), `모든 면적 매매 ${r.trade_count}건`, one));
+    if (r.chg_1y_pct != null) g.append(fact("매매가 1년 변동", pct(r.chg_1y_pct), "최근 6개월 대 1년 전 6개월 · 같은 면적 ㎡당", one));
+    if (r.chg_3y_pct != null) g.append(fact("매매가 3년 변동", pct(r.chg_3y_pct), "최근 6개월 대 3년 전 6개월 · 같은 면적 ㎡당", one));
     if (r.trade_last_amount) g.append(fact("마지막 매매", won(r.trade_last_amount), `${r.trade_last_date} · ${r.trade_last_area}㎡`, one));
     if (r.jeonse_ratio != null) g.append(fact("전세가율", r.jeonse_ratio + "%", `${r.jeonse_ratio_area}㎡ 같은 면적끼리 · 전세 ${r.jeonse_count}건`, one));
     if (r.land_price_per_m2) g.append(fact(`개별공시지가 · ${r.land_price_year}`, won(r.land_price_per_m2, "/㎡"), `필지 ${r.land_parcel_count}개 · ${r.land_category || "-"}`, one));
     if (zone) g.append(fact("용도지역", zone, `행위제한 규칙 ${r.zone_rule_count || 0}개`, one));
     if (r.bld_vl_rat != null) g.append(fact("용적률 · 건폐율", r.bld_vl_rat + "% · " + r.bld_bc_rat + "%", `건축물대장 · 주차 ${nf.format(r.bld_parking || 0)}대`, one));
+    if (r.bld_parking_per_household != null) g.append(fact("세대당 주차", r.bld_parking_per_household + "대", `${nf.format(r.bld_households)}세대 · 주차 ${nf.format(r.bld_parking)}대`, one));
+    if (r.permit_to) g.append(fact("토지거래허가구역", "~" + r.permit_to, `${r.permit_from}부터 · 허가 후 2년 실거주`, one));
     box.append(g);
   }
   const inl = el("div", "inline a");
@@ -824,12 +842,13 @@ function renderReport(item, box) {
 const CMP = [
   ["준공", r => r.build_year, v => v + "년", "yr"], ["세대", r => r.bld_households, v => nf.format(v) + "세대", "rel"],
   ["최고층", r => r.bld_floors_above, v => v + "층", "rel"], ["용적률", r => r.bld_vl_rat, v => v + "%", "pp"],
-  ["평당 매매가 · 12개월", r => r.trade_count ? r.trade_per_pyeong : null, v => won(v), "rel"],
+  ["전용 평당 매매가 · 12개월", r => r.trade_count ? r.trade_per_pyeong : null, v => won(v), "rel"],
+  ["매매가 1년 변동", r => r.chg_1y_pct, v => pct(v), "pp"], ["매매가 3년 변동", r => r.chg_3y_pct, v => pct(v), "pp"],
   ["매매 건수 · 12개월", r => r.trade_count, v => v + "건", "rel"],
   ["마지막 매매", r => r.trade_last_amount, (v, r) => won(v) + " (" + r.trade_last_area + "㎡ · " + r.trade_last_date + ")"],
   ["전세 평균 · 12개월", r => r.jeonse_avg, v => won(v), "rel"], ["전세가율", r => r.jeonse_ratio, (v, r) => v + "% (" + r.jeonse_ratio_area + "㎡)", "pp"],
   ["공시지가 ㎡당", r => r.land_price_per_m2, (v, r) => won(v) + " (" + r.land_price_year + ")", "rel"],
-  ["세대당 주차", r => r.bld_parking && r.bld_households ? Math.round(r.bld_parking / r.bld_households * 100) / 100 : null, v => v + "대", "rel"],
+  ["세대당 주차", r => r.bld_parking_per_household, v => v + "대", "rel"],
   ["용도지역", r => (r.zones || "").split(", ").filter(z => /지역$/.test(z)).join(", ") || null, v => v],
 ];
 const sign = x => (x > 0 ? "+" : "") + x;

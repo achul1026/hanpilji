@@ -330,7 +330,7 @@ def _parcel_path(rows):
 
 
 def visual(conn, results):
-    """{"subject": {"name", "address", "build_year", "area_m2", "parcel"}, "deals": {"rows": [{"d", "a", "f"}], "from", "to"}}"""
+    """{"subject": {"name", "address", "build_year", "households", "parking_ph", "area_m2", "parcel"}, "deals": {"rows": [{"d", "a", "f"}], "from", "to"}}"""
     name = _subject(results)
     if not name:
         return None
@@ -348,7 +348,9 @@ def visual(conn, results):
         card = (run("q_property_card", {"query": name}).get("rows") or [])
         if len(card) == 1:
             out["subject"].update(name=card[0].get("complex_name") or name, address=card[0].get("address"),
-                                  build_year=card[0].get("build_year") and int(card[0]["build_year"]))
+                                  build_year=card[0].get("build_year") and int(card[0]["build_year"]),
+                                  households=card[0].get("bld_households"),
+                                  parking_ph=card[0].get("bld_parking_per_household"))
         out["subject"]["parcel"] = _parcel_path(run("q_parcel_map", {"query": name}).get("rows") or [])
     except Exception:
         pass
