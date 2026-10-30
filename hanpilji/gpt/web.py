@@ -155,6 +155,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 self._card(qs.get("q", ""))
             elif url.path in ("/api/report", "/api/compare"):
                 self._report(url.path, qs)
+            elif url.path == "/api/auto":
+                self._auto(qs.get("q", ""))
             else:
                 self._json(404, {"error": "없는 주소"})
 
@@ -188,6 +190,20 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 print(f"오류: {e!r}", file=sys.stderr)
                 return self._json(500, {"error": "리포트를 만드는 중 오류가 났습니다."})
             self._json(200, out)
+
+        def _auto(self, query):
+            """질문 글로 리포트 · 비교를 바로 열지 정함(모델 없이). 아니면 {"kind": "ask"}라 화면이 모델에게 물음."""
+            if not report.intent(query):
+                return self._json(200, {"kind": "ask"})
+            if not self._rate_ok("tool", tool_per_hour):
+                return self._json(200, {"kind": "ask"})
+            try:
+                with engine.connect(cfg) as conn:
+                    out = report.auto(conn, query)
+            except Exception as e:   # 조회가 안 되면 모델이 답하게 둠
+                print(f"오류: {e!r}", file=sys.stderr)
+                out = None
+            self._json(200, out or {"kind": "ask"})
 
         def _body(self):
             """요청 JSON 객체를 읽음. 틀리면 (None, 오류 응답 코드, 문구)."""

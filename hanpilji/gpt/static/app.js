@@ -718,7 +718,7 @@ function situEl(lines) {
 }
 function askChips(lines, cls) {
   const row = el("div", "qchips " + (cls || ""));
-  for (const l of lines.slice(0, 5)) { const t = bullet(l); if (t) row.append(btn("qchip", t, () => { if (busy) return; setMode("ask"); send(t); })); }
+  for (const l of lines.slice(0, 5)) { const t = bullet(l); if (t) row.append(btn("qchip", t, () => { if (busy) return; send(t); })); }
   return row.children.length ? row : null;
 }
 function renderAnswer(item, box) {
@@ -759,33 +759,35 @@ function renderAnswer(item, box) {
 }
 
 // ------------------------------------------------------------ 필지 리포트 · 두 단지 비교(모델 없이 마트 함수만, 요금 없음)
-let mode = "ask";
-const MODES = {
-  ask: ["질문", "단지 이름, 주소, 번지, 법 조문 무엇이든. 예: 도곡렉슬 84㎡ 최근 시세와 땅 규제"],
-  report: ["필지 리포트", "단지 이름이나 「동 지번」 하나. 예: 도곡렉슬, 도곡동 527"],
-  compare: ["두 단지 비교", "두 단지를 쉼표로 나눠서. 예: 도곡렉슬, 래미안대치팰리스"],
-};
-function setMode(m) {
-  mode = m;
-  for (const b of $("modes").children) { const on = b.dataset.mode === m; b.classList.toggle("on", on); b.setAttribute("aria-selected", on); }
-  q.placeholder = MODES[m][1];
-}
-for (const m in MODES) { const b = btn("", MODES[m][0], () => { setMode(m); q.focus(); }); b.dataset.mode = m; b.setAttribute("role", "tab"); $("modes").append(b); }
+// 탭으로 고르지 않고 질문 글로 정함: 이름 · 「리포트」 → 리포트, 「A와 B 비교」 · 「A, B」 → 비교(/api/auto). 아니면 모델이 답함
 const splitPair = t => { const p = t.split(/\s*(?:,|\/|·|\s+vs\.?\s+|\s+와\s+|\s+과\s+)\s*/i).map(x => x.trim()).filter(Boolean); return p.length === 2 ? p : null; };
-
+function useLookup(item, j, m) {
+  item.kind = m; if (j.pair) item.pair = j.pair;
+  if (j.choices) { item.choices = j.choices; item.choiceFor = j.query; return; }
+  item.blocks = j.blocks || []; item.subjects = j.subjects || [j.subject];
+}
+async function getJSON(url) {
+  const r = await fetch(url, { headers: { "X-Token": token } }), j = await r.json().catch(() => ({}));
+  if (!r.ok) throw new Error(j.error || "연결 오류 " + r.status);
+  return j;
+}
+// 고른 이름으로 다시 열 때(뜻이 이미 정해짐)
 async function lookup(item, text, m) {
   let url;
   if (m === "report") url = "/api/report?q=" + encodeURIComponent(text);
   else {
     const p = splitPair(text);
-    if (!p) throw new Error("두 단지를 쉼표로 나눠 넣어 주세요. 예: 도곡렉슬, 래미안대치팰리스");
+    if (!p) throw new Error("비교할 두 단지를 찾지 못했어요. 예: 도곡렉슬과 래미안대치팰리스 비교");
     url = "/api/compare?a=" + encodeURIComponent(p[0]) + "&b=" + encodeURIComponent(p[1]); item.pair = p;
   }
-  const r = await fetch(url, { headers: { "X-Token": token } }), j = await r.json().catch(() => ({}));
-  if (!r.ok) throw new Error(j.error || "연결 오류 " + r.status);
-  item.kind = m;
-  if (j.choices) { item.choices = j.choices; item.choiceFor = j.query; return; }
-  item.blocks = j.blocks || []; item.subjects = j.subjects || [j.subject];
+  useLookup(item, await getJSON(url), m);
+}
+// 질문 글로 리포트 · 비교인지 봄. 아니면 false(모델에게)
+async function autoLookup(item, text) {
+  let j;
+  try { j = await getJSON("/api/auto?q=" + encodeURIComponent(text)); } catch { return false; }
+  if (!j || (j.kind !== "report" && j.kind !== "compare")) return false;
+  useLookup(item, j, j.kind); return true;
 }
 // 이름이 여러 단지에 맞거나 하나도 없을 때: 고르면 같은 방식으로 다시 엶
 function choicesEl(item) {
@@ -793,10 +795,8 @@ function choicesEl(item) {
   if (!item.choices.length) { box.append(el("b", null, "맞는 단지가 없어요"), el("p", null, `「${item.choiceFor}」에 맞는 단지를 찾지 못했어요. 지금 데이터는 서울 강남구 아파트만 있어요.`)); return box; }
   box.append(el("b", null, `「${item.choiceFor}」에 맞는 단지가 여럿이에요. 하나를 고르세요`));
   const row = el("div", "row"); row.style.cssText = "display:flex;flex-wrap:wrap;gap:8px;margin-top:8px";
-  for (const c of item.choices) row.append(btn("nx", c, () => {
-    setMode(item.kind);
-    send(item.kind === "compare" ? item.pair.map(x => x === item.choiceFor ? c : x).join(", ") : c);
-  }));
+  for (const c of item.choices) row.append(btn("nx", c, () =>
+    send(item.kind === "compare" ? item.pair.map(x => x === item.choiceFor ? c : x).join(", ") : c, item.kind)));
   box.append(row); return box;
 }
 const cardRow = (item, k) => { const rows = (item.blocks.filter(b => b.kind === "card")[k || 0] || { rows: [] }).rows || []; return rows.length === 1 ? rows[0] : undefined; };
@@ -927,21 +927,24 @@ function settled(text) {
   return open < 0 ? text : lines.slice(0, open).join("\n");
 }
 
-async function send(text) {
+// as: 고른 이름으로 다시 열 때 "report" · "compare". 없으면 질문 글로 정함
+async function send(text, as) {
   text = (text ?? q.value).trim(); if (!text || busy) return;
   busy = true; go.disabled = true; q.value = ""; grow();
   if (!cur) cur = newConv(text.length > 40 ? text.slice(0, 40) + "…" : text);
   const conv = cur;   // 답을 기다리는 사이 다른 대화를 열어도 이 대화에 남김
   showLog(true); $("topTitle").textContent = cur.title; renderConvs();
-  const m = mode, qtext = m === "ask" ? text : MODES[m][0] + " · " + text;
-  addQuestion(qtext);
-  const item = { q: qtext, answer: "", footer: "", blocks: [] }, box = el("div", "a"), steps = el("ul", "steps");
+  addQuestion(text);
+  const item = { q: text, answer: "", footer: "", blocks: [] }, box = el("div", "a"), steps = el("ul", "steps");
   box.append(steps); log.append(box);
   const step = label => { const li = el("li", null, label); steps.append(li); box.scrollIntoView({ block: "end", behavior: "smooth" }); return li; };
-  let pending = step(m === "ask" ? "질문을 읽는 중" : "공공기록을 모으는 중(모델 없이)");
-  if (m !== "ask") {
-    try { await lookup(item, text, m); } catch (e) { item.error = String(e.message || e); }
-  } else try {
+  let pending = step(as ? "공공기록을 모으는 중" : "질문을 읽는 중");
+  let looked = false;
+  if (as) {
+    looked = true;
+    try { await lookup(item, text, as); } catch (e) { item.error = String(e.message || e); }
+  } else looked = await autoLookup(item, text);
+  if (!looked) try {
     const r = await fetch("/api/ask/stream", { method: "POST", headers: { "Content-Type": "application/json", "X-Token": token }, body: JSON.stringify({ q: text, sid: conv.sid }) });
     if (!r.ok || !r.body) { const j = await r.json().catch(() => ({})); throw new Error(j.error || "연결 오류 " + r.status); }
     const reader = r.body.getReader(), dec = new TextDecoder(); let buf = "", done = false;

@@ -466,6 +466,40 @@ class Report(unittest.TestCase):
             out = report.report(mock.Mock(), "도곡렉슬")
         self.assertNotIn("q_parcel_map", [b["tool"] for b in out["blocks"]])
 
+    def test_intent_from_question(self):
+        cases = {
+            "도곡렉슬": ("report", "도곡렉슬", False),
+            "도곡동 527": ("report", "도곡동 527", False),
+            "도곡렉슬 84㎡ 리포트 보여줘": ("report", "도곡렉슬", True),
+            "도곡렉슬과 은마 비교해줘": ("compare", "도곡렉슬", "은마"),
+            "은마랑 도곡렉슬 어디가 나아?": ("compare", "은마", "도곡렉슬"),
+            "도곡렉슬, 래미안대치팰리스": ("compare", "도곡렉슬", "래미안대치팰리스"),
+            "도곡렉슬 vs 은마": ("compare", "도곡렉슬", "은마"),
+            "도곡렉슬 84㎡ 최근 시세": None,
+            "도곡렉슬 사도 될까?": None,
+            "도곡렉슬과 은마 전세가율 비교": None,
+            "은마 84㎡와 비교": None,
+            "토지거래허가구역": None,
+            "강남구": None,
+        }
+        for q, want in cases.items():
+            self.assertEqual(report.intent(q), want, q)
+
+    def test_auto_opens_report_compare_or_gives_up(self):
+        run = self.fake_run({"도곡렉슬": [{"complex_name": "도곡렉슬"}], "은마": [{"complex_name": "은마"}],
+                             "래미안": [{"complex_name": "래미안" + str(i)} for i in range(3)],
+                             "개포동": [{"complex_name": "개포" + str(i)} for i in range(9)], "재건축": []})
+        with mock.patch.object(tools, "run", side_effect=run):
+            self.assertEqual(report.auto(mock.Mock(), "도곡렉슬")["kind"], "report")
+            out = report.auto(mock.Mock(), "도곡렉슬과 은마 비교")
+            self.assertEqual((out["kind"], out["subjects"], out["pair"]), ("compare", ["도곡렉슬", "은마"], ["도곡렉슬", "은마"]))
+            self.assertEqual(report.auto(mock.Mock(), "래미안")["choices"], ["래미안0", "래미안1", "래미안2"])
+            self.assertEqual(report.auto(mock.Mock(), "도곡렉슬, 래미안")["pair"], ["도곡렉슬", "래미안"])
+            self.assertIsNone(report.auto(mock.Mock(), "개포동"), "이름만 넣었는데 너무 여럿이면 모델이 되묻게")
+            self.assertIsNotNone(report.auto(mock.Mock(), "개포동 리포트"), "「리포트」라고 했으면 고르게")
+            self.assertIsNone(report.auto(mock.Mock(), "재건축"), "맞는 단지가 없으면 모델에게")
+            self.assertIsNone(report.auto(mock.Mock(), "도곡렉슬 시세"))
+
     def test_compare(self):
         run = self.fake_run({"a": [{"complex_name": "A"}], "b": [{"complex_name": "B"}]})
         with mock.patch.object(tools, "run", side_effect=run):
@@ -527,6 +561,20 @@ class Web(unittest.TestCase):
         run.assert_called_once()   # 카드와 최근 거래를 한 함수(한 스냅숏)에서 읽음
         self.assertEqual(run.call_args.args[1:], ("q_property_card", {"query": "도곡"}))
         self.assertEqual(got["rows"], card["rows"])
+
+    def test_auto_endpoint_falls_back_to_ask(self):
+        self.serve()
+        import urllib.parse
+        import urllib.request
+
+        def get(q):
+            with urllib.request.urlopen(self.base + "/api/auto?q=" + urllib.parse.quote(q)) as r:
+                return json.loads(r.read())
+        self.assertEqual(get("도곡렉슬 84㎡ 최근 시세"), {"kind": "ask"})
+        with mock.patch.object(report, "auto", return_value={"kind": "report", "subject": "도곡렉슬", "blocks": []}):
+            self.assertEqual(get("도곡렉슬")["kind"], "report")
+        with mock.patch.object(report, "auto", side_effect=RuntimeError("db")):
+            self.assertEqual(get("도곡렉슬"), {"kind": "ask"}, "조회가 안 되면 모델이 답하게")
 
     def test_report_and_compare_endpoints(self):
         self.serve()
