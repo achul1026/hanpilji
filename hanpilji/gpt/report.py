@@ -1,6 +1,6 @@
 """필지 리포트 · 두 단지 비교. 모델을 부르지 않고 마트 함수 몇 개만 차례로 불러 한 장으로 모음(요금 없음).
 
-리포트: 단지 · 주소 하나 → 종합 카드, 지적도, 월별 시세 추이, 공시지가 추이, 공시지가 대비 실거래가.
+리포트: 단지 · 주소 하나 → 종합 카드, 지적도, 월별 시세 추이, 공시지가 추이, 공시지가 대비 실거래가, 주택 공시가격.
 비교: 단지 둘 → 각각의 종합 카드와 월별 시세 추이.
 이름이 여러 단지에 맞으면 조회를 더 하지 않고 고를 이름(choices)만 돌려줌.
 """
@@ -8,7 +8,7 @@ from hanpilji.gpt import blocks, tools
 
 # 카드로 단지 하나를 정한 다음 그 단지 이름으로 부르는 도구와 인자 이름
 REPORT_TOOLS = [("q_parcel_map", "query"), ("q_price_trend", "name"), ("q_land_price_trend", "query"),
-                ("q_price_vs_official", "query")]
+                ("q_price_vs_official", "query"), ("q_house_price", "query")]
 COMPARE_TOOLS = [("q_price_trend", "name")]
 MAX_QUERY = 100
 

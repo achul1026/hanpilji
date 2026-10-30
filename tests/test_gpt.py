@@ -33,7 +33,7 @@ class Tools(unittest.TestCase):
         self.assertEqual({t["name"] for t in tools.specs()},
                          {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
                           "q_building_filter", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_market_series",
-                          "q_auction_discount", "q_auction_checklist", "q_parcel_map", "q_policy_events", "q_policy_impact"})
+                          "q_house_price", "q_auction_discount", "q_auction_checklist", "q_parcel_map", "q_policy_events", "q_policy_impact"})
         for t in tools.TOOLS:
             self.assertTrue(t["sql"].startswith("SELECT * FROM mart."), "도구는 mart 함수만 부름")
 
@@ -437,8 +437,9 @@ class Report(unittest.TestCase):
             out = report.report(mock.Mock(), "도곡동 527")
         self.assertEqual(out["subject"], "도곡렉슬")
         self.assertEqual([b["tool"] for b in out["blocks"]],
-                         ["q_property_card", "q_parcel_map", "q_price_trend", "q_land_price_trend", "q_price_vs_official"])
-        self.assertEqual([b["ref"] for b in out["blocks"]], [1, 2, 3, 4, 5])
+                         ["q_property_card", "q_parcel_map", "q_price_trend", "q_land_price_trend", "q_price_vs_official",
+                          "q_house_price"])
+        self.assertEqual([b["ref"] for b in out["blocks"]], [1, 2, 3, 4, 5, 6])
         self.assertEqual(m.call_args_list[2].args[1:], ("q_price_trend", {"name": "도곡렉슬"}), "카드가 정한 단지 이름으로")
 
     def test_many_or_none_give_choices(self):

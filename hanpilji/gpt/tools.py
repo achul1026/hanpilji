@@ -271,6 +271,31 @@ TOOLS = [
                            max(1, min(int(a.get("limit") or 10), 20)), a.get("order") or "desc"),
     },
     {
+        "name": "q_house_price",
+        "description": (
+            "주택(공동주택) 공시가격. 단지 x 전용면적마다 그 면적 호들의 공시가격 중간값 · 최저 · 최고(층 · 향마다 다름)와 호 수, "
+            "같은 면적의 최근 months개월 매매 평균(trade_avg)과 official_ratio(공시가격 중간값 ÷ 매매 평균 %). "
+            "dong · ho를 주면 그 호 하나의 공시가격. official_yoy_pct는 같은 호들의 전년 대비(전년 자료가 있을 때만). "
+            "official_ratio는 정부가 말하는 공시가격 현실화율과 셈법이 달라 「현실화율」이라 부르지 말 것. "
+            "아파트 · 연립 · 다세대만 있음(오피스텔은 공시가격 대상이 아니라 없음). 국토교통부 1월 1일 기준 공시. 강남구(11680)만. 최대 20줄."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "단지명 일부 또는 「동 지번」. 예: 은마, 도곡동 527"},
+                "area_m2": {"type": "number", "description": "전용면적 ㎡. ±3㎡ 안을 같은 타입으로 봄. 없으면 모든 면적"},
+                "dong": {"type": "string", "description": "동. 예: 101동"},
+                "ho": {"type": "string", "description": "호. 예: 1001호. dong과 함께 주면 그 호 하나"},
+                "months": {"type": "integer", "description": "비교할 매매 기간(개월). 기본 12, 최대 36"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_house_price(%s::text, %s::text, %s::numeric, %s::text, %s::text, %s::int)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), a["query"], a.get("area_m2"), a.get("dong") or None,
+                           a.get("ho") or None, _months(a)),
+    },
+    {
         "name": "q_market_series",
         "description": (
             "시장 · 거시 지표의 월별 값. 지표: " + " · ".join(f"{s['id']}({s['name']})" for s in SERIES) + ". "

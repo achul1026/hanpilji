@@ -142,17 +142,7 @@ CREATE TABLE IF NOT EXISTS core.fact_land_price (
     PRIMARY KEY (pnu, base_year, is_standard)
 );
 
-CREATE TABLE IF NOT EXISTS core.fact_house_price (
-    unit_pk        text REFERENCES core.dim_unit,   -- 단독주택은 호가 없어 비움
-    pnu            varchar(25) NOT NULL REFERENCES core.dim_parcel,
-    base_year      smallint NOT NULL,
-    price          bigint NOT NULL CHECK (price > 0),
-    house_kind     text NOT NULL CHECK (house_kind IN ('공동', '개별')),  -- 추가
-    source         text NOT NULL,
-    asof           date NOT NULL
-);
-CREATE UNIQUE INDEX IF NOT EXISTS fact_house_price_uq
-    ON core.fact_house_price (coalesce(unit_pk, ''), pnu, base_year);
+-- 주택 공시가격(core.fact_house_price)은 17_house_price.sql에 있음
 
 -- 이름 · 주소는 담지 않음. 구분 · 지분 · 변동일까지만
 CREATE TABLE IF NOT EXISTS core.fact_ownership (

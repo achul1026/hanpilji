@@ -23,14 +23,14 @@ from hanpilji.gpt import tools as tools_mod
 # 도구 → (고를 수 있는 개월 수, 인자를 비웠을 때 도구가 쓰는 기본값)
 MONTHS_CHOICES = {
     "q_price_trend": ([12, 24, 36], 24), "q_deal_list": ([6, 12, 36], 12), "q_complex_rank": ([6, 12, 36], 12),
-    "q_complex_price": ([6, 12, 36], 12), "q_auction_discount": ([6, 12, 36], 12), "q_price_vs_official": ([6, 12, 36], 12), "q_market_series": ([24, 60, 120], 24),
+    "q_complex_price": ([6, 12, 36], 12), "q_auction_discount": ([6, 12, 36], 12), "q_price_vs_official": ([6, 12, 36], 12), "q_house_price": ([6, 12, 36], 12), "q_market_series": ([24, 60, 120], 24),
 }
 
 TOOL_LABEL = {
     "q_property_card": "단지 종합 카드", "q_complex_price": "면적별 시세", "q_deal_list": "실거래 목록",
     "q_complex_rank": "단지 순위", "q_law_search": "법령 조문", "q_zoning_check": "행위제한(지을 수 있는 건물)",
     "q_building_filter": "건축물대장 검색", "q_price_trend": "월별 시세 추이", "q_land_price_trend": "공시지가 추이",
-    "q_price_vs_official": "공시지가 대비 실거래가", "q_market_series": "시장 지표",
+    "q_price_vs_official": "공시지가 대비 실거래가", "q_house_price": "주택 공시가격", "q_market_series": "시장 지표",
     "q_auction_discount": "공매 물건 · 실거래 대비", "q_auction_checklist": "입찰 전 권리 확인 항목",
     "q_parcel_map": "지적도 · 건물 윤곽", "q_policy_events": "정책 · 규제 변화", "q_policy_impact": "정책 전후 비교",
 }
@@ -42,6 +42,7 @@ TOOL_DOING = {
     "q_law_search": "법령 조문을 찾는 중", "q_zoning_check": "행위제한 규칙을 찾는 중",
     "q_building_filter": "건축물대장을 찾는 중", "q_price_trend": "월별 시세 추이를 만드는 중",
     "q_land_price_trend": "공시지가 추이를 만드는 중", "q_price_vs_official": "공시지가와 실거래가를 맞대는 중",
+    "q_house_price": "주택 공시가격을 찾는 중",
     "q_market_series": "시장 지표를 찾는 중", "q_auction_discount": "공매 물건을 실거래와 맞대는 중",
     "q_auction_checklist": "입찰 전 확인 항목을 찾는 중", "q_parcel_map": "지적도를 펼치는 중",
     "q_policy_events": "정책 · 규제 변화를 찾는 중", "q_policy_impact": "정책 전후 거래와 가격을 맞대는 중",
@@ -67,6 +68,9 @@ COL = {   # 열 이름 → (보이는 이름, 형식)
     "est_market_price": ("실거래 기준 추정", "won"), "discount_pct": ("실거래 대비 할인", "pct"), "label": ("비고", "text"),
     "step": ("순서", "int"), "item": ("항목", "text"), "what_to_check": ("무엇을", "text"), "where_to_look": ("어디서", "text"),
     "article_no": ("조문", "text"),
+    "dong": ("동", "text"), "ho": ("호", "text"), "unit_count": ("호 수", "int"), "official_median": ("공시가격(중간)", "won"),
+    "official_min": ("공시가격 최저", "won"), "official_max": ("공시가격 최고", "won"), "official_yoy_pct": ("공시가격 전년비", "pct"),
+    "base_year": ("공시 연도", "int"), "official_ratio": ("매매 평균 대비", "pct"),
 }
 
 TABLE_COLS = {
@@ -78,6 +82,8 @@ TABLE_COLS = {
     "q_zoning_check": ["zone_name", "act_name", "allowed", "condition_text", "scope"],
     "q_price_vs_official": ["rank", "complex_name", "build_year", "trade_count", "trade_median_per_m2",
                             "land_price_per_m2", "price_multiple", "land_yoy_pct", "trade_yoy_pct"],
+    "q_house_price": ["complex_name", "area_m2", "dong", "ho", "unit_count", "official_median", "official_min",
+                      "official_max", "official_yoy_pct", "trade_count", "trade_avg", "official_ratio"],
     "q_market_series": ["stat_name", "region", "period", "value", "unit", "change", "yoy_pct"],
     "q_auction_discount": ["rank", "name", "usage", "area_m2", "appraisal", "min_bid", "min_bid_pct_of_appraisal",
                            "fail_count", "bid_end", "complex_name", "est_market_price", "discount_pct", "label"],
