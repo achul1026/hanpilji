@@ -108,7 +108,7 @@ class Engine(unittest.TestCase):
         self.assertIn("- [2] q_law_search", ans.footer)
         self.assertIn("화면 안내", bot.seen[0]["system"])
         self.assertNotIn("화면 안내", engine.SYSTEM)
-        for part in (":::핵심", ":::더보기", ":::확인 못 함", ":::다음", ":::고르기", ":::계산", ":::범위 밖"):   # 웹 화면이 나눠 그리는 칸
+        for part in (":::핵심", ":::더보기", ":::확인 못 함", ":::다음", ":::고르기", ":::계산", ":::범위 밖", ":::상황"):   # 웹 화면이 나눠 그리는 칸
             self.assertIn(part, bot.seen[0]["system"])
 
     def test_partial_rows_in_footer(self):
@@ -657,7 +657,8 @@ class Visual(unittest.TestCase):
     GEO = json.dumps({"type": "MultiPolygon", "coordinates": [[[[127.0, 37.5], [127.001, 37.5], [127.001, 37.5005], [127.0, 37.5]]]]})
 
     def fake(self, conn, name, args):
-        return {"q_property_card": {"rows": [{"complex_name": "도곡렉슬", "address": "서울특별시 강남구 도곡동 527", "build_year": 2006}]},
+        return {"q_property_card": {"rows": [{"complex_name": "도곡렉슬", "address": "서울특별시 강남구 도곡동 527", "build_year": 2006,
+                                              "bld_households": 3002, "bld_parking_per_household": 1.48}]},
                 "q_parcel_map": {"rows": [{"layer": "대상 필지", "geojson": self.GEO}, {"layer": "이웃 필지", "geojson": self.GEO}]},
                 "q_deal_list": {"rows": [{"kind": "매매", "contract_date": f"2026-0{i}-01", "amount": 3500000000 + i, "floor": i,
                                           "period_from": "2025-10-29", "period_to": "2026-10-29"} for i in range(1, 4)]}}[name]
@@ -667,6 +668,7 @@ class Visual(unittest.TestCase):
             v = blocks.visual(None, [self.PRICE])
         self.assertEqual(v["subject"]["address"], "서울특별시 강남구 도곡동 527")
         self.assertEqual(v["subject"]["area_m2"], 84)
+        self.assertEqual((v["subject"]["households"], v["subject"]["parking_ph"]), (3002, 1.48), "단지 줄에 세대 · 세대당 주차")
         self.assertEqual(v["subject"]["parcel"]["w"], 100.0, "가로 100에 맞춤")
         self.assertEqual(v["subject"]["parcel"]["d"].count("M"), 1, "이웃 필지는 빼고 대상 필지만")
         self.assertEqual(len(v["deals"]["rows"]), 3)

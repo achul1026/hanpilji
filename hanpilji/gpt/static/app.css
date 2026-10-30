@@ -354,3 +354,7 @@ table.cmp td.n{color:var(--survey);font-weight:600}
 }
 @media (prefers-reduced-motion:reduce){.side,.drawer{transition:none}}
 .a:has(.key) .md>p.lead{font-size:16px;font-weight:500;color:var(--ink2);margin-bottom:0}
+/* 사용자 상황 되물음: 물음 한 줄 + 누르면 보낼 내 상황 */
+.situ{max-width:520px;margin:14px 0 4px;padding:13px 14px;border:1px solid color-mix(in srgb,var(--survey) 30%,var(--line));border-radius:14px;background:var(--survey-soft)}
+.situ p{margin:0 0 10px;font-size:14.5px;font-weight:650;color:var(--ink)}
+.situ .qchip{background:var(--sheet)}
