@@ -35,6 +35,7 @@ class Pipeline(unittest.TestCase):
         )
         cls.cfg = str(cfg)
         os.environ.pop("HANPILJI_DSN", None)
+        os.environ.setdefault("DATA_GO_KR_KEY", "test-key")  # 법령 목록은 공공데이터포털 주소로 만듦(호출은 가짜)
         with psycopg.connect(DSN) as c:
             c.execute("TRUNCATE core.reg_rule, core.doc_law, stg.law_article, stg.law_annex, stg.eum_rule_raw,"
                       " ops.reject_estate, ops.ingest_cursor, ops.ingest_task, ops.ingest_run RESTART IDENTITY CASCADE")
@@ -72,6 +73,36 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(len(calls), law.MAX_NET_FAILS)  # 연달아 접속 실패하면 남은 법령은 부르지 않음
         self.assertEqual(self.q("SELECT cursor_value FROM ops.ingest_cursor"), before)
         self.assertEqual(self.q("SELECT status FROM ops.ingest_run ORDER BY run_id DESC LIMIT 1")[0][0], "failed")
+
+    def test_3b_changed_law_without_body_is_pending(self):
+        """MST가 바뀌었는데 법제처가 본문을 안 주면(OC=test 차단) 실패가 아니라 「본문 대기」, 커서는 그대로."""
+        before = self.q("SELECT cursor_value FROM ops.ingest_cursor WHERE cursor_key = 'law:주택임대차보호법 시행령'")
+        blocked = ('<?xml version="1.0" encoding="UTF-8"?><Response><result>사용자 정보 검증에 실패하였습니다.</result>'
+                   '</Response>').encode()
+
+        def fetch(url):
+            if "lawSearch" in url:
+                return (FIX / "law_search_sample.xml").read_bytes().replace(b"900001", b"900099")
+            return blocked
+        self.q("DELETE FROM ops.ingest_cursor")  # 커서가 없어도 현행 조문 출처의 MST로 비교함
+        self.assertEqual(law.main(["--config", self.cfg], fetch=fetch), 0)
+        last = self.q("SELECT status, note FROM ops.ingest_run ORDER BY run_id DESC LIMIT 1")[0]
+        self.assertEqual(last[0], "done")
+        self.assertIn("본문 대기", last[1])
+        self.assertEqual(self.q("SELECT status FROM ops.ingest_task ORDER BY task_id DESC LIMIT 1")[0][0], "pending")
+        self.assertEqual(self.q("SELECT count(*) FROM ops.ingest_cursor")[0][0], 0)
+        # 같은 MST면 커서를 채우고 건너뜀
+        self.assertEqual(law.main(["--config", self.cfg], fetch=fake_fetch), 0)
+        self.assertEqual(self.q("SELECT cursor_value FROM ops.ingest_cursor WHERE cursor_key = 'law:주택임대차보호법 시행령'"),
+                         before)
+
+    def test_3c_gateway_error_is_failure(self):
+        err = (b'<?xml version="1.0" encoding="UTF-8"?><OpenAPI_ServiceResponse><cmmMsgHeader>'
+               b'<errMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</errMsg><returnReasonCode>30</returnReasonCode>'
+               b'</cmmMsgHeader></OpenAPI_ServiceResponse>')
+        self.assertEqual(law.main(["--config", self.cfg], fetch=lambda url: err), 1)
+        note = self.q("SELECT error FROM ops.ingest_task ORDER BY task_id DESC LIMIT 1")[0][0]
+        self.assertIn("SERVICE_KEY", note)
 
     def test_4_eum_rule_mapping(self):
         path = Path(self.tmp.name) / "행위제한_시험.csv"
