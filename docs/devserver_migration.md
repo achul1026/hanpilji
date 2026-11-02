@@ -1,145 +1,199 @@
-# 한필지 데이터를 개발서버(AI-PLUG 플레이그라운드 DB)로 옮기기
+# 한필지 DB를 공용 PostgreSQL 서버의 스키마 하나로 옮기기
 
-Supabase에 있는 한필지 데이터를 개발서버 PostgreSQL 안의 **스키마 하나(`hanpilji`)** 로 옮기는 방법입니다.
-AI-PLUG 플레이그라운드(5대 도메인)와 같은 DB를 쓰므로, 한필지의 네 스키마(ops · stg · core · mart)를
-`hanpilji` 하나로 합쳤습니다. 표 · 뷰 · 함수 이름이 겹치는 게 없어서 합쳐도 잃는 것이 없습니다.
+Supabase에 있는 한필지 데이터를 다른 서비스와 같이 쓰는 PostgreSQL 컨테이너 `<컨테이너>`의 DB `<DB>` 안,
+**스키마 `hanpilji`** 로 옮기는 절차입니다. 서버 명령은 사람이 직접 실행합니다. 비밀번호 자리는 `<…>`로 비워 두었습니다.
 
-- 옮긴 뒤에도 웹사이트와 자동 갱신(GitHub Actions)은 Supabase를 그대로 씁니다. 바꾸려면 [6단계](#6-나중에-웹사이트--자동-갱신까지-옮기려면)를 보세요.
-- 이 문서의 명령은 개발서버에서 돌립니다. 클라우드 작업 환경에서는 회사 서버에 접속할 수 없습니다.
+- 정한 이름: 스키마 **`hanpilji`**, 앱 계정 **`hanpilji_app`**(스키마 주인). 웹 · GPT용 읽기 계정 **`hanpilji_gpt`** 를 하나 더 권합니다(조회 함수 · 뷰만 읽고 표는 못 읽음. 지금 Supabase와 같은 구성).
+- 다른 서비스의 스키마와 `public`에는 아무것도 만들지 않습니다. 한필지 객체는 바깥 스키마를 참조하지 않습니다(확인함).
+- 옮긴 뒤에도 웹사이트(Cloud Run)와 자동 갱신(GitHub Actions)은 Supabase를 그대로 씁니다. 바꾸는 법은 [7단계](#7-앱-연결-바꾸기).
 
-## 준비물
+## 1. 지금 DB 파악(이미 확인한 결과)
 
-| 파일 | 어디에 | 쓰임 |
-|---|---|---|
-| `hanpilji_YYYYMMDD_single.dump` | 프로젝트 파일 `hanpilji-data/` | `hanpilji` 스키마 하나로 합친 백업(pg_dump 사용자 지정 형식) |
-| `sql/single_schema/grants.sql` | 이 저장소 | 복원 뒤 GPT 읽기 계정 권한 |
-| `sql/single_schema/check_counts.sql` | 이 저장소 | 복원 뒤 표마다 건수 |
+| 항목 | 값 |
+|---|---|
+| 원래 DB | Supabase, PostgreSQL 17.11 (18 이하 ✓) |
+| 쓰는 확장 | `postgis` 3.3.7 · **`pg_trgm` 1.6** (법령 검색 점수 `word_similarity`와 색인 하나) · `vector` 0.8.2는 설치만 돼 있고 쓰는 열 없음 |
+| 표가 있던 곳 | `public` 아님. 자기 스키마 4개(ops · stg · core · mart) → **이미 `hanpilji` 하나로 합친 백업**을 만들어 둠. 서버에서 임시 DB가 필요 없음 |
+| 크기 | 표 40개 · 562,959줄 · DB 약 322MB · 백업 파일 약 27MB |
+| 객체 수 | 표 40 · 뷰 6 · 함수 20 · 시퀀스 4 · 색인 59 · 트리거 0 · 바깥 스키마를 가리키는 외래키 0 |
+| 함수 본문의 `public.` | 0곳. 함수 17개는 `SECURITY DEFINER` + `SET search_path = pg_catalog, public` (PostGIS · pg_trgm을 `public`에서 찾음) |
+| 공간 · 벡터 열 | 공간: `geo_parcel.geom` · `geo_building.geom` (SRID 5186). 벡터 열은 없음 |
+| 정렬 규칙 | 원래 ICU `en-US` → 서버 `C.UTF-8`. 조회 함수 7개를 C.UTF-8 DB에서 돌려 Supabase와 줄 순서까지 같음을 확인 |
 
-같은 날짜의 `hanpilji_YYYYMMDD.dump`는 지금 구성(네 스키마) 그대로의 백업입니다. Supabase를 되살릴 때 씁니다.
+**확인이 필요한 것 하나:** `pg_trgm`이 대상 DB에 없으면 복원이 멈춥니다. 2단계에서 먼저 조회하고, 없으면 설치 여부를 알려 주세요(공용 DB라 확장 설치는 관리자가 정함).
 
-## 1. 컨테이너
+## 2. 서버 상태 조회(바꾸는 것 없음)
 
-PostgreSQL 17 + PostGIS가 꼭 있어야 합니다(지적도 · 건물 윤곽 표가 `geometry`를 씀). 법령 검색 색인에
-`pg_trgm`도 쓰는데 PostgreSQL에 기본으로 들어 있습니다. AI-PLUG 안내서가 pgvector를 쓰므로 함께 넣는 것을 권합니다.
-
-```dockerfile
-# Dockerfile: PostGIS 공식 이미지에 pgvector만 더함
-FROM postgis/postgis:17-3.5
-RUN apt-get update && apt-get install -y --no-install-recommends postgresql-17-pgvector \
- && rm -rf /var/lib/apt/lists/*
+```bash
+# [PC]
+ssh -p <SSH 포트> <서버 계정>@<서버>
 ```
 
 ```bash
-docker build -t aiplug-postgres .
-docker run -d --name aiplug-db -p 5432:5432 \
-  -e POSTGRES_PASSWORD='<관리자 비밀번호>' -e POSTGRES_DB=aiplug_demo \
-  -v aiplug-pgdata:/var/lib/postgresql/data aiplug-postgres
+# [서버] 확장 · 스키마 · 계정이 지금 어떤지
+docker exec -i <컨테이너> psql -U <관리자> -d <DB> <<'SQL'
+SELECT extname, extversion, extnamespace::regnamespace AS schema FROM pg_extension ORDER BY 1;
+SELECT name, default_version FROM pg_available_extensions WHERE name = 'pg_trgm';
+SELECT nspname FROM pg_namespace WHERE nspname = 'hanpilji';
+SELECT rolname FROM pg_roles WHERE rolname IN ('hanpilji_app', 'hanpilji_gpt');
+SQL
+df -h /data
 ```
 
-이미 컨테이너를 만들었다면 `docker exec aiplug-db psql -U postgres -c "select * from pg_available_extensions where name in ('postgis','vector','pg_trgm')"`
-로 세 확장이 보이는지만 확인하면 됩니다. 아래 명령의 `aiplug-db` · `aiplug_demo`는 실제 컨테이너 · DB 이름으로 바꾸세요.
+바라는 결과: 확장 목록에 `postgis` · `vector`가 `public`에 있고, **`pg_trgm`도 있어야 함**. `hanpilji` 스키마와 두 계정은 아직 없어야 함.
+`pg_trgm`이 첫 목록에 없고 두 번째 조회에만 보이면(PostgreSQL에 기본으로 딸려 있는 확장이라 보통 보임) 알려 주세요.
 
-## 2. 확장 켜기(한 번만)
+## 3. 파일 옮기기
+
+프로젝트 파일 `hanpilji-migration/` 폴더를 PC로 받습니다. 안에 든 것:
+
+| 파일 | 쓰임 |
+|---|---|
+| `hanpilji_20261102_single.dump` | `hanpilji` 스키마만 든 백업(`pg_dump -Fc --no-owner --no-acl -n hanpilji`, 확장 없음) |
+| `grants.sql` | 웹 · GPT 읽기 계정 권한 |
+| `check_counts.sql` | 표 건수 한 줄 지문 |
 
 ```bash
-docker exec -i aiplug-db psql -U postgres -d aiplug_demo -v ON_ERROR_STOP=1 <<'SQL'
-CREATE EXTENSION IF NOT EXISTS postgis;   -- public 스키마에 만듦(백업이 public.geometry를 찾음)
-CREATE EXTENSION IF NOT EXISTS pg_trgm;
-CREATE EXTENSION IF NOT EXISTS vector;    -- 한필지에는 아직 필요 없음. AI-PLUG용
+# [서버] 작업 폴더
+mkdir -p <작업 폴더>
+```
+
+```bash
+# [PC] hanpilji-migration 폴더가 있는 곳에서
+scp -P <SSH 포트> hanpilji-migration/* <서버 계정>@<서버>:<작업 폴더>/
+```
+
+```bash
+# [서버] 받은 파일이 맞는지(크기 약 27MB, sha256은 아래와 같아야 함)
+ls -la <작업 폴더>/
+sha256sum <작업 폴더>/hanpilji_20261102_single.dump
+```
+
+`5be6182386cce9401fe6b8a652d0898bd7e3f2f687e229f159fbbfde4bd71176`
+
+## 4. 계정 · 스키마 만들기
+
+```bash
+# [서버] 비밀번호 두 개 만들기(메모해 두기)
+openssl rand -hex 20   # hanpilji_app
+openssl rand -hex 20   # hanpilji_gpt
+```
+
+```bash
+# [서버] 관리자 계정으로
+docker exec -i <컨테이너> psql -U <관리자> -d <DB> -v ON_ERROR_STOP=1 <<'SQL'
+CREATE ROLE hanpilji_app LOGIN PASSWORD '<hanpilji_app 비밀번호>';
+CREATE ROLE hanpilji_gpt LOGIN PASSWORD '<hanpilji_gpt 비밀번호>';
+CREATE SCHEMA hanpilji AUTHORIZATION hanpilji_app;
+REVOKE ALL ON SCHEMA hanpilji FROM PUBLIC;
+ALTER ROLE hanpilji_app IN DATABASE <DB> SET search_path = hanpilji, public;
+ALTER ROLE hanpilji_gpt IN DATABASE <DB> SET search_path = hanpilji, public;
 SQL
 ```
 
-PostGIS가 이미 다른 스키마(예: `extensions`)에 설치돼 있으면 복원이 `type "public.geometry" does not exist`로 멈춥니다.
-그때는 알려 주세요. 그 스키마에 맞춘 백업을 다시 만들어 드립니다.
+## 5. 복원
 
-## 3. 복원
-
-```bash
-# 다시 넣는 경우만: 예전 hanpilji 스키마를 지움(다른 도메인 스키마는 그대로)
-docker exec aiplug-db psql -U postgres -d aiplug_demo -c "DROP SCHEMA IF EXISTS hanpilji CASCADE"
-
-docker cp hanpilji_YYYYMMDD_single.dump aiplug-db:/tmp/hanpilji.dump
-docker exec aiplug-db pg_restore -U postgres -d aiplug_demo --no-owner --no-acl --exit-on-error /tmp/hanpilji.dump
-docker exec aiplug-db rm /tmp/hanpilji.dump
-docker exec aiplug-db psql -U postgres -d aiplug_demo -c "ANALYZE"   # 꼭 할 것: 통계가 없으면 단지 순위 조회가 5초를 넘겨 끊김
-```
-
-1분 안에 끝납니다(시험 복원 5초. 약 56만 줄, 백업 파일 약 27MB).
-
-## 4. GPT 읽기 계정
-
-웹 · GPT는 `hanpilji_gpt` 계정으로 조회 함수(`q_*`)와 뷰 3개만 읽습니다. 표는 직접 못 읽습니다(Supabase와 같음).
+백업 안에 `CREATE SCHEMA hanpilji`가 들어 있어서, 4단계에서 만든 스키마와 부딪치지 않게 그 한 줄을 뺀 목록(`restore.list`)으로 복원합니다.
+여기서부터는 사람이 덜 쓰는 시간에 하세요(시험 복원은 5초 걸림).
 
 ```bash
-docker exec -i aiplug-db psql -U postgres -d aiplug_demo -v ON_ERROR_STOP=1 < sql/single_schema/grants.sql
-docker exec aiplug-db psql -U postgres -d aiplug_demo -c "ALTER ROLE hanpilji_gpt PASSWORD '<GPT 계정 비밀번호>'"
+# [서버]
+docker cp <작업 폴더>/hanpilji_20261102_single.dump <컨테이너>:/tmp/hanpilji.dump
+docker exec <컨테이너> sh -c \
+  "pg_restore -l /tmp/hanpilji.dump | grep -v ' SCHEMA - hanpilji ' > /tmp/hanpilji.list"
+docker exec <컨테이너> pg_restore -U <관리자> -d <DB> \
+  --no-owner --no-privileges --role=hanpilji_app --single-transaction --exit-on-error \
+  -L /tmp/hanpilji.list /tmp/hanpilji.dump
+docker exec <컨테이너> rm /tmp/hanpilji.dump /tmp/hanpilji.list
 ```
-
-수집기(자동 갱신)용으로 쓰기 계정이 따로 필요하면 `hanpilji` 스키마에만 권한을 주면 됩니다.
-
-```sql
-CREATE ROLE hanpilji_etl LOGIN PASSWORD '<비밀번호>';
-GRANT USAGE, CREATE ON SCHEMA hanpilji TO hanpilji_etl;
-GRANT SELECT, INSERT, UPDATE, DELETE, TRUNCATE ON ALL TABLES IN SCHEMA hanpilji TO hanpilji_etl;
-GRANT USAGE, SELECT, UPDATE ON ALL SEQUENCES IN SCHEMA hanpilji TO hanpilji_etl;
-```
-
-## 5. 확인
 
 ```bash
-docker exec -i aiplug-db psql -U postgres -d aiplug_demo < sql/single_schema/check_counts.sql
+# [서버] 읽기 계정 권한 + hanpilji 표만 통계 갱신(통계가 없으면 단지 순위 조회가 5초 제한에 걸림)
+docker exec -i <컨테이너> psql -U <관리자> -d <DB> -v ON_ERROR_STOP=1 < <작업 폴더>/grants.sql
+docker exec -i <컨테이너> psql -U <관리자> -d <DB> -v ON_ERROR_STOP=1 <<'SQL'
+SELECT format('ANALYZE hanpilji.%I', tablename) FROM pg_tables WHERE schemaname = 'hanpilji' \gexec
+SQL
 ```
 
-아래 표와 건수가 같으면 끝입니다. 이 숫자는 백업을 만든 시점의 Supabase 건수이고, 줄마다 내용까지 같은지 비교했습니다.
-
-<!-- COUNTS -->
-
-조회 함수가 도는지도 한 번 봅니다.
+## 6. 확인
 
 ```bash
-docker exec aiplug-db psql -U postgres -d aiplug_demo -c \
-  "SET ROLE hanpilji_gpt; SELECT count(*) FROM hanpilji.q_law_search('건폐율', NULL)"
+# [서버] 한 줄 지문: 아래 값과 같으면 표 40개 건수가 모두 같음
+docker exec -i <컨테이너> psql -U <관리자> -d <DB> < <작업 폴더>/check_counts.sql
 ```
 
-## 앱을 개발서버에 붙이는 법
+| fingerprint | tables | total_rows |
+|---|---|---|
+| `a36eb2849347a16f16d3ae457eff524d` | 40 | 562959 |
 
-코드는 그대로 두고 환경변수만 바꿉니다. `HANPILJI_DB_SCHEMA=hanpilji`가 있으면 SQL 속 `core.` · `mart.` · `ops.` · `stg.`를
-보내기 직전에 `hanpilji.`로 바꿉니다(`hanpilji/db.py`). 없으면 지금처럼 Supabase 구성으로 돕니다.
+이 값은 2026-11-02 03:07 UTC에 Supabase에서 같은 쿼리로 뽑은 것입니다. 백업은 이때 Supabase를 조회만 해서 복사했고, 표 40개 모두 줄 내용까지 같음을 비교했습니다.
+
+```bash
+# [서버] 공간 열 · 조회 함수 · 막혀야 하는 것
+docker exec -i <컨테이너> psql -U <관리자> -d <DB> <<'SQL'
+SET ROLE hanpilji_app;
+SELECT pnu, ST_SRID(geom) AS srid, round(ST_Area(ST_Transform(geom, 4326)::geography)) AS m2
+FROM hanpilji.geo_parcel ORDER BY pnu LIMIT 1;           -- 1168010100106010000 | 5186 | 494
+RESET ROLE;
+SET ROLE hanpilji_gpt;
+SELECT count(*) FROM hanpilji.q_law_search('건폐율', NULL);   -- 43
+SELECT count(*) FROM hanpilji.fact_deal;                   -- permission denied (표는 못 읽어야 맞음)
+SQL
+```
+
+```bash
+# [서버] 앱 계정으로 접속(컨테이너 안 소켓)해 다른 서비스 스키마(<다른 스키마>) 표 하나를 읽으면 막혀야 함
+docker exec -i <컨테이너> psql -U hanpilji_app -d <DB> <<'SQL'
+SELECT current_user, current_setting('search_path') AS search_path;      -- hanpilji_app | hanpilji, public
+SELECT format('SELECT 1 FROM <다른 스키마>.%I LIMIT 1', tablename) FROM pg_tables WHERE schemaname = '<다른 스키마>' LIMIT 1 \gexec
+-- ERROR:  permission denied for schema <다른 스키마> 가 나오면 맞음
+SQL
+```
+
+벡터 열은 한필지에 아직 없어서 확인할 것이 없습니다.
+
+## 7. 앱 연결 바꾸기
+
+코드에 `public.`을 직접 적은 곳은 없습니다. 대신 SQL이 `core.` · `mart.` · `ops.` · `stg.`를 쓰므로,
+환경변수 `HANPILJI_DB_SCHEMA=hanpilji`를 넣으면 보내기 직전에 `hanpilji.`로 바꿉니다(`hanpilji/db.py`, PR #41). 없으면 지금처럼 Supabase 구성입니다.
 
 | 환경변수 | 값 |
 |---|---|
 | `HANPILJI_DB_SCHEMA` | `hanpilji` |
-| `HANPILJI_DSN` | `postgresql://hanpilji_etl:<비밀번호>@<서버>:5432/aiplug_demo` (수집기) |
-| `HANPILJI_GPT_DSN` | `postgresql://hanpilji_gpt:<비밀번호>@<서버>:5432/aiplug_demo` (웹 · GPT) |
-| `HANPILJI_DB_VIA` | 비움(이 값은 Supabase를 HTTPS로 읽을 때만 씀) |
+| `HANPILJI_DSN` (수집기) | `postgresql://hanpilji_app:<비밀번호>@<서버>:<포트>/<DB>` |
+| `HANPILJI_GPT_DSN` (웹 · GPT) | `postgresql://hanpilji_gpt:<비밀번호>@<서버>:<포트>/<DB>` |
+| `HANPILJI_DB_VIA` | 비움(Supabase를 HTTPS로 읽을 때만 씀) |
 
-## 6. 나중에 웹사이트 · 자동 갱신까지 옮기려면
+웹사이트 · 자동 갱신까지 옮길 때(지금은 하지 않음):
 
-지금은 하지 않습니다. 옮기기로 하면 아래가 바뀝니다.
+1. Cloud Run(Google 서울)과 GitHub Actions 실행기(해외 IP)가 `<서버>:<포트>`에 닿아야 합니다. 회사 방화벽이 막으면 웹사이트는 Supabase에 남깁니다.
+2. Cloud Run 서비스 `hanpilji-git`: `HANPILJI_GPT_DSN` 바꾸고 `HANPILJI_DB_SCHEMA=hanpilji` 추가.
+3. `refresh.yml`: 비밀값 `HANPILJI_DSN`을 위 수집기 주소로, `env`에 `HANPILJI_DB_SCHEMA: hanpilji`. 실행기가 막히면 서버 cron에서 같은 수집기를 돌림.
+4. 그 전까지 Supabase가 원본입니다. 개발서버 사본은 다시 받을 때 5단계를 반복합니다(먼저 `DROP SCHEMA hanpilji CASCADE`를 `hanpilji_app`으로).
 
-1. **접속 경로:** Cloud Run(Google 서울)과 GitHub Actions 실행기(해외 IP)가 개발서버 5432에 닿아야 합니다.
-   회사 내부망 서버라면 방화벽을 열거나 터널을 둬야 하고, 이게 안 되면 웹사이트는 Supabase에 남아야 합니다.
-2. **Cloud Run:** 서비스 `hanpilji-git`의 환경변수 `HANPILJI_GPT_DSN`을 개발서버 주소로, `HANPILJI_DB_SCHEMA=hanpilji`를 추가.
-3. **GitHub Actions(`refresh.yml`):** 비밀값 `HANPILJI_DSN`을 개발서버 쓰기 계정 주소로, `env`에 `HANPILJI_DB_SCHEMA: hanpilji` 추가.
-   개발서버가 해외 IP를 막으면 실행기 대신 개발서버의 cron으로 같은 수집기를 돌립니다(V-World도 이때는 받을 수 있음).
-4. **Supabase:** 아무 것도 접속하지 않으면 무료 플랜은 7일 뒤 멈춥니다. 지워도 되는지는 그때 정합니다.
-   `python -m hanpilji.supabase …`(HTTPS 복원 · 건수 비교)는 Supabase 전용이라 개발서버에는 쓰지 않습니다.
+## 8. 이후 백업
 
-## 백업을 새로 만들 때(클라우드 작업 환경)
+```bash
+# [서버] hanpilji 스키마만. 다른 서비스의 복원 · 동기화가 자기 스키마만 다루면 이 스키마는 그대로 남음
+docker exec <컨테이너> pg_dump -U <관리자> -d <DB> -n hanpilji -Fc -Z 6 --no-owner --no-privileges \
+  -f /tmp/hanpilji_$(date +%Y%m%d).dump
+docker cp <컨테이너>:/tmp/hanpilji_$(date +%Y%m%d).dump <작업 폴더>/
+docker exec <컨테이너> rm /tmp/hanpilji_$(date +%Y%m%d).dump
+```
 
-클라우드에서는 Supabase에 DB로 바로 붙을 수 없어서(HTTPS만 열림) `pg_dump`를 Supabase에 직접 못 겁니다.
-대신 Supabase를 조회만 해서 로컬 PostgreSQL에 그대로 복사한 뒤 백업을 뜹니다. 자동 갱신이 도는 동안에는 숫자가 움직이니
-끝난 뒤에 돌립니다.
+## 백업을 새로 만드는 법(클라우드 작업 환경)
+
+클라우드에서는 Supabase에 DB로 바로 붙을 수 없어서(HTTPS만 열림), Supabase를 조회만 해서 로컬 PostgreSQL에 복사한 뒤 백업을 뜹니다.
+자동 갱신이 Supabase에 쓰는 동안에는 숫자가 움직이니 끝난 뒤에 돌립니다.
 
 ```bash
 apt-get install -y postgresql-16-postgis-3 postgresql-16-pgvector
 createdb hanpilji_mirror
 HANPILJI_DSN=postgresql:///hanpilji_mirror scripts/init_db.sh --postgis --pgvector
 psql -d hanpilji_mirror -c "ALTER TABLE core.dim_building DROP COLUMN geom; ALTER TABLE core.dim_parcel DROP COLUMN geom; ALTER TABLE core.doc_law DROP COLUMN embedding"
-python scripts/supabase_mirror.py --verify                     # Supabase → 로컬, 건수 · 줄 내용 비교
-pg_dump -Fc -Z 6 -d hanpilji_mirror -n ops -n stg -n core -n mart -f hanpilji_YYYYMMDD.dump
-scripts/make_single_schema_dump.sh hanpilji_mirror hanpilji_YYYYMMDD_single.dump
+python scripts/supabase_mirror.py --verify          # Supabase → 로컬, 건수 · 줄 내용 비교
+pg_dump -Fc -Z 6 -d hanpilji_mirror -n ops -n stg -n core -n mart -f hanpilji_YYYYMMDD.dump   # 네 스키마 그대로(Supabase 복원용)
+scripts/make_single_schema_dump.sh hanpilji_mirror hanpilji_YYYYMMDD_single.dump             # hanpilji 하나(개발서버용)
 ```
 
-`ALTER TABLE … DROP COLUMN` 줄은 Supabase에 없는 열 셋(PostGIS · pgvector 선택 파일에서만 만드는 것)을 맞추는 것입니다.
-개발서버가 클라우드에서 닿는 곳이면 서버에서 `pg_dump "$SUPABASE_DSN" …`로 바로 떠도 됩니다.
+`DROP COLUMN` 줄은 Supabase에 없는 선택 열 셋을 맞추는 것입니다.
