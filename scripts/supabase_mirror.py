@@ -15,6 +15,7 @@ import time
 from pathlib import Path
 
 import psycopg
+from psycopg import sql
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 from hanpilji import supabase as s  # noqa: E402
@@ -22,8 +23,23 @@ from hanpilji import supabase as s  # noqa: E402
 GEO_TYPES = ("geometry", "geography", "vector")
 
 
-def q(sql):
-    return s.query(sql, read_only=True, idempotent=True, retries=5)
+def q(text):
+    return s.query(text, read_only=True, idempotent=True, retries=5)
+
+
+def ident(name):
+    """'core.fact_deal' → '"core"."fact_deal"'. 이름은 카탈로그에서 읽은 것이지만 늘 따옴표로 감쌈(Supabase API는 문자열 SQL만 받음)."""
+    return ".".join('"' + part.replace('"', '""') + '"' for part in name.split("."))
+
+
+def table_sql(name):
+    """로컬 실행용 psycopg 식별자."""
+    return sql.Identifier(*name.split("."))
+
+
+def ordered_row(cols):
+    """열 이름 순으로 묶은 행. 두 DB의 열 순서가 달라도(나중에 ADD COLUMN 한 열) 같은 글자가 나오게"""
+    return "ROW(" + ", ".join(ident(c) for c in sorted(cols)) + ")::text"
 
 
 def remote_tables():
@@ -34,22 +50,23 @@ def remote_tables():
 
 def copy_table(conn, t, log=print):
     cols = q(f"""SELECT a.attname c, format_type(a.atttypid, a.atttypmod) ty FROM pg_attribute a
-        WHERE a.attrelid = '{t}'::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum""")
+        WHERE a.attrelid = '{ident(t)}'::regclass AND a.attnum > 0 AND NOT a.attisdropped ORDER BY a.attnum""")
     # 도형은 16진 EWKB 글자로 받음(row_to_json은 GeoJSON으로 바꿔 SRID를 잃음)
     sel = ", ".join(f'"{c["c"]}"::text AS "{c["c"]}"' if c["ty"].startswith(GEO_TYPES) else f'"{c["c"]}"'
                     for c in cols)
     pk = q(f"""SELECT string_agg(quote_ident(a.attname), ',' ORDER BY array_position(i.indkey, a.attnum)) k
         FROM pg_index i JOIN pg_attribute a ON a.attrelid = i.indrelid AND a.attnum = ANY(i.indkey)
-        WHERE i.indrelid = '{t}'::regclass AND i.indisprimary""")[0]["k"] or "ctid"
-    n = int(q(f"SELECT count(*) n FROM {t}")[0]["n"])
-    sample = int(q(f"SELECT coalesce(sum(pg_column_size(x)), 0) b FROM (SELECT * FROM {t} LIMIT 500) x")[0]["b"])
+        WHERE i.indrelid = '{ident(t)}'::regclass AND i.indisprimary""")[0]["k"] or "ctid"
+    n = int(q(f"SELECT count(*) n FROM {ident(t)}")[0]["n"])
+    sample = int(q(f"SELECT coalesce(sum(pg_column_size(x)), 0) b FROM (SELECT * FROM {ident(t)} LIMIT 500) x")[0]["b"])
     per = max(200, min(20000, int(2_500_000 / max(1, sample / 500))))   # 응답 한 번에 약 2.5MB
     got, t0 = 0, time.time()
     for off in range(0, n, per):
         j = q(f"SELECT coalesce(json_agg(row_to_json(x)), '[]')::text j FROM "
-              f"(SELECT {sel} FROM {t} ORDER BY {pk} LIMIT {per} OFFSET {off}) x")[0]["j"]
-        got += conn.execute(f"INSERT INTO {t} SELECT * FROM json_populate_recordset(null::{t}, %s::json)",
-                            (j,)).rowcount
+              f"(SELECT {sel} FROM {ident(t)} ORDER BY {pk} LIMIT {per} OFFSET {off}) x")[0]["j"]
+        stmt = sql.SQL("INSERT INTO {t} SELECT * FROM json_populate_recordset(null::{t}, %s::json)").format(
+            t=table_sql(t))
+        got += conn.execute(stmt, (j,)).rowcount
     log(f"{t}: Supabase {n} · 로컬 {got} ({time.time() - t0:.0f}초)")
     return n, got
 
@@ -58,8 +75,14 @@ def verify(conn, tables, log=print):
     conn.execute("SET timezone = 'UTC'")
     bad = []
     for t in tables:
-        r = {x["h"] for x in q(f"SET timezone = 'UTC'; SELECT md5(x::text) h FROM {t} x")}
-        loc = {x[0] for x in conn.execute(f"SELECT md5(x::text) FROM {t} x")}
+        cols = [r[0] for r in conn.execute(
+            "SELECT attname FROM pg_attribute WHERE attrelid = %s::regclass AND attnum > 0 AND NOT attisdropped",
+            (ident(t),))]
+        row = ordered_row(cols)
+        r = {x["h"] for x in q(f"SET timezone = 'UTC'; SELECT md5({row}) h FROM {ident(t)} x")}
+        local_row = sql.SQL(", ").join(sql.Identifier(c) for c in sorted(cols))
+        loc = {x[0] for x in conn.execute(
+            sql.SQL("SELECT md5(ROW({cols})::text) FROM {t} x").format(cols=local_row, t=table_sql(t)))}
         if r != loc:
             bad.append(t)
             log(f"다름 {t}: Supabase에만 {len(r - loc)}줄 · 로컬에만 {len(loc - r)}줄")
@@ -76,7 +99,7 @@ def main(argv=None):
     with psycopg.connect(a.local, autocommit=True) as conn:
         conn.execute("SET session_replication_role = replica")   # 외래키 검사 없이 넣음(원본이 이미 맞음)
         # 한 번에 비움(표마다 TRUNCATE ... CASCADE 하면 앞서 채운 표가 외래키 따라 같이 비워짐)
-        conn.execute("TRUNCATE " + ", ".join(tables))
+        conn.execute(sql.SQL("TRUNCATE {}").format(sql.SQL(", ").join(table_sql(t) for t in tables)))
         short = []
         for t in tables:
             n, got = copy_table(conn, t)
@@ -85,7 +108,7 @@ def main(argv=None):
         for r in q("SELECT schemaname || '.' || sequencename s, last_value v FROM pg_sequences "
                    "WHERE schemaname IN ('ops', 'stg', 'core')"):
             if r["v"] is not None:
-                conn.execute(f"SELECT setval('{r['s']}', {int(r['v'])}, true)")
+                conn.execute("SELECT setval(%s::regclass, %s, true)", (ident(r["s"]), int(r["v"])))
         if short:
             sys.exit(f"건수 다른 표: {short}")
         if a.verify and verify(conn, tables):
