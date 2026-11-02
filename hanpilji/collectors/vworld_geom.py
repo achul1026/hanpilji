@@ -17,7 +17,7 @@ import sys
 import zipfile
 from pathlib import Path
 
-from hanpilji import ingest
+from hanpilji import db, ingest
 
 SOURCE = "vworld_geom"
 PARCEL_LABEL = "V-World 연속지적도"
@@ -157,13 +157,12 @@ def main(argv=None):
     src.add_argument("--from-dir", metavar="DIR", help="그 zip을 푼 폴더")
     args = ap.parse_args(argv)
 
-    import psycopg
     from hanpilji import config as config_mod
     cfg = config_mod.load(args.config)
     parcels, buildings = collect(read_files(args.from_zip or args.from_dir), args.sigungu)
     print(f"읽음: 필지 {len(parcels):,}개 · 건물 {len(buildings):,}개")
     today = datetime.date.today()
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
         try:
             n_p, n_b = load(conn, parcels, buildings, args.sigungu, today)

@@ -19,9 +19,8 @@ import sys
 import urllib.parse
 import xml.etree.ElementTree as ET
 
-import psycopg
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import datagokr, ingest
 from hanpilji.textnorm import search_text
 
@@ -229,7 +228,7 @@ def main(argv=None, fetch=fetch_default):
         print("주의: 법제처 본문은 테스트 계정(OC=test)으로 요청함(2026-11-01부터 막힘). 개정된 법령의 본문을 받으려면 "
               "open.law.go.kr에서 ID를 받아 LAW_OC로 넣을 것", file=sys.stderr)
     names = args.only or cfg["law"]["names"]
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
         loaded, failed, pending, net_fails = 0, [], [], 0
         for i, name in enumerate(names):

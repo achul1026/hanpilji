@@ -23,7 +23,7 @@ import urllib.parse
 import urllib.request
 import zipfile
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import ingest
 
 SOURCE = "molit_house_price"
@@ -164,12 +164,11 @@ def main(argv=None, portal=None, today=None):
     ap.add_argument("--force", action="store_true", help="이미 넣은 파일이어도 다시 넣음")
     args = ap.parse_args(argv)
 
-    import psycopg
     cfg = config_mod.load(args.config)
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = today or datetime.date.today()
     portal = portal or Portal()
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
         loaded = rejected = 0
         status, note = "done", None

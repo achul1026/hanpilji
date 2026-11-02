@@ -14,9 +14,8 @@ import json
 import sys
 from pathlib import Path
 
-import psycopg
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import ingest
 
 SOURCE = "eum_act_rule"
@@ -94,7 +93,7 @@ def main(argv=None):
     cfg = config_mod.load(args.config)
     data = Path(args.csv_path).read_bytes()
     asof = datetime.date.fromisoformat(args.asof) if args.asof else datetime.date.today()
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
         path, sha = ingest.save_raw(cfg["storage"]["raw_dir"], "eum", Path(args.csv_path).name, data)
         if ingest.already_loaded(conn, SOURCE, sha):

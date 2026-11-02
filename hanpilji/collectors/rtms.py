@@ -22,9 +22,8 @@ import json
 import re
 import sys
 
-import psycopg
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import datagokr, ingest
 
 # base: 매매(trade) · 전월세(rent) 중 어느 쪽 표에 넣는지. source: ops 실행 기록 · stg 원본의 수집처 이름
@@ -298,7 +297,7 @@ def main(argv=None, fetch=datagokr.fetch):
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = datetime.date.today()
     failed_any = stop = False
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         for kind in kinds:
             if stop:
                 break

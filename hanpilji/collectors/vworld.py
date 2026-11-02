@@ -27,7 +27,7 @@ import urllib.error
 import urllib.parse
 from pathlib import Path
 
-from hanpilji import ingest
+from hanpilji import db, ingest
 
 SOURCE = "vworld_ned"
 LAND_LABEL = "V-World 토지특성"
@@ -310,7 +310,6 @@ def main(argv=None, fetch=fetch):
     if args.fetch_only:
         return fetch_only(args.fetch_only, args.out, fetch, args.max_calls)
 
-    import psycopg
     from hanpilji import config as config_mod
     cfg = config_mod.load(args.config)
     vcfg = cfg.get("vworld", {})
@@ -319,7 +318,7 @@ def main(argv=None, fetch=fetch):
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = datetime.date.today()
     caller = DirCaller(args.from_dir) if args.from_dir else Caller(fetch, cfg["storage"]["raw_dir"], max_calls)
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         pnus = args.pnu or [r[0] for r in conn.execute(
             "SELECT pnu FROM core.dim_parcel WHERE left(pnu, 5) = ANY(%s) ORDER BY pnu", (sigungus,)).fetchall()]
         if args.export_pnus:

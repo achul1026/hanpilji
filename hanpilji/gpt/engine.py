@@ -248,8 +248,8 @@ def connect(cfg):
     if os.environ.get("HANPILJI_DB_VIA") == "supabase-api":
         from hanpilji import supabase
         return supabase.SupabaseConn()
-    import psycopg
+    from hanpilji import db
     dsn = os.environ.get("HANPILJI_GPT_DSN") or cfg["db"]["dsn"]
-    conn = psycopg.connect(dsn, autocommit=True, connect_timeout=5,
+    conn = db.connect(dsn, autocommit=True, connect_timeout=5,
                            options="-c default_transaction_read_only=on -c statement_timeout=5000")
     return conn
