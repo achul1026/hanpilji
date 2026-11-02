@@ -1,9 +1,15 @@
-"""법제처 국가법령정보 Open API → stg.law_article · stg.law_annex → core.doc_law.
+"""법제처 국가법령정보 → stg.law_article · stg.law_annex → core.doc_law.
 
     python -m hanpilji.collectors.law [--config config.toml] [--only 건축법]
 
+1) 개정 확인: 공공데이터포털 「법제처 국가법령정보 공유서비스」(data.go.kr 15000115) 법령 목록으로
+   현행 법령일련번호(MST)를 받음. 인증키는 DATA_GO_KR_KEY, IP 등록이 없어 깃허브 실행기에서도 됨.
+2) 본문: MST가 바뀐 법령만 법제처 DRF(lawService.do, OC=LAW_OC)에서 받음. 2026-11-01부터 법제처가
+   테스트 계정(OC=test)과 등록 안 된 IP를 막아서, 본문을 못 받으면 「개정 감지 · 본문 대기」로 남기고
+   커서는 그대로 둠(다음 실행에서 다시 시도). 이건 실패로 치지 않음.
+
 법령마다 한 트랜잭션. 실패한 법령은 커서가 그대로라 다음 실행에서 다시 받음.
-응답 XML 구조는 2026-10-22 실제 응답(OC=test, 17개 법령)으로 확인함.
+응답 XML 구조는 2026-10-22 실제 응답(OC=test, 17개 법령), 목록은 2026-11-02 포털 실제 응답으로 확인함.
 """
 import argparse
 import datetime
@@ -16,15 +22,36 @@ import xml.etree.ElementTree as ET
 import psycopg
 
 from hanpilji import config as config_mod
-from hanpilji import ingest
+from hanpilji import datagokr, ingest
 from hanpilji.textnorm import search_text
 
 SOURCE = "law_go_kr"
 BASE = "http://www.law.go.kr/DRF"
+SEARCH_BASE = "https://apis.data.go.kr/1170000"
 # 법제처는 해외(깃허브 실행기)에서 가끔 응답을 아예 안 줌(2026-10-28 두 번). 한 번에 오래 기다리지 않고,
 # 접속 실패가 이만큼 연달아 나면 남은 법령은 다음 실행으로 넘김(커서가 그대로라 그때 받음)
 fetch_default = functools.partial(ingest.http_get, tries=2, timeout=15)
 MAX_NET_FAILS = 3
+
+
+class BodyPending(RuntimeError):
+    """개정은 확인했지만 법제처 본문을 못 받음(사용자 검증 실패 등). 다음 실행에서 다시 시도."""
+
+
+def search_url(name):
+    return datagokr.build_url("law/lawSearchList.do",
+                              {"target": "law", "query": name, "numOfRows": 100, "pageNo": 1}, base=SEARCH_BASE)
+
+
+def known_mst(conn, name):
+    """마지막으로 넣은 MST. 커서가 없으면(Supabase로 옮길 때 커서가 빠진 법령) 현행 조문 출처에서 읽음."""
+    mst = ingest.get_cursor(conn, SOURCE, f"law:{name}")
+    if mst:
+        return mst
+    row = conn.execute(
+        """SELECT substring(source FROM 'MST ([0-9]+)') FROM core.doc_law
+           WHERE law_name = %s AND is_current ORDER BY effective_date DESC LIMIT 1""", (name,)).fetchone()
+    return row[0] if row else None
 
 
 def _t(el, tag):
@@ -156,15 +183,26 @@ def load_law(conn, run_id, mst, meta, articles, annexes):
 
 def collect_one(conn, cfg, run_id, name, fetch):
     oc = cfg["law"]["oc"]
-    q = urllib.parse.quote(name)
-    search_xml = fetch(f"{BASE}/lawSearch.do?OC={oc}&target=law&type=XML&display=100&query={q}")
+    search_xml = fetch(search_url(name))
+    if b"OpenAPI_ServiceResponse" in search_xml[:300]:  # 포털 게이트웨이 오류(키 미등록 · 한도 초과)
+        datagokr.parse(search_xml)
     found = pick_current(search_xml, name)
     if not found:
         raise LookupError(f"검색 결과에 「{name}」 현행 법령이 없음")
     mst = found["mst"]
-    if ingest.get_cursor(conn, SOURCE, f"law:{name}") == mst:
+    old = known_mst(conn, name)
+    if old == mst:
+        ingest.set_cursor(conn, SOURCE, f"law:{name}", mst)  # 커서가 비어 있던 법령도 채워 둠
+        conn.commit()
         return "skipped", 0
-    body = fetch(f"{BASE}/lawService.do?OC={oc}&target=law&type=XML&MST={mst}")
+    try:
+        body = fetch(f"{BASE}/lawService.do?OC={urllib.parse.quote(oc)}&target=law&type=XML&MST={mst}")
+    except OSError as e:
+        raise BodyPending(f"MST {old} → {mst}, 법제처 본문 접속 실패: {e}") from e
+    if "<법령".encode() not in body[:2000]:  # 2026-11-01부터 OC=test는 「사용자 정보 검증에 실패」 응답
+        why = re.search(r"<result>(.*?)</result>", body.decode("utf-8", "replace"), re.S)
+        raise BodyPending(f"MST {old} → {mst}, 법제처 본문을 못 받음(LAW_OC 확인): "
+                          f"{why.group(1).strip() if why else body[:80].decode('utf-8', 'replace')}")
     path, sha = ingest.save_raw(cfg["storage"]["raw_dir"], "law", f"{name}_{mst}.xml", body)
     if ingest.already_loaded(conn, SOURCE, sha):
         ingest.set_cursor(conn, SOURCE, f"law:{name}", mst)
@@ -188,11 +226,12 @@ def main(argv=None, fetch=fetch_default):
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     if cfg["law"]["oc"] == "test":
-        print("주의: 법제처 테스트 계정(OC=test)으로 요청함. 운영 전에 open.law.go.kr에서 ID를 받아 LAW_OC로 넣을 것", file=sys.stderr)
+        print("주의: 법제처 본문은 테스트 계정(OC=test)으로 요청함(2026-11-01부터 막힘). 개정된 법령의 본문을 받으려면 "
+              "open.law.go.kr에서 ID를 받아 LAW_OC로 넣을 것", file=sys.stderr)
     names = args.only or cfg["law"]["names"]
     with psycopg.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
-        loaded, failed, net_fails = 0, [], 0
+        loaded, failed, pending, net_fails = 0, [], [], 0
         for i, name in enumerate(names):
             if net_fails >= MAX_NET_FAILS:
                 left = names[i:]
@@ -204,6 +243,14 @@ def main(argv=None, fetch=fetch_default):
                 loaded += n
                 net_fails = 0
                 print(f"{status:8} {n:5}조  {name}")
+            except BodyPending as e:  # 개정은 확인함. 본문만 다음에(커서 그대로)
+                conn.rollback()
+                task = ingest.add_task(conn, run_id, SOURCE, f"law:{name}", status="pending")
+                ingest.end_task(conn, task, "pending", str(e)[:500])
+                conn.commit()
+                pending.append(name)
+                net_fails = 0
+                print(f"::warning::개정 감지 · 본문 대기  {name}: {e}")
             except Exception as e:  # 한 법령이 실패해도 나머지는 계속
                 conn.rollback()
                 task = ingest.add_task(conn, run_id, SOURCE, f"law:{name}", status="failed")
@@ -212,8 +259,10 @@ def main(argv=None, fetch=fetch_default):
                 failed.append(name)
                 net_fails = net_fails + 1 if isinstance(e, OSError) else 0  # URLError · 시간 초과 · DNS 실패
                 print(f"failed       {name}: {e}", file=sys.stderr)
+        notes = [("실패: " + ", ".join(failed)) if failed else None,
+                 ("개정 감지 · 본문 대기: " + ", ".join(pending)) if pending else None]
         ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, len(failed),
-                          ("실패: " + ", ".join(failed)) if failed else None)
+                          " / ".join(n for n in notes if n) or None)
     return 1 if failed else 0
 
 

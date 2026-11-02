@@ -71,6 +71,7 @@ jobs:
         timeout-minutes: 30
         run: python -m hanpilji.collectors.onbid
 
+      # 개정 확인은 공공데이터포털(법제처 국가법령정보 공유서비스, DATA_GO_KR_KEY). 바뀐 법령의 본문은 법제처 LAW_OC가 있어야 받음
       - name: 법령
         if: ${{ !cancelled() && env.WHAT == 'weekly' }}
         timeout-minutes: 20
