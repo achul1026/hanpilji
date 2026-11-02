@@ -23,9 +23,8 @@ import sys
 import time
 import xml.etree.ElementTree as ET
 
-import psycopg
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import datagokr, ingest
 
 SOURCE = "dg_bld_hub"
@@ -412,7 +411,7 @@ def main(argv=None, fetch=datagokr.fetch):
     sigungus = args.sigungu or cfg["pilot"]["sigungu"]
     today = datetime.date.today()
     caller = Caller(fetch, cfg["storage"]["raw_dir"], max_calls)
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         pnus = args.pnu or [r[0] for r in conn.execute(
             """SELECT DISTINCT pnu FROM core.dim_complex WHERE pnu IS NOT NULL AND left(pnu, 5) = ANY(%s)
                  AND kind <> '연립다세대' ORDER BY pnu""", (sigungus,)).fetchall()]

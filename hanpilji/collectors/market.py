@@ -23,7 +23,7 @@ import re
 import sys
 import urllib.parse
 
-from hanpilji import ingest
+from hanpilji import db, ingest
 
 REGION = {"전국": "0000000000", "서울": "1100000000", "서울특별시": "1100000000", "강남구": "1168000000"}
 KEYS = {"ecos": "ECOS_KEY", "rone": "RONE_KEY", "kosis": "KOSIS_KEY"}
@@ -335,7 +335,6 @@ def main(argv=None, fetch=fetch, today=None):
     if args.items:
         return items(args.items, fetch)
 
-    import psycopg
     from hanpilji import config as config_mod
     cfg = config_mod.load(args.config)
     mcfg = cfg.get("market", {})
@@ -348,7 +347,7 @@ def main(argv=None, fetch=fetch, today=None):
     series = [s for s in series if s["src"] not in nokey]
     f = Fetcher(fetch, cfg["storage"]["raw_dir"])
     failed, stopped = 0, set()
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         runs = {}
         for s in series:
             src = s["src"]

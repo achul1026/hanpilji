@@ -1,9 +1,12 @@
 """수집처별 마지막 성공 시각을 마크다운 표로 찍음(깃허브 실행 요약용). DB는 HANPILJI_DSN."""
 import os
+import sys
+from pathlib import Path
 
-import psycopg
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+from hanpilji import db  # noqa: E402
 
-with psycopg.connect(os.environ["HANPILJI_DSN"]) as conn:
+with db.connect(os.environ["HANPILJI_DSN"]) as conn:
     rows = conn.execute(
         """SELECT f.source_id, f.name, f.cycle, f.last_success, r.status, r.rows_loaded, r.note
            FROM ops.v_source_freshness f

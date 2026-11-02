@@ -14,9 +14,8 @@ import json
 import re
 import sys
 
-import psycopg
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import datagokr, ingest
 
 SOURCE = "dg_luinfo"
@@ -161,7 +160,7 @@ def main(argv=None, fetch=datagokr.fetch):
     acts = args.act or cfg.get("luinfo", {}).get("acts", [])
     refresh_days = cfg.get("luinfo", {}).get("refresh_days", 30)
     today = datetime.date.today()
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         zones = args.zone or [r[0] for r in conn.execute(
             "SELECT zone_cd FROM core.dim_zone WHERE code_system = 'uq' ORDER BY zone_cd").fetchall()]
         run_id = ingest.start_run(conn, SOURCE)

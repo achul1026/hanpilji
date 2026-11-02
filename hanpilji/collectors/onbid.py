@@ -20,7 +20,7 @@ import json
 import re
 import sys
 
-from hanpilji import config as config_mod
+from hanpilji import db, config as config_mod
 from hanpilji import datagokr, ingest
 
 SOURCE = "onbid"
@@ -220,13 +220,12 @@ def main(argv=None, http_get=ingest.http_get, today=None):
     ap.add_argument("--max-calls", type=int, help="이번 실행의 최대 호출 수")
     args = ap.parse_args(argv)
 
-    import psycopg
     cfg = config_mod.load(args.config)
     ocfg = cfg.get("onbid", {})
     divs = args.div or ocfg.get("prpt_divs", ["0007", "0005", "0010", "0002", "0008"])
     today = today or datetime.date.today()
     f = Fetcher(http_get, cfg["storage"]["raw_dir"], args.max_calls)
-    with psycopg.connect(cfg["db"]["dsn"]) as conn:
+    with db.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
         loaded = rejected = 0
         status, note = "done", None
