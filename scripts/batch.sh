@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 서버 cron용 수집 배치. GitHub Actions(.github/workflows/refresh.yml)와 같은 순서 · 같은 수집기를 돎
+# 서버 cron용 수집 배치(스키마 하나로 합친 DB). GitHub Actions(.github/workflows/refresh.yml)와 같은 순서 · 같은 수집기를 돎
 #   scripts/batch.sh daily|weekly|monthly
 # 설정은 저장소 옆 .env(권한 600)에서 읽음: HANPILJI_DSN · HANPILJI_DB_SCHEMA · DATA_GO_KR_KEY · ECOS_KEY · RONE_KEY · KOSIS_KEY · LAW_OC · VWORLD_KEY …
 # 한 번에 하나만 돎(flock). 단계 하나가 실패해도 다음 단계는 돌고, 끝에 실패가 있으면 종료 코드 1
@@ -20,8 +20,12 @@ fi
 
 # 설정 파일이 없으면 멈춤(없이 돌면 셸에 남은 다른 DB 주소로 쓸 수 있음)
 [ -r "$ENV_FILE" ] || { echo "설정 파일 없음: $ENV_FILE" >> "$LOG"; exit 2; }
+# 셸에서 물려받은 값은 버리고 .env에 적힌 값만 씀
+unset HANPILJI_DSN HANPILJI_GPT_DSN HANPILJI_DB_SCHEMA HANPILJI_DB_VIA
 set -a; . "$ENV_FILE"; set +a
-[ -n "${HANPILJI_DSN:-}" ] || { echo "HANPILJI_DSN 없음" >> "$LOG"; exit 2; }
+[ -n "${HANPILJI_DSN:-}" ] || { echo "$ENV_FILE 에 HANPILJI_DSN 없음" >> "$LOG"; exit 2; }
+# 서버는 스키마 하나(hanpilji) 구성이라 꼭 있어야 함. 없으면 core. · ops. 그대로 보내 전부 실패함
+[ -n "${HANPILJI_DB_SCHEMA:-}" ] || { echo "$ENV_FILE 에 HANPILJI_DB_SCHEMA 없음" >> "$LOG"; exit 2; }
 cd "$ROOT"
 export PYTHONUNBUFFERED=1
 failed=()
