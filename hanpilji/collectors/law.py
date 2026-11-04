@@ -35,6 +35,7 @@ SEARCH_BASE = "https://apis.data.go.kr/1170000"
 # 접속 실패가 이만큼 연달아 나면 남은 법령은 다음 실행으로 넘김(커서가 그대로라 그때 받음)
 fetch_default = functools.partial(ingest.http_get, tries=2, timeout=15)
 MAX_NET_FAILS = 3
+KST = datetime.timezone(datetime.timedelta(hours=9))   # 한국 표준시(서머타임 없음). 서버 이미지에 tzdata가 없어도 됨
 
 
 class BodyPending(RuntimeError):
@@ -57,10 +58,15 @@ def known_mst(conn, name):
     return row[0] if row else None
 
 
+def today_kst():
+    """시행일은 한국 날짜 기준. 깃허브 실행기(UTC)는 월요일 05:07 KST에 아직 일요일이라 따로 맞춤."""
+    return datetime.datetime.now(KST).date()
+
+
 def has_future_current(conn, name):
     """현행으로 표시된 조문이 아직 시행 전인가(예전 수집기가 target=law로 시행 전 판을 넣은 경우)."""
-    return conn.execute("SELECT 1 FROM core.doc_law WHERE law_name = %s AND is_current AND effective_date > current_date "
-                        "LIMIT 1", (name,)).fetchone() is not None
+    return conn.execute("SELECT 1 FROM core.doc_law WHERE law_name = %s AND is_current AND effective_date > %s "
+                        "LIMIT 1", (name, today_kst())).fetchone() is not None
 
 
 def body_url(oc, mst, efyd):
@@ -182,7 +188,7 @@ def load_law(conn, run_id, mst, meta, articles, annexes):
             "UPDATE core.doc_law SET is_current = false WHERE law_id = %s AND effective_date <> %s",
             (meta["law_id"], eff),
         )
-        today = datetime.date.today()
+        today = today_kst()
         cur.executemany(
             """INSERT INTO core.doc_law (article_id, law_id, law_name, law_kind, article_no, article_title,
                    body, search_text, effective_date, is_current, source, asof)
@@ -221,16 +227,20 @@ def collect_one(conn, cfg, run_id, name, fetch):
         why = re.search(r"<result>(.*?)</result>", body.decode("utf-8", "replace"), re.S)
         raise BodyPending(f"MST {old} → {mst}, 법제처 본문을 못 받음(LAW_OC 확인): "
                           f"{why.group(1).strip() if why else body[:80].decode('utf-8', 'replace')}")
-    eff = re.search("<시행일자>(\\d{8})<".encode(), body[:3000])  # 기본정보의 시행일자(조문시행일자로는 못 거름)
-    if eff and _date(eff.group(1).decode()) > datetime.date.today():
-        raise BodyPending(f"MST {mst}: 시행 전 판(시행일 {eff.group(1).decode()})이 와서 넣지 않음")
+    meta, articles, annexes = parse_law(body)
+    # 기본정보의 시행일자로 거름(조문시행일자로는 못 거름). 날짜가 없거나 이상하면 넣지 않음
+    try:
+        eff = _date(meta["effective_date"] or "")
+    except ValueError:   # 없음 · 8자리가 아님 · 없는 날짜(20261340 등)
+        eff = None
+    if eff is None or eff > today_kst():
+        raise BodyPending(f"MST {mst}: 시행 전 판이거나 시행일을 모름(시행일 {meta['effective_date']}) → 넣지 않음")
     path, sha = ingest.save_raw(cfg["storage"]["raw_dir"], "law", f"{name}_{mst}.xml", body)
     if ingest.already_loaded(conn, SOURCE, sha) and not future:
         ingest.set_cursor(conn, SOURCE, f"law:{name}", mst)
         conn.commit()
         return "skipped", 0
     task = ingest.add_task(conn, run_id, SOURCE, f"law:{name}", path, sha)
-    meta, articles, annexes = parse_law(body)
     if not articles:
         raise ValueError(f"「{name}」 조문 0개 — 응답 형식 확인 필요")
     n = load_law(conn, run_id, mst, meta, articles, annexes)
