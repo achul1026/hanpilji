@@ -25,7 +25,7 @@ import xml.etree.ElementTree as ET
 
 
 from hanpilji import db, config as config_mod
-from hanpilji import datagokr, ingest
+from hanpilji import datagokr, ingest, regions
 
 SOURCE = "dg_bld_hub"
 SOURCE_LABEL = "건축HUB 건축물대장"
@@ -397,7 +397,7 @@ def resolve_unmatched(conn, caller, run_id, sigungus, asof, log=print):
 def main(argv=None, fetch=datagokr.fetch):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
-    ap.add_argument("--sigungu", action="append", help="시군구 5자리(기본: config [pilot])")
+    ap.add_argument("--sigungu", action="append", help="시군구 5자리 또는 seoul(서울 25개 구). 기본: config [pilot]")
     ap.add_argument("--pnu", action="append", help="이 필지만(기본: 단지 PNU 전부)")
     ap.add_argument("--max-calls", type=int, help="이번 실행의 최대 호출 수(하루 한도를 나눠 쓸 때)")
     ap.add_argument("--refresh", action="store_true", help="최근에 받은 필지도 다시 받음")
@@ -408,7 +408,7 @@ def main(argv=None, fetch=datagokr.fetch):
     bcfg = cfg.get("bld", {})
     refresh_days = bcfg.get("refresh_days", 30)
     max_calls = args.max_calls if args.max_calls is not None else bcfg.get("max_calls")
-    sigungus = args.sigungu or cfg["pilot"]["sigungu"]
+    sigungus = regions.expand(args.sigungu or cfg["pilot"]["sigungu"])
     today = datetime.date.today()
     caller = Caller(fetch, cfg["storage"]["raw_dir"], max_calls)
     with db.connect(cfg["db"]["dsn"]) as conn:

@@ -61,3 +61,31 @@ class ShRent(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+DSN = __import__("os").environ.get("HANPILJI_TEST_DSN")
+
+
+@unittest.skipUnless(DSN, "HANPILJI_TEST_DSN 없음")
+class DailyLimit(unittest.TestCase):
+    def test_limit_stops_only_that_kind_and_is_not_failure(self):
+        import tempfile
+        from hanpilji import datagokr
+        from tests.test_stage1 import fixture_fetch
+        calls = []
+
+        def fetch(path, params):
+            calls.append(path)
+            if "OffiTrade" in path:
+                raise datagokr.ApiError("22 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS_ERROR")
+            return fixture_fetch(path, params)
+
+        with tempfile.TemporaryDirectory() as tmp:
+            cfg = Path(tmp) / "config.toml"
+            cfg.write_text(f'[db]\ndsn = "{DSN}"\n[storage]\nraw_dir = "{tmp}/raw"\n[pilot]\nsigungu = ["11680"]\n'
+                           '[law]\noc = "test"\n')
+            rc = rtms.main(["--config", str(cfg), "--months", "2", "--only", "offi_trade", "--only", "offi_rent"],
+                           fetch=fetch)
+        self.assertEqual(rc, 0, "하루 한도는 실패가 아님(내일 이어 받음)")
+        self.assertEqual(sum("OffiTrade" in c for c in calls), 1, "한도에 닿으면 그 종류는 바로 멈춤")
+        self.assertTrue(any("OffiRent" in c for c in calls), "다른 종류(따로 한도)는 계속")

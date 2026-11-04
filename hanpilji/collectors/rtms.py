@@ -347,6 +347,7 @@ def main(argv=None, fetch=datagokr.fetch):
             src = KINDS[kind]["source"]
             run_id = ingest.start_run(conn, src)
             total_loaded = total_rejected = failed = 0
+            quota_note = None
             finished = False
             try:
                 for sgg in sigungus:
@@ -369,14 +370,20 @@ def main(argv=None, fetch=datagokr.fetch):
                             t = ingest.add_task(conn, run_id, src, ckey, status="failed")
                             ingest.end_task(conn, t, "failed", str(e)[:500])
                             conn.commit()
+                            if datagokr.is_daily_limit(e):
+                                # 하루 한도는 API마다 따로라 이 종류만 멈추고 다음 종류는 계속. 커서가 남아 내일 이어 받으므로
+                                # 실패로 세지 않음(서울 36개월을 처음 채울 때는 며칠 동안 날마다 생김)
+                                quota_note = f"하루 한도에 닿아 멈춤({sgg} {ym}부터 내일 이어 받음)"
+                                print(f"{kind}: {quota_note}", file=sys.stderr)
+                                break
                             failed += 1
                             print(f"failed {kind} {sgg} {ym}: {e}", file=sys.stderr)
-                            if datagokr.is_fatal(e):  # 키 · 한도 문제는 다음 호출도 똑같이 실패하므로 전부 멈춤
+                            if datagokr.is_fatal(e):  # 키 문제는 다음 호출도 똑같이 실패하므로 전부 멈춤
                                 stop = True
                                 break
-                    if stop:
+                    if stop or quota_note:
                         break
-                ingest.finish_run(conn, run_id, "failed" if failed else "done", total_loaded, total_rejected)
+                ingest.finish_run(conn, run_id, "failed" if failed else "done", total_loaded, total_rejected, quota_note)
                 finished = True
             finally:
                 if not finished:  # 예상 못 한 오류 · 중단(Ctrl+C)에도 실행 기록을 「running」으로 남기지 않음
