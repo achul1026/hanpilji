@@ -21,6 +21,13 @@ class ApiError(RuntimeError):
     """포털 · 기관 쪽 오류 응답(키 미등록, 한도 초과 등)."""
 
 
+def is_daily_limit(e):
+    """하루 호출 한도에 닿은 오류(공공데이터포털 22 LIMITED_NUMBER_OF_SERVICE_REQUESTS_EXCEEDS · 429)."""
+    if isinstance(e, ApiError):
+        return "LIMIT" in str(e).upper()
+    return isinstance(e, urllib.error.HTTPError) and e.code == 429
+
+
 def is_fatal(e):
     """다음 호출도 똑같이 실패할 오류(키 · 한도 · 429)면 True — 수집을 멈춰야 함."""
     if isinstance(e, ApiError):

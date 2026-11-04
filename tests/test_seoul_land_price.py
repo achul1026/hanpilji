@@ -44,9 +44,18 @@ class Offline(unittest.TestCase):
 
 @unittest.skipUnless(DSN, "HANPILJI_TEST_DSN 없음")
 class Load(unittest.TestCase):
+    @staticmethod
+    def _cleanup():
+        """다른 DB 시험(법정동 코드표를 지우는 것 등)이 이 시험의 필지에 걸리지 않게 넣은 줄을 지움."""
+        with psycopg.connect(DSN, autocommit=True) as c:
+            c.execute("DELETE FROM core.fact_land_price WHERE pnu LIKE '11%'")
+            c.execute("DELETE FROM core.dim_parcel WHERE pnu LIKE '11%%' AND source IN ('t', %s)", (s.SOURCE_LABEL,))
+            c.execute("DELETE FROM core.dim_region WHERE lawd_cd LIKE '11%%' AND source IN ('t', %s)", (s.SOURCE_LABEL,))
+
     def test_load_twice_and_keep_other_sources(self):
         tmp = tempfile.mkdtemp()
         self.addCleanup(shutil.rmtree, tmp)
+        self.addCleanup(self._cleanup)
         cfg = Path(tmp) / "config.toml"
         cfg.write_text(f'[db]\ndsn = "{DSN}"\n[storage]\nraw_dir = "{tmp}/raw"\n[pilot]\nsigungu = ["11680"]\n[law]\noc = "test"\n')
         files = {2026: {"seq": "93", "updated": "2026-09-03"}}
