@@ -188,7 +188,7 @@ def load_law(conn, run_id, mst, meta, articles, annexes):
             "UPDATE core.doc_law SET is_current = false WHERE law_id = %s AND effective_date <> %s",
             (meta["law_id"], eff),
         )
-        today = datetime.date.today()
+        today = today_kst()
         cur.executemany(
             """INSERT INTO core.doc_law (article_id, law_id, law_name, law_kind, article_no, article_title,
                    body, search_text, effective_date, is_current, source, asof)
@@ -229,7 +229,11 @@ def collect_one(conn, cfg, run_id, name, fetch):
                           f"{why.group(1).strip() if why else body[:80].decode('utf-8', 'replace')}")
     meta, articles, annexes = parse_law(body)
     # 기본정보의 시행일자로 거름(조문시행일자로는 못 거름). 날짜가 없거나 이상하면 넣지 않음
-    if not re.fullmatch(r"\d{8}", meta["effective_date"] or "") or _date(meta["effective_date"]) > today_kst():
+    try:
+        eff = _date(meta["effective_date"] or "")
+    except ValueError:   # 없음 · 8자리가 아님 · 없는 날짜(20261340 등)
+        eff = None
+    if eff is None or eff > today_kst():
         raise BodyPending(f"MST {mst}: 시행 전 판이거나 시행일을 모름(시행일 {meta['effective_date']}) → 넣지 않음")
     path, sha = ingest.save_raw(cfg["storage"]["raw_dir"], "law", f"{name}_{mst}.xml", body)
     if ingest.already_loaded(conn, SOURCE, sha) and not future:
