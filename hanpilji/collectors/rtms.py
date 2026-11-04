@@ -1,6 +1,6 @@
 """국토교통부 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
 
-    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent|offi_trade|offi_rent|rh_trade|rh_rent]
+    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent|offi_trade|offi_rent|rh_trade|rh_rent|sh_rent]
                                                           [--sigungu 11680]
 
 시군구 x 계약월 x 종류마다 한 트랜잭션. 끝난 달은 커서에 남겨 다시 받지 않되,
@@ -46,6 +46,11 @@ KINDS = {
                 "label": "연립다세대", "base": "rent", "src": "국토교통부 연립다세대 전월세 실거래가"},
     "sh_rent": {"source": "dg_sh_rent", "path": "RTMSDataSvcSHRent/getRTMSDataSvcSHRent",
                 "label": "단독다가구", "base": "rent", "src": "국토교통부 단독/다가구 전월세 실거래가"},
+}
+# 이미 만들어 둔 DB(Supabase · 개발서버)에는 sql/09_stage1.sql의 새 수집처 줄이 없을 수 있어, 처음 돌 때 넣음
+NEW_SOURCES = {
+    "dg_sh_rent": ("단독/다가구 전월세 실거래가 자료", "국토교통부", "api", 10000, "UTF-8", "매일", "이용허락범위 제한 없음",
+                   "https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=단독/다가구 전월세 실거래가"),
 }
 # 단지가 없는 종류(단독 · 다가구는 지번도 응답에 없음): 거래를 법정동에만 붙이고 dim_complex는 만들지 않음
 NO_COMPLEX = {"sh_rent"}
@@ -206,6 +211,16 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
     src, label, base, src_label = (KINDS[kind][k] for k in ("source", "label", "base", "src"))
     loaded = rejected = 0
     seen, keys = {}, []
+    # 단지 없는 종류는 법정동 코드가 응답에 없을 수 있어 동 이름 → 코드표(core.dim_region)를 한 번에 읽어 둠.
+    # 같은 이름이 둘 이상이면(코드 변경 등) 어느 쪽인지 몰라 넣지 않음(시군구 단위로 남음)
+    dong_codes = {}
+    if kind in NO_COMPLEX:
+        counts = {}
+        for code, emd in conn.execute("SELECT lawd_cd, emd FROM core.dim_region WHERE left(lawd_cd, 5) = %s AND emd IS NOT NULL",
+                                      (sigungu,)).fetchall():
+            counts[emd] = counts.get(emd, 0) + 1
+            dong_codes[emd] = code
+        dong_codes = {k: c for k, c in dong_codes.items() if counts[k] == 1}
     # 파이프라인: 줄마다 응답을 기다리지 않고 몰아 보냄. 원격 DB(Supabase)에서는 왕복 수천 번이 몇 번으로 줄어듦
     with conn.pipeline(), conn.cursor() as cur:
         cur.execute("DELETE FROM stg.rtms_raw WHERE source_id = %s AND sigungu_cd = %s AND deal_ym = %s",
@@ -229,12 +244,8 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                 continue
             v["deal_id" if base == "trade" else "rent_id"] = key
             keys.append(key)
-            if kind in NO_COMPLEX and v["lawd_cd"].endswith("00000") and _s(row, "umdNm"):
-                # 법정동 코드가 응답에 없으면 동 이름으로 코드표(core.dim_region)에서 찾음. 없으면 시군구 단위 그대로
-                hit = cur.execute("""SELECT lawd_cd FROM core.dim_region WHERE left(lawd_cd, 5) = %s AND emd = %s
-                                     ORDER BY lawd_cd LIMIT 1""", (sigungu, _s(row, "umdNm"))).fetchone()
-                if hit:
-                    v["lawd_cd"] = hit[0]
+            if v["lawd_cd"].endswith("00000") and dong_codes.get(_s(row, "umdNm")):
+                v["lawd_cd"] = dong_codes[_s(row, "umdNm")]
             _ensure_dims(cur, v["lawd_cd"], row, asof, label, complex_too=kind not in NO_COMPLEX)
             if base == "trade":
                 cur.execute(
@@ -302,6 +313,17 @@ def months_back(n, today=None):
     return out
 
 
+def ensure_sources(conn, source_ids):
+    """NEW_SOURCES 중 이번에 쓸 수집처가 ops.ingest_source에 없으면 넣음(있으면 그대로)."""
+    for sid in source_ids:
+        if sid in NEW_SOURCES:
+            conn.execute(
+                """INSERT INTO ops.ingest_source (source_id, name, operator, method, daily_limit, encoding, cycle, license, url)
+                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s) ON CONFLICT (source_id) DO NOTHING""",
+                (sid, *NEW_SOURCES[sid]))
+    conn.commit()
+
+
 def main(argv=None, fetch=datagokr.fetch):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
@@ -318,6 +340,7 @@ def main(argv=None, fetch=datagokr.fetch):
     today = datetime.date.today()
     failed_any = stop = False
     with db.connect(cfg["db"]["dsn"]) as conn:
+        ensure_sources(conn, [KINDS[k]["source"] for k in kinds])
         for kind in kinds:
             if stop:
                 break
