@@ -21,7 +21,7 @@ fi
 # 설정 파일이 없으면 멈춤(없이 돌면 셸에 남은 다른 DB 주소로 쓸 수 있음)
 [ -r "$ENV_FILE" ] || { echo "설정 파일 없음: $ENV_FILE" >> "$LOG"; exit 2; }
 # 셸에서 물려받은 값은 버리고 .env에 적힌 값만 씀
-unset HANPILJI_DSN HANPILJI_GPT_DSN HANPILJI_DB_SCHEMA HANPILJI_DB_VIA
+unset HANPILJI_DSN HANPILJI_GPT_DSN HANPILJI_DB_SCHEMA HANPILJI_DB_VIA HANPILJI_BATCH_SKIP
 set -a; . "$ENV_FILE"; set +a
 [ -n "${HANPILJI_DSN:-}" ] || { echo "$ENV_FILE 에 HANPILJI_DSN 없음" >> "$LOG"; exit 2; }
 # 서버는 스키마 하나(hanpilji) 구성이라 꼭 있어야 함. 없으면 core. · ops. 그대로 보내 전부 실패함
@@ -30,10 +30,15 @@ cd "$ROOT"
 export PYTHONUNBUFFERED=1
 failed=()
 
-# .env의 HANPILJI_BATCH_SKIP="apt onbid bld" 처럼 적은 작업은 건너뜀
-# (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때)
+# .env의 HANPILJI_BATCH_SKIP="apt onbid" 처럼 적은 작업은 건너뜀
+# (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
+# bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
+KEYS="apt offi rh onbid law market bld luinfo house_price freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
+for k in $SKIP; do
+  [[ " $KEYS " == *" $k "* ]] || echo "!! HANPILJI_BATCH_SKIP의 '$k'는 없는 키라 무시함 (쓸 수 있는 키: $KEYS)" >> "$LOG"
+done
 
 step() {   # step <키> <이름> <제한 분> <명령…>
   local key="$1" name="$2" mins="$3"; shift 3
