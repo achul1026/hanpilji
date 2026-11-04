@@ -118,7 +118,15 @@ INSERT INTO core.ref_permit_zone (zone_id, name, event_id, sigungu, emd, target,
   '2025-10-20', '2026-12-31',
   '아파트를 사려면 구청 허가를 받아야 하고, 산 뒤 2년은 직접 살아야 함(전세를 끼고 사는 갭투자 불가)',
   '부동산 거래신고 등에 관한 법률', '제10조', 'SBS Biz 보도(10·15 대책, 10월 20일부터 2026년 12월 31일까지)',
-  'https://biz.sbs.co.kr/amp/article/20000266053', '2026-10-30')
+  'https://biz.sbs.co.kr/amp/article/20000266053', '2026-10-30'),
+ -- 2021-04-27 처음 지정된 뒤 해마다 다시 지정돼 끊김 없이 이어짐. 동 전체가 아니라 동 안의 지정 구역만이라 뜻에 적어 둠
+ ('2021-04-27-apgujeong-yeouido-mokdong-seongsu', '압구정 · 여의도 · 목동 · 성수 토지거래허가구역', NULL,
+  '{11680,11560,11470,11200}', '{압구정동,여의도동,목동,신정동,성수동1가,성수동2가}', '아파트',
+  '2021-04-27', '2027-04-26',
+  '동 전체가 아니라 압구정 아파트지구 · 여의도 아파트지구 · 목동 택지개발지구 아파트 단지 · 성수전략정비구역 안만 해당. '
+  '주거지역 6㎡(상업지역 15㎡)를 넘는 땅을 사려면 구청 허가를 받아야 하고, 주택은 산 뒤 2년 직접 살아야 함',
+  '부동산 거래신고 등에 관한 법률', '제10조', '헤럴드경제 보도(서울시 공고 제2026-1141호, 2026-04-27부터 2027-04-26까지 1년 연장)',
+  'https://www.heraldk.com/article/2026040117000042686', '2026-11-04')
 ON CONFLICT (zone_id) DO UPDATE SET name = excluded.name, event_id = excluded.event_id, sigungu = excluded.sigungu,
     emd = excluded.emd, target = excluded.target, start_date = excluded.start_date, end_date = excluded.end_date,
     rule = excluded.rule, law_name = excluded.law_name, article_no = excluded.article_no, source = excluded.source,

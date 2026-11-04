@@ -54,6 +54,16 @@ class LawParseReal(unittest.TestCase):
         a7 = arts[labels.index("제7조")]
         self.assertIn("20분의 1", a7["body"])
 
+    def test_body_url_asks_effective_version(self):
+        x = (FIX / "law_search_real.xml").read_bytes()
+        found = law.pick_current(x, "주택임대차보호법")
+        self.assertEqual(found["effective_date"], "20260102")
+        url = law.body_url("abc", found["mst"], found["effective_date"])
+        self.assertIn("target=eflaw", url)
+        self.assertIn("efYd=20260102", url)
+        self.assertIn("MST=276291", url)
+        self.assertIn("target=law&", law.body_url("abc", "1", None) + "&")
+
 
 if __name__ == "__main__":
     unittest.main()
