@@ -96,6 +96,30 @@ class Pipeline(unittest.TestCase):
         self.assertEqual(self.q("SELECT cursor_value FROM ops.ingest_cursor WHERE cursor_key = 'law:주택임대차보호법 시행령'"),
                          before)
 
+    def test_3d_future_version_is_refetched_and_not_loaded(self):
+        """시행 전 판이 현행으로 들어가 있으면 MST가 같아도 다시 받고, 또 시행 전 판이 오면 넣지 않음."""
+        self.assertEqual(law.main(["--config", self.cfg], fetch=fake_fetch), 0)
+        self.q("UPDATE core.doc_law SET effective_date = current_date + 100, article_id = article_id || ':f' WHERE law_name = '주택임대차보호법 시행령'")
+        urls = []
+
+        def future(url):
+            urls.append(url)
+            if "lawSearch" in url:
+                return fake_fetch(url)
+            return fake_fetch(url).replace("<시행일자>20260101".encode(), "<시행일자>20991231".encode())
+
+        self.assertEqual(law.main(["--config", self.cfg], fetch=future), 0)
+        self.assertTrue(any("target=eflaw" in u and "efYd=20260101" in u for u in urls), urls)
+        st = self.q("SELECT status, error FROM ops.ingest_task WHERE task_key = 'law:주택임대차보호법 시행령' ORDER BY task_id DESC LIMIT 1")
+        self.assertEqual(st[0][0], "pending")
+        self.assertIn("시행 전", st[0][1])
+        # 제대로 된 현행 판이 오면 다시 넣고, 시행 전 판은 현행에서 내려감
+        self.assertEqual(law.main(["--config", self.cfg], fetch=fake_fetch), 0)
+        self.assertEqual(self.q("SELECT count(*) FROM core.doc_law WHERE law_name = '주택임대차보호법 시행령' "
+                                "AND is_current AND effective_date > current_date")[0][0], 0)
+        self.assertGreater(self.q("SELECT count(*) FROM core.doc_law WHERE law_name = '주택임대차보호법 시행령' "
+                                  "AND is_current")[0][0], 0)
+
     def test_3c_gateway_error_is_failure(self):
         err = (b'<?xml version="1.0" encoding="UTF-8"?><OpenAPI_ServiceResponse><cmmMsgHeader>'
                b'<errMsg>SERVICE_KEY_IS_NOT_REGISTERED_ERROR</errMsg><returnReasonCode>30</returnReasonCode>'

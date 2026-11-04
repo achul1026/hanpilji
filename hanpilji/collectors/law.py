@@ -4,7 +4,11 @@
 
 1) 개정 확인: 공공데이터포털 「법제처 국가법령정보 공유서비스」(data.go.kr 15000115) 법령 목록으로
    현행 법령일련번호(MST)를 받음. 인증키는 DATA_GO_KR_KEY, IP 등록이 없어 깃허브 실행기에서도 됨.
-2) 본문: MST가 바뀐 법령만 법제처 DRF(lawService.do, OC=LAW_OC)에서 받음. 2026-11-01부터 법제처가
+2) 본문: MST가 바뀐 법령만 법제처 DRF(lawService.do, OC=LAW_OC)에서 받음.
+   target=law&MST= 로 부르면 시행 전 판(예: 주택법 2026-09-08 현행 대신 2027-03-09 판)이 와서,
+   target=eflaw&MST=&efYd=<검색 결과의 시행일자> 로 현행 시행본을 받음(2026-11-04 확인).
+   그래도 시행일이 오늘 뒤인 판이 오면 넣지 않고 「본문 대기」로 둠. 이미 시행 전 판이 현행으로 들어간 법령은
+   MST가 같아도 다시 받음. 2026-11-01부터 법제처가
    테스트 계정(OC=test)과 등록 안 된 IP를 막아서, 본문을 못 받으면 「개정 감지 · 본문 대기」로 남기고
    커서는 그대로 둠(다음 실행에서 다시 시도). 이건 실패로 치지 않음.
 
@@ -53,6 +57,19 @@ def known_mst(conn, name):
     return row[0] if row else None
 
 
+def has_future_current(conn, name):
+    """현행으로 표시된 조문이 아직 시행 전인가(예전 수집기가 target=law로 시행 전 판을 넣은 경우)."""
+    return conn.execute("SELECT 1 FROM core.doc_law WHERE law_name = %s AND is_current AND effective_date > current_date "
+                        "LIMIT 1", (name,)).fetchone() is not None
+
+
+def body_url(oc, mst, efyd):
+    """현행 시행본 본문 주소. 시행일자를 모르면 예전 방식(target=law)으로 부르고, 받은 판의 시행일을 따로 확인함."""
+    q = {"OC": oc, "type": "XML", "MST": mst}
+    q.update({"target": "eflaw", "efYd": efyd} if efyd else {"target": "law"})
+    return f"{BASE}/lawService.do?" + urllib.parse.urlencode(q)
+
+
 def _t(el, tag):
     v = el.findtext(tag)
     return v.strip() if v else None
@@ -68,7 +85,8 @@ def pick_current(search_xml: bytes, name):
             continue
         if (_t(law, "현행연혁코드") or "현행") != "현행":
             continue
-        return {"mst": _t(law, "법령일련번호"), "law_id": _t(law, "법령ID"), "kind": _t(law, "법령구분명")}
+        return {"mst": _t(law, "법령일련번호"), "law_id": _t(law, "법령ID"), "kind": _t(law, "법령구분명"),
+                "effective_date": _t(law, "시행일자")}
     return None
 
 
@@ -190,20 +208,24 @@ def collect_one(conn, cfg, run_id, name, fetch):
         raise LookupError(f"검색 결과에 「{name}」 현행 법령이 없음")
     mst = found["mst"]
     old = known_mst(conn, name)
-    if old == mst:
+    future = has_future_current(conn, name)
+    if old == mst and not future:
         ingest.set_cursor(conn, SOURCE, f"law:{name}", mst)  # 커서가 비어 있던 법령도 채워 둠
         conn.commit()
         return "skipped", 0
     try:
-        body = fetch(f"{BASE}/lawService.do?OC={urllib.parse.quote(oc)}&target=law&type=XML&MST={mst}")
+        body = fetch(body_url(oc, mst, found.get("effective_date")))
     except OSError as e:
         raise BodyPending(f"MST {old} → {mst}, 법제처 본문 접속 실패: {e}") from e
     if "<법령".encode() not in body[:2000]:  # 2026-11-01부터 OC=test는 「사용자 정보 검증에 실패」 응답
         why = re.search(r"<result>(.*?)</result>", body.decode("utf-8", "replace"), re.S)
         raise BodyPending(f"MST {old} → {mst}, 법제처 본문을 못 받음(LAW_OC 확인): "
                           f"{why.group(1).strip() if why else body[:80].decode('utf-8', 'replace')}")
+    eff = re.search("<시행일자>(\\d{8})<".encode(), body[:3000])  # 기본정보의 시행일자(조문시행일자로는 못 거름)
+    if eff and _date(eff.group(1).decode()) > datetime.date.today():
+        raise BodyPending(f"MST {mst}: 시행 전 판(시행일 {eff.group(1).decode()})이 와서 넣지 않음")
     path, sha = ingest.save_raw(cfg["storage"]["raw_dir"], "law", f"{name}_{mst}.xml", body)
-    if ingest.already_loaded(conn, SOURCE, sha):
+    if ingest.already_loaded(conn, SOURCE, sha) and not future:
         ingest.set_cursor(conn, SOURCE, f"law:{name}", mst)
         conn.commit()
         return "skipped", 0
