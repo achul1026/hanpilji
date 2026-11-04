@@ -9,11 +9,12 @@ CSV는 CP949, 열은 시도명 · 시군구명 · 법정동명 · 토지코드(P
 필지구분 1(토지) · 2(임야)만 넣음. 가지번 · 블럭지번 · 기타지번(코드 3~9, 0.2%)은 PNU가 아니라 뺌.
 필지(core.dim_parcel) · 법정동(core.dim_region)이 없으면 같이 만듦(법정동 이름도 채워짐).
 같은 필지 · 같은 해를 V-World 등 다른 수집처가 이미 넣었으면 그대로 둠(이 수집처 줄만 고침).
-화면의 파일 목록에서 해마다 파일 번호(seq)와 수정일을 읽어, 바뀐 해만 다시 받음(커서).
+화면의 파일 목록에서 해마다 파일 번호(seq)를 읽어 받고, 받은 파일의 해시가 지난번과 같으면 넣지 않음(커서).
 """
 import argparse
 import csv
 import datetime
+import hashlib
 import io
 import re
 import sys
@@ -88,8 +89,15 @@ def jibun(row):
     return ("산 " if row["필지구분코드"] == "2" else "") + str(bon) + (f"-{bu}" if bu else "")
 
 
-def normalize(row):
-    """한 줄 → (pnu, 해, 단가, 법정동 10자리, 시군구명, 동이름, 지번, 대장 구분) 또는 (None, 이유)."""
+def normalize(row, year=None):
+    """한 줄 → (pnu, 해, 단가, 법정동 10자리, 시군구명, 동이름, 지번, 대장 구분) 또는 (None, 이유).
+    year를 주면 기준년도가 다른 줄은 파일이 잘못된 것으로 보고 멈춤(다른 해 파일을 그 해로 넣지 않게)."""
+    if any(not isinstance(row.get(c), str) for c in COLS):
+        return None, "칸이 모자람"
+    if not row["기준년도"].isdigit():
+        return None, "기준년도 형식 오류"
+    if year is not None and int(row["기준년도"]) != year:
+        raise RuntimeError(f"{year}년 파일에 {row['기준년도']}년 줄이 있음(파일이 바뀌었는지 확인)")
     pnu, price = row["토지코드"], row["공시지가(원/㎡)"]
     kind = row["필지구분코드"]
     if kind not in LEDGER or not re.fullmatch(r"\d{19}", pnu) or pnu[10] != kind:
@@ -104,7 +112,7 @@ def normalize(row):
 
 # ── 적재 ──
 
-def load_year(conn, run_id, rows, asof):
+def load_year(conn, run_id, rows, asof, year=None):
     """한 해치를 임시 표에 COPY한 뒤 법정동 · 필지 · 공시지가로 옮김 → (넣은 줄, 버린 줄)."""
     loaded = rejected = 0
     samples = []   # COPY 중에는 같은 연결로 다른 SQL을 못 보내서, 뺀 줄 견본은 모아 두었다가 뒤에 남김
@@ -113,7 +121,7 @@ def load_year(conn, run_id, rows, asof):
                            sigungu text, emd text, jibun text, ledger text) ON COMMIT DROP""")
         with cur.copy("COPY land_in FROM STDIN") as cp:
             for row in rows:
-                v, why = normalize(row)
+                v, why = normalize(row, year)
                 if v is None:
                     rejected += 1
                     if len(samples) < 200:   # 이유만 보이면 되니 몇 줄만 남김
@@ -136,6 +144,11 @@ def load_year(conn, run_id, rows, asof):
                        ON CONFLICT (pnu, base_year, is_standard) DO UPDATE
                            SET price_per_m2 = excluded.price_per_m2, asof = excluded.asof
                            WHERE core.fact_land_price.source = excluded.source""", (SOURCE_LABEL, asof))
+        # 고친 파일에서 빠진 필지는 이 수집처 줄만 지움(다른 수집처 줄은 그대로)
+        for (y,) in cur.execute("SELECT DISTINCT base_year FROM land_in").fetchall():
+            cur.execute("""DELETE FROM core.fact_land_price f WHERE f.base_year = %s AND f.source = %s
+                           AND NOT EXISTS (SELECT 1 FROM land_in i WHERE i.pnu = f.pnu AND i.base_year = f.base_year)""",
+                        (y, SOURCE_LABEL))
     return loaded, rejected
 
 
@@ -174,17 +187,19 @@ def main(argv=None, lister=list_files, fetch=download, today=None):
                 f = files.get(y)
                 if not f:
                     raise RuntimeError(f"{y}년 파일이 목록에 없음")
-                mark = f"{f['seq']}:{f['updated']}"
-                if not args.force and ingest.get_cursor(conn, SOURCE, str(y)) == mark:
-                    print(f"{y}년: 바뀐 파일 없음")
-                    continue
                 path = args.zip or f"{tmp.name}/{y}.zip"
                 if not args.zip:
                     print(f"{y}년 받는 중(seq {f['seq']})")
                     fetch(f["seq"], path)
+                # 화면의 번호 · 날짜는 그대로인데 내용만 고칠 수도 있어 받은 파일의 해시로 비교(한 해 8MB라 매달 받아도 됨)
+                with open(path, "rb") as fh:
+                    mark = hashlib.sha256(fh.read()).hexdigest()
+                if not args.force and ingest.get_cursor(conn, SOURCE, str(y)) == mark:
+                    print(f"{y}년: 바뀐 파일 없음")
+                    continue
                 asof = datetime.date.fromisoformat(f["updated"]) if f["updated"] else today
                 task = ingest.add_task(conn, run_id, SOURCE, str(y))
-                n, bad = load_year(conn, run_id, read_rows(path), asof)
+                n, bad = load_year(conn, run_id, read_rows(path), asof, y)
                 ingest.end_task(conn, task, "done")
                 ingest.set_cursor(conn, SOURCE, str(y), mark)
                 conn.commit()

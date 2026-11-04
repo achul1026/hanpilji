@@ -30,6 +30,13 @@ class Offline(unittest.TestCase):
         self.assertEqual((v[6], v[7]), ("산 5-51", "임야"))
         self.assertEqual([s.normalize(r)[0] is None for r in rows], [False, False, False, True, True])
 
+    def test_malformed_and_wrong_year(self):
+        row = next(s.read_rows(ZIP))
+        self.assertEqual(s.normalize(dict(row, **{"기준년도": "x"})), (None, "기준년도 형식 오류"))
+        self.assertEqual(s.normalize({k: v for k, v in row.items() if k != "본번"}), (None, "칸이 모자람"))
+        with self.assertRaises(RuntimeError):
+            s.normalize(row, 2025)
+
     def test_empty_price_rejected(self):
         row = dict(next(s.read_rows(ZIP)), **{"공시지가(원/㎡)": ""})
         self.assertEqual(s.normalize(row), (None, "공시지가 없음"))
@@ -63,6 +70,16 @@ class Load(unittest.TestCase):
         self.assertEqual(len(rows), 3)
         self.assertEqual(rows["1129013600100170009"], 1)          # V-World 줄은 덮지 않음
         self.assertEqual(rows["1129013600100100031"], 5_984_000)
+        # 고친 파일에서 빠진 이 수집처 줄은 지워짐
+        with psycopg.connect(DSN, autocommit=True) as c:
+            c.execute("""INSERT INTO core.dim_parcel (pnu, lawd_cd, source, asof) VALUES ('1129013600100990099', '1129013600', 't', '2026-01-01')
+                         ON CONFLICT DO NOTHING""")
+            c.execute("""INSERT INTO core.fact_land_price (pnu, base_year, is_standard, price_per_m2, source, asof)
+                         VALUES ('1129013600100990099', 2026, false, 9, %s, '2026-01-01')""", (s.SOURCE_LABEL,))
+        self.assertEqual(s.main(["--config", str(cfg), "--force"], lister=lambda: files, fetch=fetch), 0)
+        with psycopg.connect(DSN) as c:
+            gone = c.execute("SELECT count(*) FROM core.fact_land_price WHERE pnu = '1129013600100990099'").fetchone()[0]
+        self.assertEqual(gone, 0)
         self.assertEqual(emd, "하월곡동")                         # 비어 있던 동 이름을 채움
 
 
