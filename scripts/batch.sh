@@ -33,12 +33,18 @@ failed=()
 # .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh sh onbid law market bld luinfo house_price land_price freshness"
+KEYS="apt offi rh sh nrg onbid law market bld luinfo house_price land_price freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
   [[ " $KEYS " == *" $k "* ]] || echo "!! HANPILJI_BATCH_SKIP의 '$k'는 없는 키라 무시함 (쓸 수 있는 키: $KEYS)" >> "$LOG"
 done
+
+# 공공데이터포털 하루 한도(자정에 다시 참)는 계정 · API마다 하나라, 같은 계정을 쓰는 GitHub Actions(강남 매일, 04:17) ·
+# 다른 서비스(5대 도메인 부동산 월간 배치, 관리자가 손으로 돌림, 매월 3일은 피함) 몫을 남김.
+# 실거래는 종류(API)마다, 건축물대장은 API 묶음 전체로 하루 이 수까지만 부름. 개발계정 한도 10,000 중 1,000을 남기는 값.
+# 평소 실거래는 최근 3개월만 다시 받아 API마다 하루 75~150번이라 상한에 닿는 건 처음 채울 때뿐
+DG_MAX="${HANPILJI_DG_MAX_CALLS:-9000}"
 
 step() {   # step <키> <이름> <제한 분> <명령…>
   local key="$1" name="$2" mins="$3"; shift 3
@@ -59,16 +65,23 @@ case "$WHAT" in
   daily)
     # 실거래는 모두 서울 25개 구(5대 도메인과는 엮지 않음, 2026-11-04).
     # 처음엔 36개월을 채우느라 하루 한도에 걸리는 API는 멈추고, 다음 날 이어 받음(2~3일)
-    step apt "실거래(아파트, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only trade --only rent
-    step offi "실거래(오피스텔, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only offi_trade --only offi_rent
-    step rh "실거래(연립다세대, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only rh_trade --only rh_rent
-    step sh "실거래(단독다가구 전월세, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only sh_rent
+    RTMS=("$PY" -m hanpilji.collectors.rtms --sigungu seoul --max-calls "$DG_MAX")
+    step apt "실거래(아파트, 서울)" 120 "${RTMS[@]}" --only trade --only rent
+    step offi "실거래(오피스텔, 서울)" 120 "${RTMS[@]}" --only offi_trade --only offi_rent
+    step rh "실거래(연립다세대, 서울)" 120 "${RTMS[@]}" --only rh_trade --only rh_rent
+    step sh "실거래(단독다가구 매매 · 전월세, 서울)" 120 "${RTMS[@]}" --only sh_trade --only sh_rent
+    step nrg "실거래(상업업무용 매매, 서울)" 120 "${RTMS[@]}" --only nrg_trade
     step onbid "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
     # 건축물대장(서울 아파트 · 오피스텔 단지 필지). 필지마다 4번 호출이라 서울은 수만 번 → 매일 9,000번씩 이어 받고,
     # 받은 지 30일(config [bld] refresh_days) 지난 필지만 다시 받음. 실거래 단계 뒤라 새 단지도 그날 붙음
-    step bld "건축물대장(서울)" 240 "$PY" -m hanpilji.collectors.bld --sigungu seoul --max-calls 9000
+    step bld "건축물대장(서울)" 240 "$PY" -m hanpilji.collectors.bld --sigungu seoul --max-calls "$DG_MAX"
     ;;
   weekly)
+    # 법제처 본문은 open.law.go.kr에서 받은 ID(OC)와 그 ID에 등록한 이 서버의 IP가 있어야 받음.
+    # 테스트 계정(test)은 2026-11-01부터 막힘(2026-11-04 확인). 없으면 개정만 감지하고 본문은 「본문 대기」로 남음
+    case "${LAW_OC:-test}" in
+      ""|test) echo "!! LAW_OC가 없거나 test라 개정된 법령의 본문을 못 받음(.env에 open.law.go.kr ID를 넣을 것)" >> "$LOG" ;;
+    esac
     step law "법령" 20 "$PY" -m hanpilji.collectors.law
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;

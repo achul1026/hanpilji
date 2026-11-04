@@ -27,6 +27,7 @@ def as_month(rows, ym):
 def fixture_fetch(path, params):
     name = ("rtms_offi_trade_real.xml" if "OffiTrade" in path else "rtms_offi_rent_real.xml" if "OffiRent" in path
             else "rtms_rh_trade_real.xml" if "RHTrade" in path else "rtms_rh_rent_real.xml" if "RHRent" in path
+            else "rtms_nrg_trade_real.xml" if "NrgTrade" in path else "rtms_sh_trade_real.xml" if "SHTrade" in path
             else "rtms_trade_real.xml" if "Trade" in path else "rtms_rent_real.xml" if "Rent" in path
             else "luinfo_real_snackbar.xml")
     data = (FIX / name).read_bytes()
