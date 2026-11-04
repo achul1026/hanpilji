@@ -14,6 +14,10 @@
 연립다세대(매매 15126467 · 전월세 15126473)는 건물 이름이 mhouseNm이고 연립 · 다세대 구분이 houseType에 옴(실제 응답으로
 확인, 강남구 2026-10-29). 매매만 주소 끝에 「2」가 붙음(RTMSDataSvcRHTrade2). 종류는 「연립다세대」 하나로 넣고
 단지 번호는 「rtms-rh:」로 시작. 빌라는 건물 한 동이 한 단지.
+단독 · 다가구 전월세(sh_rent, RTMSDataSvcSHRent)는 개인 정보 때문에 지번 · 건물명 · 층이 없고, 면적은 전용면적 대신
+계약면적(totalFloorAr)으로 옴. 그래서 단지 없이 법정동에만 붙이고 종류는 「단독다가구」. 항목 이름은 포털 명세 기준이고
+활용신청 전이라 실제 응답으로는 아직 확인 못 함(2026-11-04). 처음 받을 때 stg.rtms_raw로 확인할 것.
+--sigungu seoul 이면 서울 25개 구(hanpilji.regions).
 """
 import argparse
 import datetime
@@ -24,7 +28,7 @@ import sys
 
 
 from hanpilji import db, config as config_mod
-from hanpilji import datagokr, ingest
+from hanpilji import datagokr, ingest, regions
 
 # base: 매매(trade) · 전월세(rent) 중 어느 쪽 표에 넣는지. source: ops 실행 기록 · stg 원본의 수집처 이름
 KINDS = {
@@ -40,7 +44,11 @@ KINDS = {
                  "label": "연립다세대", "base": "trade", "src": "국토교통부 연립다세대 매매 실거래가"},
     "rh_rent": {"source": "dg_rh_rent", "path": "RTMSDataSvcRHRent/getRTMSDataSvcRHRent",
                 "label": "연립다세대", "base": "rent", "src": "국토교통부 연립다세대 전월세 실거래가"},
+    "sh_rent": {"source": "dg_sh_rent", "path": "RTMSDataSvcSHRent/getRTMSDataSvcSHRent",
+                "label": "단독다가구", "base": "rent", "src": "국토교통부 단독/다가구 전월세 실거래가"},
 }
+# 단지가 없는 종류(단독 · 다가구는 지번도 응답에 없음): 거래를 법정동에만 붙이고 dim_complex는 만들지 않음
+NO_COMPLEX = {"sh_rent"}
 # 응답에 있는 단지명 항목 → 단지 번호 앞머리. 아파트(aptNm)는 「rtms:」 그대로
 NAME_FIELDS = {"offiNm": "rtms-offi:", "mhouseNm": "rtms-rh:"}
 PAGE_ROWS = 1000
@@ -102,6 +110,8 @@ def row_key(kind, row):
     keys += ["dealAmount"] if kind == "trade" else ["deposit", "monthlyRent", "contractTerm", "contractType"]
     if name_field(row) != "aptNm":
         keys.append(name_field(row))
+    if "totalFloorAr" in row:   # 단독 · 다가구: 지번 · 이름 · 층 대신 유형 · 계약면적으로 가름
+        keys += ["houseType", "totalFloorAr"]
     return hashlib.sha1("|".join(_s(row, k) for k in keys).encode()).hexdigest()
 
 
@@ -136,7 +146,9 @@ def to_deal(row, sigungu):
 
 
 def to_rent(row, sigungu):
-    deposit, monthly, area = _int(_s(row, "deposit")), _int(_s(row, "monthlyRent")) or 0, _area(_s(row, "excluUseAr"))
+    # 단독 · 다가구는 전용면적이 없고 계약면적(totalFloorAr)만 옴
+    area = _area(_s(row, "excluUseAr") or _s(row, "totalFloorAr"))
+    deposit, monthly = _int(_s(row, "deposit")), _int(_s(row, "monthlyRent")) or 0
     try:
         d = contract_date(row)
     except ValueError:
@@ -148,7 +160,7 @@ def to_rent(row, sigungu):
     return {
         "rent_id": row_key("rent", row),
         "lawd_cd": lawd_cd(row, sigungu),
-        "complex_id": complex_key(row),
+        "complex_id": None if "totalFloorAr" in row else complex_key(row),
         "contract_date": d,
         "area": area,
         "floor": _int(_s(row, "floor")),
@@ -161,12 +173,14 @@ def to_rent(row, sigungu):
 
 # ── 적재 ──
 
-def _ensure_dims(cur, lawd, row, asof, label):
+def _ensure_dims(cur, lawd, row, asof, label, complex_too=True):
     cur.execute(
         """INSERT INTO core.dim_region (lawd_cd, emd, source, asof) VALUES (%s, %s, %s, %s)
            ON CONFLICT (lawd_cd) DO NOTHING""",
         (lawd, _s(row, "umdNm") if not lawd.endswith("00000") else None, "국토교통부 실거래가 응답", asof),
     )
+    if not complex_too:
+        return
     # 단지는 동 이름 → 법정동 코드(core.dim_region)로 법정동 단위에 둠. 코드표에 없으면 거래와 같은 시군구 단위
     cur.execute(
         """WITH v AS (
@@ -215,7 +229,13 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                 continue
             v["deal_id" if base == "trade" else "rent_id"] = key
             keys.append(key)
-            _ensure_dims(cur, v["lawd_cd"], row, asof, label)
+            if kind in NO_COMPLEX and v["lawd_cd"].endswith("00000") and _s(row, "umdNm"):
+                # 법정동 코드가 응답에 없으면 동 이름으로 코드표(core.dim_region)에서 찾음. 없으면 시군구 단위 그대로
+                hit = cur.execute("""SELECT lawd_cd FROM core.dim_region WHERE left(lawd_cd, 5) = %s AND emd = %s
+                                     ORDER BY lawd_cd LIMIT 1""", (sigungu, _s(row, "umdNm"))).fetchone()
+                if hit:
+                    v["lawd_cd"] = hit[0]
+            _ensure_dims(cur, v["lawd_cd"], row, asof, label, complex_too=kind not in NO_COMPLEX)
             if base == "trade":
                 cur.execute(
                     """INSERT INTO core.fact_deal (deal_id, lawd_cd, complex_id, deal_type, contract_date, amount, area,
@@ -287,14 +307,14 @@ def main(argv=None, fetch=datagokr.fetch):
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--months", type=int, help="몇 개월 치(기본: config [rtms] months)")
     ap.add_argument("--only", choices=list(KINDS), action="append", help="기본: config [rtms] kinds, 없으면 전부")
-    ap.add_argument("--sigungu", action="append", help="시군구 5자리(기본: config [pilot])")
+    ap.add_argument("--sigungu", action="append", help="시군구 5자리 또는 seoul(서울 25개 구). 기본: config [pilot]")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     rcfg = cfg.get("rtms", {})
     months = months_back(args.months or rcfg.get("months", 36))
     refetch = set(months[: rcfg.get("refetch_months", 3)])
     kinds = args.only or rcfg.get("kinds") or list(KINDS)
-    sigungus = args.sigungu or cfg["pilot"]["sigungu"]
+    sigungus = regions.expand(args.sigungu or cfg["pilot"]["sigungu"])
     today = datetime.date.today()
     failed_any = stop = False
     with db.connect(cfg["db"]["dsn"]) as conn:
