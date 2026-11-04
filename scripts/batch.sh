@@ -30,8 +30,17 @@ cd "$ROOT"
 export PYTHONUNBUFFERED=1
 failed=()
 
-step() {   # step <이름> <제한 분> <명령…>
-  local name="$1" mins="$2"; shift 2
+# .env의 HANPILJI_BATCH_SKIP="apt onbid bld" 처럼 적은 작업은 건너뜀
+# (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때)
+SKIP=" ${HANPILJI_BATCH_SKIP:-} "
+SKIP="${SKIP//,/ }"
+
+step() {   # step <키> <이름> <제한 분> <명령…>
+  local key="$1" name="$2" mins="$3"; shift 3
+  if [[ "$SKIP" == *" $key "* ]]; then
+    echo "-- 건너뜀 $name (HANPILJI_BATCH_SKIP에 $key)" >> "$LOG"
+    return 0
+  fi
   echo "== $(date '+%F %T') $name" >> "$LOG"
   if timeout "${mins}m" "$@" >> "$LOG" 2>&1; then
     echo "-- 성공 $name" >> "$LOG"
@@ -43,24 +52,24 @@ step() {   # step <이름> <제한 분> <명령…>
 
 case "$WHAT" in
   daily)
-    step "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
-    step "실거래(오피스텔)" 30 "$PY" -m hanpilji.collectors.rtms --only offi_trade --only offi_rent
-    step "실거래(연립다세대)" 30 "$PY" -m hanpilji.collectors.rtms --only rh_trade --only rh_rent
-    step "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
+    step apt "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
+    step offi "실거래(오피스텔)" 30 "$PY" -m hanpilji.collectors.rtms --only offi_trade --only offi_rent
+    step rh "실거래(연립다세대)" 30 "$PY" -m hanpilji.collectors.rtms --only rh_trade --only rh_rent
+    step onbid "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
     ;;
   weekly)
-    step "법령" 20 "$PY" -m hanpilji.collectors.law
-    step "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
+    step law "법령" 20 "$PY" -m hanpilji.collectors.law
+    step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)
-    step "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
-    step "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
-    step "주택 공시가격" 30 "$PY" -m hanpilji.collectors.house_price
+    step bld "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
+    step luinfo "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
+    step house_price "주택 공시가격" 30 "$PY" -m hanpilji.collectors.house_price
     ;;
   *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;;
 esac
 
-step "수집처별 마지막 성공" 5 "$PY" scripts/freshness.py
+step freshness "수집처별 마지막 성공" 5 "$PY" scripts/freshness.py
 # 로그는 60일만 둠
 find "$LOG_DIR" -name '*.log' -mtime +60 ! -name skipped.log -delete 2>/dev/null
 
