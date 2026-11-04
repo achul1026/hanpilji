@@ -57,20 +57,22 @@ step() {   # step <키> <이름> <제한 분> <명령…>
 
 case "$WHAT" in
   daily)
-    step apt "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
-    # 오피스텔 · 연립다세대 · 단독다가구 전월세는 서울 25개 구(아파트는 5대 도메인 쪽 서울 자료를 읽기로 함).
-    # 처음엔 36개월을 채우느라 API마다 하루 한도(1,000회)에 걸려 멈추고, 다음 날 이어 받음(2~3일)
+    # 실거래는 모두 서울 25개 구(5대 도메인과는 엮지 않음, 2026-11-04).
+    # 처음엔 36개월을 채우느라 하루 한도에 걸리는 API는 멈추고, 다음 날 이어 받음(2~3일)
+    step apt "실거래(아파트, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only trade --only rent
     step offi "실거래(오피스텔, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only offi_trade --only offi_rent
     step rh "실거래(연립다세대, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only rh_trade --only rh_rent
     step sh "실거래(단독다가구 전월세, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only sh_rent
     step onbid "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
+    # 건축물대장(서울 아파트 · 오피스텔 단지 필지). 필지마다 4번 호출이라 서울은 수만 번 → 매일 9,000번씩 이어 받고,
+    # 받은 지 30일(config [bld] refresh_days) 지난 필지만 다시 받음. 실거래 단계 뒤라 새 단지도 그날 붙음
+    step bld "건축물대장(서울)" 240 "$PY" -m hanpilji.collectors.bld --sigungu seoul --max-calls 9000
     ;;
   weekly)
     step law "법령" 20 "$PY" -m hanpilji.collectors.law
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)
-    step bld "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
     step luinfo "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
     step house_price "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
     # 서울 개별공시지가(서울 열린데이터광장 파일). 새 해 파일이 올라왔거나 고쳐졌을 때만 받음
