@@ -97,6 +97,11 @@ class NewTrades(unittest.TestCase):
         cancelled = [r for r in rows if r.get("cdealType") == "O"]
         self.assertTrue(cancelled and rtms.to_deal(cancelled[0], "11680")[0]["is_cancelled"])
 
+    def test_share_deal_excluded(self):
+        row = {**real_rows("rtms_nrg_trade_real.xml")[0], "shareDealingType": "지분"}
+        self.assertEqual(rtms.to_deal(row, "11680"), (None, "지분거래"))
+        self.assertNotEqual(rtms.row_key("trade", row), rtms.row_key("trade", real_rows("rtms_nrg_trade_real.xml")[0]))
+
     def test_nrg_row_key_tells_buildings_apart(self):
         rows = real_rows("rtms_nrg_trade_real.xml")
         keys = [rtms.row_key("trade", r) for r in rows]

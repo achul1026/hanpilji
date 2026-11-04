@@ -77,11 +77,9 @@ case "$WHAT" in
     step bld "건축물대장(서울)" 240 "$PY" -m hanpilji.collectors.bld --sigungu seoul --max-calls "$DG_MAX"
     ;;
   weekly)
-    # 법제처 본문은 open.law.go.kr에서 받은 ID(OC)와 그 ID에 등록한 이 서버의 IP가 있어야 받음.
-    # 테스트 계정(test)은 2026-11-01부터 막힘(2026-11-04 확인). 없으면 개정만 감지하고 본문은 「본문 대기」로 남음
-    case "${LAW_OC:-test}" in
-      ""|test) echo "!! LAW_OC가 없거나 test라 개정된 법령의 본문을 못 받음(.env에 open.law.go.kr ID를 넣을 것)" >> "$LOG" ;;
-    esac
+    # 법제처 본문은 open.law.go.kr에서 받은 ID(.env의 LAW_OC)와 그 ID에 등록한 이 서버의 IP가 있어야 받음.
+    # 테스트 계정(test)은 2026-11-01부터 막힘(2026-11-04 확인). ID가 test면 수집기가 로그에 「주의」를 남기고,
+    # 개정만 감지해 본문은 「본문 대기」로 둠
     step law "법령" 20 "$PY" -m hanpilji.collectors.law
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;

@@ -22,7 +22,8 @@
 - 단독다가구 매매: houseType(단독 · 다가구) · totalFloorAr(연면적) · plottageAr(대지면적), 층 없음. 면적은 연면적.
 - 상업업무용 매매: buildingType(일반 · 집합) · buildingUse(건물 주용도) · landUse(용도지역) · buildingAr(건물면적) ·
   plottageAr(대지면적, 집합은 빈칸) · floor(일반은 빈칸) · shareDealingType(지분거래면 값이 있음). 면적은 건물면적.
-  지분거래는 일부만 사고판 값이라 단가를 낼 때 빼야 함(원본 stg.rtms_raw에 그대로 있음). 종류는 「상업업무용」.
+  지분거래는 일부만 사고판 값이라 core.fact_deal에 넣지 않고 제외(ops.reject_estate)로 남김(원본은 stg.rtms_raw).
+  종류는 「상업업무용」.
 --sigungu seoul 이면 서울 25개 구(hanpilji.regions).
 --max-calls N 이면 종류(API)마다 이번 실행에 N번까지만 부름. 공공데이터포털 하루 한도는 계정 · API마다 하나라
 같은 계정을 쓰는 다른 서비스 몫을 남길 때 씀. 닿으면 하루 한도와 같이 그 종류만 멈추고 내일 이어 받음(실패 아님).
@@ -71,7 +72,7 @@ NEW_SOURCES = {
 # 단지가 없는 종류(지번이 없거나 가려져 옴): 거래를 법정동에만 붙이고 dim_complex는 만들지 않음
 NO_COMPLEX = {"sh_rent", "sh_trade", "nrg_trade"}
 # 상업업무용 매매에만 있는 항목. 같은 날 · 같은 값의 다른 건물을 가르려고 거래 번호에 넣음
-NRG_KEYS = ["buildingType", "buildingUse", "landUse", "buildingAr", "plottageAr"]
+NRG_KEYS = ["buildingType", "buildingUse", "landUse", "buildingAr", "plottageAr", "shareDealingType"]
 # 응답에 있는 단지명 항목 → 단지 번호 앞머리. 아파트(aptNm)는 「rtms:」 그대로
 NAME_FIELDS = {"offiNm": "rtms-offi:", "mhouseNm": "rtms-rh:"}
 PAGE_ROWS = 1000
@@ -164,6 +165,8 @@ def to_deal(row, sigungu):
         return None, "거래금액 없음"
     if not area or area <= 0:
         return None, "전용면적 없음"
+    if _s(row, "shareDealingType"):   # 상업업무용: 일부 지분만 사고판 값이라 단가가 틀어짐
+        return None, "지분거래"
     return {
         "deal_id": row_key("trade", row),
         "lawd_cd": lawd_cd(row, sigungu),
