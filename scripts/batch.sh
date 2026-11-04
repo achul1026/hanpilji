@@ -30,10 +30,10 @@ cd "$ROOT"
 export PYTHONUNBUFFERED=1
 failed=()
 
-# .env의 HANPILJI_BATCH_SKIP="apt onbid" 처럼 적은 작업은 건너뜀
+# .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh onbid law market bld luinfo house_price freshness"
+KEYS="apt offi rh sh onbid law market bld luinfo house_price freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
@@ -58,8 +58,11 @@ step() {   # step <키> <이름> <제한 분> <명령…>
 case "$WHAT" in
   daily)
     step apt "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
-    step offi "실거래(오피스텔)" 30 "$PY" -m hanpilji.collectors.rtms --only offi_trade --only offi_rent
-    step rh "실거래(연립다세대)" 30 "$PY" -m hanpilji.collectors.rtms --only rh_trade --only rh_rent
+    # 오피스텔 · 연립다세대 · 단독다가구 전월세는 서울 25개 구(아파트는 5대 도메인 쪽 서울 자료를 읽기로 함).
+    # 처음엔 36개월을 채우느라 API마다 하루 한도(1,000회)에 걸려 멈추고, 다음 날 이어 받음(2~3일)
+    step offi "실거래(오피스텔, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only offi_trade --only offi_rent
+    step rh "실거래(연립다세대, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only rh_trade --only rh_rent
+    step sh "실거래(단독다가구 전월세, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only sh_rent
     step onbid "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
     ;;
   weekly)
@@ -69,7 +72,7 @@ case "$WHAT" in
   monthly)
     step bld "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
     step luinfo "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
-    step house_price "주택 공시가격" 30 "$PY" -m hanpilji.collectors.house_price
+    step house_price "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
     ;;
   *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;;
 esac
