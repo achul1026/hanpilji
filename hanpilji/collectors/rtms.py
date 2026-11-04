@@ -1,7 +1,8 @@
-"""국토교통부 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
+"""국토교통부 아파트 · 오피스텔 · 연립다세대 · 단독다가구 · 상업업무용 실거래가 API → stg.rtms_raw → core.fact_deal · core.fact_rent.
 
-    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36] [--only trade|rent|offi_trade|offi_rent|rh_trade|rh_rent|sh_rent]
-                                                          [--sigungu 11680]
+    DATA_GO_KR_KEY=... python -m hanpilji.collectors.rtms [--months 36]
+        [--only trade|rent|offi_trade|offi_rent|rh_trade|rh_rent|sh_trade|sh_rent|nrg_trade]
+        [--sigungu 11680] [--max-calls 5000]
 
 시군구 x 계약월 x 종류마다 한 트랜잭션. 끝난 달은 커서에 남겨 다시 받지 않되,
 최근 몇 달(config [rtms] refetch_months)은 신고 · 해제가 늦게 붙으므로 매번 다시 받음.
@@ -15,9 +16,17 @@
 확인, 강남구 2026-10-29). 매매만 주소 끝에 「2」가 붙음(RTMSDataSvcRHTrade2). 종류는 「연립다세대」 하나로 넣고
 단지 번호는 「rtms-rh:」로 시작. 빌라는 건물 한 동이 한 단지.
 단독 · 다가구 전월세(sh_rent, RTMSDataSvcSHRent)는 개인 정보 때문에 지번 · 건물명 · 층이 없고, 면적은 전용면적 대신
-계약면적(totalFloorAr)으로 옴. 그래서 단지 없이 법정동에만 붙이고 종류는 「단독다가구」. 항목 이름은 포털 명세 기준이고
-활용신청 전이라 실제 응답으로는 아직 확인 못 함(2026-11-04). 처음 받을 때 stg.rtms_raw로 확인할 것.
+계약면적(totalFloorAr)으로 옴. 그래서 단지 없이 법정동에만 붙이고 종류는 「단독다가구」(실제 응답으로 확인, 2026-11-04).
+단독 · 다가구 매매(sh_trade, RTMSDataSvcSHTrade)와 상업업무용 매매(nrg_trade, RTMSDataSvcNrgTrade)는 실제 응답으로 확인함
+(강남구 2026년 9월, 2026-11-04). 둘 다 지번이 「1***」처럼 가려져 오고 법정동 코드(umdCd)가 없어, 단지 없이 법정동에만 붙임.
+- 단독다가구 매매: houseType(단독 · 다가구) · totalFloorAr(연면적) · plottageAr(대지면적), 층 없음. 면적은 연면적.
+- 상업업무용 매매: buildingType(일반 · 집합) · buildingUse(건물 주용도) · landUse(용도지역) · buildingAr(건물면적) ·
+  plottageAr(대지면적, 집합은 빈칸) · floor(일반은 빈칸) · shareDealingType(지분거래면 값이 있음). 면적은 건물면적.
+  지분거래는 일부만 사고판 값이라 core.fact_deal에 넣지 않고 제외(ops.reject_estate)로 남김(원본은 stg.rtms_raw).
+  종류는 「상업업무용」.
 --sigungu seoul 이면 서울 25개 구(hanpilji.regions).
+--max-calls N 이면 종류(API)마다 이번 실행에 N번까지만 부름. 공공데이터포털 하루 한도는 계정 · API마다 하나라
+같은 계정을 쓰는 다른 서비스 몫을 남길 때 씀. 닿으면 하루 한도와 같이 그 종류만 멈추고 내일 이어 받음(실패 아님).
 """
 import argparse
 import datetime
@@ -44,16 +53,26 @@ KINDS = {
                  "label": "연립다세대", "base": "trade", "src": "국토교통부 연립다세대 매매 실거래가"},
     "rh_rent": {"source": "dg_rh_rent", "path": "RTMSDataSvcRHRent/getRTMSDataSvcRHRent",
                 "label": "연립다세대", "base": "rent", "src": "국토교통부 연립다세대 전월세 실거래가"},
+    "sh_trade": {"source": "dg_sh_trade", "path": "RTMSDataSvcSHTrade/getRTMSDataSvcSHTrade",
+                 "label": "단독다가구", "base": "trade", "src": "국토교통부 단독/다가구 매매 실거래가"},
     "sh_rent": {"source": "dg_sh_rent", "path": "RTMSDataSvcSHRent/getRTMSDataSvcSHRent",
                 "label": "단독다가구", "base": "rent", "src": "국토교통부 단독/다가구 전월세 실거래가"},
+    "nrg_trade": {"source": "dg_nrg_trade", "path": "RTMSDataSvcNrgTrade/getRTMSDataSvcNrgTrade",
+                  "label": "상업업무용", "base": "trade", "src": "국토교통부 상업업무용 부동산 매매 실거래가"},
 }
 # 이미 만들어 둔 DB(Supabase · 개발서버)에는 sql/09_stage1.sql의 새 수집처 줄이 없을 수 있어, 처음 돌 때 넣음
 NEW_SOURCES = {
     "dg_sh_rent": ("단독/다가구 전월세 실거래가 자료", "국토교통부", "api", 10000, "UTF-8", "매일", "이용허락범위 제한 없음",
                    "https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=단독/다가구 전월세 실거래가"),
+    "dg_sh_trade": ("단독/다가구 매매 실거래가 자료", "국토교통부", "api", 10000, "UTF-8", "매일", "이용허락범위 제한 없음",
+                    "https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=단독/다가구 매매 실거래가"),
+    "dg_nrg_trade": ("상업업무용 부동산 매매 실거래가 자료", "국토교통부", "api", 10000, "UTF-8", "매일", "이용허락범위 제한 없음",
+                     "https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=상업업무용 부동산 매매 실거래가"),
 }
-# 단지가 없는 종류(단독 · 다가구는 지번도 응답에 없음): 거래를 법정동에만 붙이고 dim_complex는 만들지 않음
-NO_COMPLEX = {"sh_rent"}
+# 단지가 없는 종류(지번이 없거나 가려져 옴): 거래를 법정동에만 붙이고 dim_complex는 만들지 않음
+NO_COMPLEX = {"sh_rent", "sh_trade", "nrg_trade"}
+# 상업업무용 매매에만 있는 항목. 같은 날 · 같은 값의 다른 건물을 가르려고 거래 번호에 넣음
+NRG_KEYS = ["buildingType", "buildingUse", "landUse", "buildingAr", "plottageAr", "shareDealingType"]
 # 응답에 있는 단지명 항목 → 단지 번호 앞머리. 아파트(aptNm)는 「rtms:」 그대로
 NAME_FIELDS = {"offiNm": "rtms-offi:", "mhouseNm": "rtms-rh:"}
 PAGE_ROWS = 1000
@@ -117,6 +136,10 @@ def row_key(kind, row):
         keys.append(name_field(row))
     if "totalFloorAr" in row:   # 단독 · 다가구: 지번 · 이름 · 층 대신 유형 · 계약면적으로 가름
         keys += ["houseType", "totalFloorAr"]
+        if kind == "trade":     # 매매에는 대지면적도 옴(전월세 값은 예전 그대로 두려고 매매만)
+            keys.append("plottageAr")
+    if "buildingAr" in row:     # 상업업무용
+        keys += NRG_KEYS
     return hashlib.sha1("|".join(_s(row, k) for k in keys).encode()).hexdigest()
 
 
@@ -126,9 +149,14 @@ def lawd_cd(row, sigungu):
     return f"{sigungu}{umd}" if len(umd) == 5 and umd.isdigit() else f"{sigungu}00000"
 
 
+def deal_area(row):
+    """매매 면적(㎡): 아파트 · 오피스텔 · 연립다세대 전용면적, 단독다가구 연면적, 상업업무용 건물면적."""
+    return _area(_s(row, "excluUseAr") or _s(row, "totalFloorAr") or _s(row, "buildingAr"))
+
+
 def to_deal(row, sigungu):
     """매매 한 건 → fact_deal 값. 못 쓰는 줄이면 (None, 이유)."""
-    amount, area = _int(_s(row, "dealAmount")), _area(_s(row, "excluUseAr"))
+    amount, area = _int(_s(row, "dealAmount")), deal_area(row)
     try:
         d = contract_date(row)
     except ValueError:
@@ -137,10 +165,12 @@ def to_deal(row, sigungu):
         return None, "거래금액 없음"
     if not area or area <= 0:
         return None, "전용면적 없음"
+    if _s(row, "shareDealingType"):   # 상업업무용: 일부 지분만 사고판 값이라 단가가 틀어짐
+        return None, "지분거래"
     return {
         "deal_id": row_key("trade", row),
         "lawd_cd": lawd_cd(row, sigungu),
-        "complex_id": complex_key(row),
+        "complex_id": None if ("totalFloorAr" in row or "buildingAr" in row) else complex_key(row),
         "contract_date": d,
         "amount": amount * 10_000,                     # 만원 → 원
         "area": area,
@@ -324,12 +354,31 @@ def ensure_sources(conn, source_ids):
     conn.commit()
 
 
+class CallCap(Exception):
+    """--max-calls에 닿음(이 종류만 멈추고 내일 이어 받음)."""
+
+
+def capped(fetch, max_calls):
+    """fetch를 감싸 max_calls번까지만 부름. None이면 그대로."""
+    if max_calls is None:
+        return fetch
+    calls = [0]
+
+    def f(path, params):
+        if calls[0] >= max_calls:
+            raise CallCap(f"--max-calls {max_calls}에 닿음")
+        calls[0] += 1
+        return fetch(path, params)
+    return f
+
+
 def main(argv=None, fetch=datagokr.fetch):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--months", type=int, help="몇 개월 치(기본: config [rtms] months)")
     ap.add_argument("--only", choices=list(KINDS), action="append", help="기본: config [rtms] kinds, 없으면 전부")
     ap.add_argument("--sigungu", action="append", help="시군구 5자리 또는 seoul(서울 25개 구). 기본: config [pilot]")
+    ap.add_argument("--max-calls", type=int, help="종류(API)마다 이번 실행의 최대 호출 수(같은 계정의 하루 한도를 나눠 쓸 때)")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     rcfg = cfg.get("rtms", {})
@@ -346,6 +395,7 @@ def main(argv=None, fetch=datagokr.fetch):
                 break
             src = KINDS[kind]["source"]
             run_id = ingest.start_run(conn, src)
+            kfetch = capped(fetch, args.max_calls)
             total_loaded = total_rejected = failed = 0
             quota_note = None
             finished = False
@@ -357,7 +407,7 @@ def main(argv=None, fetch=datagokr.fetch):
                             continue
                         task = ingest.add_task(conn, run_id, src, ckey)
                         try:
-                            rows = fetch_month(kind, sgg, ym, cfg["storage"]["raw_dir"], fetch)
+                            rows = fetch_month(kind, sgg, ym, cfg["storage"]["raw_dir"], kfetch)
                             n, r = load_month(conn, run_id, kind, sgg, ym, rows, today)
                             ingest.end_task(conn, task, "done")
                             ingest.set_cursor(conn, src, ckey, "done")
@@ -365,6 +415,11 @@ def main(argv=None, fetch=datagokr.fetch):
                             total_loaded += n
                             total_rejected += r
                             print(f"{kind:5} {sgg} {ym}  {n:5}건  제외 {r}")
+                        except CallCap as e:   # 이 서비스 몫을 다 씀: 하루 한도와 같이 멈추고 내일 이어 받음
+                            conn.rollback()
+                            quota_note = f"{e}({sgg} {ym}부터 내일 이어 받음)"
+                            print(f"{kind}: {quota_note}", file=sys.stderr)
+                            break
                         except Exception as e:  # 한 달이 실패해도 나머지는 계속(커서는 그대로)
                             conn.rollback()
                             t = ingest.add_task(conn, run_id, src, ckey, status="failed")

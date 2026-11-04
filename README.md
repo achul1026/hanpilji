@@ -109,7 +109,7 @@ HANPILJI_TEST_DSN=postgresql://user@localhost/hanpilji_test python -m unittest d
 > Encoding · Decoding 키 어느 쪽을 넣어도 됩니다.
 
 > [!NOTE]
-> 법제처 수집은 공식 테스트 계정 `OC=test`로도 돌아갑니다. 운영 전에 [open.law.go.kr](https://open.law.go.kr)에서 ID를 받아 `LAW_OC` 환경변수로 넣으세요.
+> 법제처 테스트 계정 `OC=test`는 2026-11-01부터 막혔습니다(2026-11-04 확인: 「사용자 정보 검증에 실패」). 개정 감지는 공공데이터포털 키로 되지만, 바뀐 법령의 **본문**은 [open.law.go.kr](https://open.law.go.kr)에서 받은 ID와 그 ID에 등록한 서버 IP가 있어야 받습니다. ID를 `LAW_OC` 환경변수로 넣으세요. 없으면 「본문 대기」로 남고 다음 실행에서 다시 받습니다.
 
 ## 🔎 GPT가 부르는 마트 함수
 
@@ -331,7 +331,13 @@ HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용
 
 실행 요약에 수집처별 마지막 성공 시각(`ops.v_source_freshness`)이 표로 나오고, 받은 원본은 14일 동안 실행 결과물로 남습니다. 실패하면 깃허브가 메일을 보냅니다. **Actions → 데이터 자동 최신화 → Run workflow**로 아무 때나 돌릴 수 있습니다.
 
-비밀값(Settings → Secrets and variables → Actions): `HANPILJI_DSN`(Session pooler 주소) · `DATA_GO_KR_KEY` · `ECOS_KEY` · `RONE_KEY` · `KOSIS_KEY` · `LAW_OC`(없으면 테스트 계정). 매일 도니 무료 플랜이 7일 쉬어 멈추는 일도 없습니다.
+비밀값(Settings → Secrets and variables → Actions): `HANPILJI_DSN`(Session pooler 주소) · `DATA_GO_KR_KEY` · `ECOS_KEY` · `RONE_KEY` · `KOSIS_KEY` · `LAW_OC`(깃허브 실행기는 IP가 매번 바뀌어 법제처에 등록할 수 없으므로, Actions는 개정만 감지하고 본문은 IP를 등록한 서버가 받음). 매일 도니 무료 플랜이 7일 쉬어 멈추는 일도 없습니다.
+
+### 서버 배치
+
+[`scripts/batch.sh`](scripts/batch.sh) `daily|weekly|monthly`는 같은 수집기를 서버 cron에서 돌려 스키마 하나(`HANPILJI_DB_SCHEMA`)로 합친 DB에 씁니다. 실거래(아파트 · 오피스텔 · 연립다세대 · 단독다가구 매매 · 전월세 · 상업업무용 매매) · 건축물대장 · 주택 공시가격 · 공시지가는 서울 25개 구를 받습니다. 설정은 저장소 옆 `.env`에서 읽고, `HANPILJI_BATCH_SKIP=onbid,law`처럼 단계를 뺄 수 있습니다.
+
+**공공데이터포털 하루 한도를 나눠 씀.** 한도는 계정 · API마다 하나이고 자정에 다시 찹니다. 같은 계정을 Actions(강남 매일)와 다른 서비스도 쓰므로, 서버 배치는 실거래 API마다 · 건축물대장 전체로 하루 `HANPILJI_DG_MAX_CALLS`(기본 9,000번, 개발계정 한도 10,000 중 1,000을 남김)까지만 부릅니다. 닿으면 하루 한도에 걸렸을 때와 같이 그 종류만 멈추고 다음 날 이어 받습니다(실패로 세지 않음). 평소 실거래는 최근 3개월만 다시 받아 API마다 하루 75~150번이라, 상한에 닿는 건 서울을 처음 채울 때뿐입니다. 다른 서비스가 대량 수집을 하는 날에는 `.env`에서 이 값을 낮추세요.
 
 ## 📊 진행 상황
 
@@ -450,7 +456,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 | 공간 · 의미 검색 | 없이도 동작 | `scripts/init_db.sh --postgis --pgvector` |
 | 시범 구 | 서울 강남구 (11680) | `config.toml` `[pilot]` |
 | GPT 엔진 | Anthropic Claude `claude-opus-5-5`. 마트 함수는 엔진과 무관 | `config.toml` `[gpt]` |
-| 법제처 ID | 테스트 계정 `test` | `LAW_OC` |
+| 법제처 ID | 테스트 계정 `test`(2026-11-01부터 막혀 본문 못 받음) | `LAW_OC` + open.law.go.kr에 서버 IP 등록 |
 
 ## 📝 남은 일
 

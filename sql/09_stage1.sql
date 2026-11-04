@@ -8,7 +8,9 @@ INSERT INTO ops.ingest_source (source_id, name, operator, method, daily_limit, e
  ('dg_offi_rent',  '오피스텔 전월세 실거래가 자료',      '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126475/openapi.do'),
  ('dg_rh_trade',   '연립다세대 매매 실거래가 자료',      '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126467/openapi.do'),
  ('dg_rh_rent',    '연립다세대 전월세 실거래가 자료',    '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/data/15126473/openapi.do'),
- ('dg_sh_rent',    '단독/다가구 전월세 실거래가 자료',   '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=단독/다가구 전월세 실거래가')
+ ('dg_sh_rent',    '단독/다가구 전월세 실거래가 자료',   '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=단독/다가구 전월세 실거래가'),
+ ('dg_sh_trade',   '단독/다가구 매매 실거래가 자료',     '국토교통부', 'api', 10000, 'UTF-8', '매일',  '이용허락범위 제한 없음', 'https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=단독/다가구 매매 실거래가'),
+ ('dg_nrg_trade',  '상업업무용 부동산 매매 실거래가 자료', '국토교통부', 'api', 10000, 'UTF-8', '매일', '이용허락범위 제한 없음', 'https://www.data.go.kr/tcs/dss/selectDataSetList.do?keyword=상업업무용 부동산 매매 실거래가')
 ON CONFLICT (source_id) DO UPDATE SET encoding = excluded.encoding;
 
 -- 실거래가 응답 한 건 = 한 줄. 원본 모양 그대로(jsonb) 받고 core로 옮길 때 풂
