@@ -44,8 +44,11 @@ step() {   # step <이름> <제한 분> <명령…>
 case "$WHAT" in
   daily)
     step "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
-    step "실거래(오피스텔)" 30 "$PY" -m hanpilji.collectors.rtms --only offi_trade --only offi_rent
-    step "실거래(연립다세대)" 30 "$PY" -m hanpilji.collectors.rtms --only rh_trade --only rh_rent
+    # 오피스텔 · 연립다세대 · 단독다가구 전월세는 서울 25개 구(아파트는 5대 도메인 쪽 서울 자료를 읽기로 함).
+    # 처음엔 36개월을 채우느라 API마다 하루 한도(1,000회)에 걸려 멈추고, 다음 날 이어 받음(2~3일)
+    step "실거래(오피스텔, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only offi_trade --only offi_rent
+    step "실거래(연립다세대, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only rh_trade --only rh_rent
+    step "실거래(단독다가구 전월세, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only sh_rent
     step "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
     ;;
   weekly)
@@ -55,7 +58,7 @@ case "$WHAT" in
   monthly)
     step "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
     step "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
-    step "주택 공시가격" 30 "$PY" -m hanpilji.collectors.house_price
+    step "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
     ;;
   *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;;
 esac

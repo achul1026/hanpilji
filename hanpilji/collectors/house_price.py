@@ -24,7 +24,7 @@ import urllib.request
 import zipfile
 
 from hanpilji import db, config as config_mod
-from hanpilji import ingest
+from hanpilji import ingest, regions
 
 SOURCE = "molit_house_price"
 SOURCE_LABEL = "국토교통부 주택 공시가격 정보"
@@ -159,13 +159,13 @@ def load(conn, run_id, sigungu, rows, asof):
 def main(argv=None, portal=None, today=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
-    ap.add_argument("--sigungu", action="append", help="시군구 코드 5자리(기본 config [pilot] sigungu)")
+    ap.add_argument("--sigungu", action="append", help="시군구 코드 5자리 또는 seoul(서울 25개 구). 기본 config [pilot] sigungu")
     ap.add_argument("--zip", help="받아 둔 압축 파일(주면 포털에서 받지 않음)")
     ap.add_argument("--force", action="store_true", help="이미 넣은 파일이어도 다시 넣음")
     args = ap.parse_args(argv)
 
     cfg = config_mod.load(args.config)
-    sigungus = args.sigungu or cfg["pilot"]["sigungu"]
+    sigungus = regions.expand(args.sigungu or cfg["pilot"]["sigungu"])
     today = today or datetime.date.today()
     portal = portal or Portal()
     with db.connect(cfg["db"]["dsn"]) as conn:
