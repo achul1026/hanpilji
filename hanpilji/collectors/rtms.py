@@ -211,6 +211,16 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
     src, label, base, src_label = (KINDS[kind][k] for k in ("source", "label", "base", "src"))
     loaded = rejected = 0
     seen, keys = {}, []
+    # 단지 없는 종류는 법정동 코드가 응답에 없을 수 있어 동 이름 → 코드표(core.dim_region)를 한 번에 읽어 둠.
+    # 같은 이름이 둘 이상이면(코드 변경 등) 어느 쪽인지 몰라 넣지 않음(시군구 단위로 남음)
+    dong_codes = {}
+    if kind in NO_COMPLEX:
+        counts = {}
+        for code, emd in conn.execute("SELECT lawd_cd, emd FROM core.dim_region WHERE left(lawd_cd, 5) = %s AND emd IS NOT NULL",
+                                      (sigungu,)).fetchall():
+            counts[emd] = counts.get(emd, 0) + 1
+            dong_codes[emd] = code
+        dong_codes = {k: c for k, c in dong_codes.items() if counts[k] == 1}
     # 파이프라인: 줄마다 응답을 기다리지 않고 몰아 보냄. 원격 DB(Supabase)에서는 왕복 수천 번이 몇 번으로 줄어듦
     with conn.pipeline(), conn.cursor() as cur:
         cur.execute("DELETE FROM stg.rtms_raw WHERE source_id = %s AND sigungu_cd = %s AND deal_ym = %s",
@@ -234,13 +244,8 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
                 continue
             v["deal_id" if base == "trade" else "rent_id"] = key
             keys.append(key)
-            if kind in NO_COMPLEX and v["lawd_cd"].endswith("00000") and _s(row, "umdNm"):
-                # 법정동 코드가 응답에 없으면 동 이름으로 코드표(core.dim_region)에서 찾음. 없으면 시군구 단위 그대로
-                # 같은 이름이 둘 이상이면(코드 변경 등) 어느 쪽인지 몰라 시군구 단위로 둠
-                hits = cur.execute("""SELECT lawd_cd FROM core.dim_region WHERE left(lawd_cd, 5) = %s AND emd = %s
-                                      LIMIT 2""", (sigungu, _s(row, "umdNm"))).fetchall()
-                if len(hits) == 1:
-                    v["lawd_cd"] = hits[0][0]
+            if v["lawd_cd"].endswith("00000") and dong_codes.get(_s(row, "umdNm")):
+                v["lawd_cd"] = dong_codes[_s(row, "umdNm")]
             _ensure_dims(cur, v["lawd_cd"], row, asof, label, complex_too=kind not in NO_COMPLEX)
             if base == "trade":
                 cur.execute(
