@@ -21,7 +21,7 @@ fi
 # 설정 파일이 없으면 멈춤(없이 돌면 셸에 남은 다른 DB 주소로 쓸 수 있음)
 [ -r "$ENV_FILE" ] || { echo "설정 파일 없음: $ENV_FILE" >> "$LOG"; exit 2; }
 # 셸에서 물려받은 값은 버리고 .env에 적힌 값만 씀
-unset HANPILJI_DSN HANPILJI_GPT_DSN HANPILJI_DB_SCHEMA HANPILJI_DB_VIA
+unset HANPILJI_DSN HANPILJI_GPT_DSN HANPILJI_DB_SCHEMA HANPILJI_DB_VIA HANPILJI_BATCH_SKIP
 set -a; . "$ENV_FILE"; set +a
 [ -n "${HANPILJI_DSN:-}" ] || { echo "$ENV_FILE 에 HANPILJI_DSN 없음" >> "$LOG"; exit 2; }
 # 서버는 스키마 하나(hanpilji) 구성이라 꼭 있어야 함. 없으면 core. · ops. 그대로 보내 전부 실패함
@@ -30,8 +30,22 @@ cd "$ROOT"
 export PYTHONUNBUFFERED=1
 failed=()
 
-step() {   # step <이름> <제한 분> <명령…>
-  local name="$1" mins="$2"; shift 2
+# .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
+# (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
+# bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
+KEYS="apt offi rh sh onbid law market bld luinfo house_price freshness"
+SKIP=" ${HANPILJI_BATCH_SKIP:-} "
+SKIP="${SKIP//,/ }"
+for k in $SKIP; do
+  [[ " $KEYS " == *" $k "* ]] || echo "!! HANPILJI_BATCH_SKIP의 '$k'는 없는 키라 무시함 (쓸 수 있는 키: $KEYS)" >> "$LOG"
+done
+
+step() {   # step <키> <이름> <제한 분> <명령…>
+  local key="$1" name="$2" mins="$3"; shift 3
+  if [[ "$SKIP" == *" $key "* ]]; then
+    echo "-- 건너뜀 $name (HANPILJI_BATCH_SKIP에 $key)" >> "$LOG"
+    return 0
+  fi
   echo "== $(date '+%F %T') $name" >> "$LOG"
   if timeout "${mins}m" "$@" >> "$LOG" 2>&1; then
     echo "-- 성공 $name" >> "$LOG"
@@ -43,27 +57,27 @@ step() {   # step <이름> <제한 분> <명령…>
 
 case "$WHAT" in
   daily)
-    step "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
+    step apt "실거래(아파트)" 30 "$PY" -m hanpilji.collectors.rtms --only trade --only rent
     # 오피스텔 · 연립다세대 · 단독다가구 전월세는 서울 25개 구(아파트는 5대 도메인 쪽 서울 자료를 읽기로 함).
     # 처음엔 36개월을 채우느라 API마다 하루 한도(1,000회)에 걸려 멈추고, 다음 날 이어 받음(2~3일)
-    step "실거래(오피스텔, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only offi_trade --only offi_rent
-    step "실거래(연립다세대, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only rh_trade --only rh_rent
-    step "실거래(단독다가구 전월세, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only sh_rent
-    step "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
+    step offi "실거래(오피스텔, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only offi_trade --only offi_rent
+    step rh "실거래(연립다세대, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only rh_trade --only rh_rent
+    step sh "실거래(단독다가구 전월세, 서울)" 120 "$PY" -m hanpilji.collectors.rtms --sigungu seoul --only sh_rent
+    step onbid "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
     ;;
   weekly)
-    step "법령" 20 "$PY" -m hanpilji.collectors.law
-    step "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
+    step law "법령" 20 "$PY" -m hanpilji.collectors.law
+    step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)
-    step "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
-    step "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
-    step "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
+    step bld "건축물대장" 240 "$PY" -m hanpilji.collectors.bld --refresh
+    step luinfo "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
+    step house_price "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
     ;;
   *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;;
 esac
 
-step "수집처별 마지막 성공" 5 "$PY" scripts/freshness.py
+step freshness "수집처별 마지막 성공" 5 "$PY" scripts/freshness.py
 # 로그는 60일만 둠
 find "$LOG_DIR" -name '*.log' -mtime +60 ! -name skipped.log -delete 2>/dev/null
 
