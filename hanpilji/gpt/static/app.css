@@ -49,6 +49,7 @@ a{color:var(--survey)}
 .conv:hover .del,.conv .del:focus-visible{opacity:1}
 .scope{font-size:12px;line-height:1.6;color:var(--muted);border-top:1px dashed var(--line);padding:10px 6px 0}
 .scope b{display:block;color:var(--ink);font-weight:600;margin-bottom:2px}
+.scope .credit{display:block;margin-top:6px;font-size:11px}
 
 /* 가운데: 대화 */
 .main{display:flex;flex-direction:column;min-width:0;min-height:0;background:var(--sheet);position:relative}
@@ -140,6 +141,7 @@ tr:last-child td{border-bottom:0}
 .map svg path.m-nb:hover,.map svg path.m-bd:hover{stroke:var(--survey);stroke-opacity:1}
 .map .tiles{opacity:.9}
 .mapw{position:relative}
+.mapcredit{position:absolute;right:6px;bottom:6px;padding:2px 6px;border-radius:4px;background:color-mix(in srgb,var(--sheet) 85%,transparent);color:var(--muted);font-size:10.5px;line-height:1.3;pointer-events:none}
 .mapf{overflow:hidden;border-radius:6px;touch-action:none;cursor:grab;user-select:none}
 .mapf:active{cursor:grabbing}
 .mapz{position:absolute;top:8px;left:8px;display:flex;flex-direction:column;border:1px solid var(--line);border-radius:8px;background:var(--sheet);overflow:hidden;box-shadow:0 2px 8px rgba(0,0,0,.12)}
@@ -232,6 +234,7 @@ tr:last-child td{border-bottom:0}
 .subj{display:flex;align-items:center;gap:11px}
 .subj .thumb{width:50px;height:38px;flex:none;border-radius:9px;background:var(--survey-soft);display:grid;place-items:center;padding:4px}
 .subj .thumb svg{width:100%;height:100%}
+.subj .vwsrc{display:block;font-size:10.5px;color:var(--muted)}
 .subj .st{display:flex;flex-direction:column;min-width:0}
 .subj .st b{font-size:15px;font-weight:700;line-height:1.35}
 .subj .st span{font-size:12.5px;color:var(--muted)}
