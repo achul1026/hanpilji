@@ -1,4 +1,4 @@
-"""한필지 웹(대화 + 원자료 창). 서버는 파이썬 표준 라이브러리만, 화면은 static/ 의 파일 셋.
+"""한필지 웹(대화 + 근거 자료 창). 서버는 파이썬 표준 라이브러리만, 화면은 static/ 의 파일 셋.
 
     HANPILJI_LLM_API_KEY=... python -m hanpilji.gpt.web [--port 8000] [--host 127.0.0.1]
 

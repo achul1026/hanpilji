@@ -1,4 +1,4 @@
-/* 한필지 웹. 지적도 위의 기록부: 왼쪽 대화 목록, 가운데 대화, 누르면 뜨는 원자료 창(PC 가운데 모달 · 휴대폰 아래 시트).
+/* 한필지 웹. 지적도 위의 기록부: 왼쪽 대화 목록, 가운데 대화, 누르면 뜨는 근거 자료 창(PC 가운데 모달 · 휴대폰 아래 시트).
    색: 측량 청색(--survey)이 조작 · 근거, 도장 붉은색(--seal)은 근거 도장과 표시에만.
    글꼴: 한글은 모두 Pretendard 하나(굵기로만 위계), 고정폭(JetBrains Mono)은 PNU · 날짜 같은 영문 · 숫자에만 */
 :root{
@@ -323,7 +323,7 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .go:disabled{opacity:.35;cursor:default}
 .fine{max-width:800px;margin:6px auto 0;text-align:center;font-size:11.5px;color:var(--muted)}
 
-/* 원자료 창: PC는 가운데 모달, 휴대폰은 아래에서 올라오는 시트 */
+/* 근거 자료 창: PC는 가운데 모달, 휴대폰은 아래에서 올라오는 시트 */
 .drawer{position:fixed;left:50%;top:50%;z-index:30;width:min(780px,calc(100vw - 48px));max-height:min(86vh,860px);background:var(--paper);border:1px solid var(--line);border-radius:16px;box-shadow:0 24px 70px -20px rgba(8,14,20,.45);display:flex;flex-direction:column;min-width:0;overflow:hidden;transform:translate(-50%,-48%) scale(.985);opacity:0;transition:transform .18s,opacity .18s}
 .app.sheet .drawer{transform:translate(-50%,-50%);opacity:1}
 .dhead{display:flex;align-items:center;justify-content:space-between;padding:14px 12px 8px 20px;position:relative}

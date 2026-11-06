@@ -479,7 +479,7 @@ function cardEl(b, compact) {
   return box;
 }
 
-// 블록 하나. inline = 답 안에 짧게, 아니면 원자료 창에 전부. 기간을 바꾸면 다시 조회해 같은 자리에서 바꿈
+// 블록 하나. inline = 답 안에 짧게, 아니면 근거 자료 창에 전부. 기간을 바꾸면 다시 조회해 같은 자리에서 바꿈
 function blockEl(item, idx, inlineMode) {
   const b = item.blocks[idx], wrap = el("div", "blk"); wrap.dataset.ref = b.ref;
   const hd = el("div", "hd"), t = el("div", "t"), tools = el("div", "tools");
@@ -528,14 +528,14 @@ function blockEl(item, idx, inlineMode) {
   return wrap;
 }
 function alertLine(after, text) { const p = el("div", "err-msg", text); after.after(p); setTimeout(() => p.remove(), 5000); }
-// 답 안과 원자료 창에 같은 블록이 둘 다 떠 있으면 나머지 하나도 바꿈
+// 답 안과 근거 자료 창에 같은 블록이 둘 다 떠 있으면 나머지 하나도 바꿈
 function refreshTwin(item, idx, inlineMode) {
   const ref = String(item.blocks[idx].ref);
   if (inlineMode && drawerItem === item) renderDrawer(item, activeRef);
   if (!inlineMode && item.el) { const old = item.el.querySelector(`.inline .blk[data-ref="${ref}"]`); if (old) old.replaceWith(blockEl(item, idx, true)); }
 }
 
-// ------------------------------------------------------------ 원자료 창 (PC 모달 · 휴대폰 아래 시트)
+// ------------------------------------------------------------ 근거 자료 창 (PC 모달 · 휴대폰 아래 시트)
 let drawerItem = null, activeRef = null;
 function renderDrawer(item, ref, detail) {
   drawerItem = item; activeRef = ref;
