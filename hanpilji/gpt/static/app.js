@@ -162,9 +162,15 @@ function md(text) {
 }
 
 // ------------------------------------------------------------ 블록
+// V-World 자료는 출처 표기만 하면 상업적 이용 가능(브이월드 답변 2026-11-03). 이름 뒤에 제공 기관을 붙임
+const VW_CREDIT = "V-World(국토교통부)";
+// 한 출처 칸에 「건축물대장 · V-World 토지이용계획」처럼 여럿이 묶여 올 수 있어 조각마다 봄
+const srcName = x => String(x).split(" · ").map(p => /^V-World\b/.test(p) && !p.includes("국토교통부") ? p + "(국토교통부)" : p).join(" · ");
+const fromVworld = b => ((b.source || {}).sources || []).some(x => /V-World/.test(x));
+
 function sourceLine(b) {
   const s = b.source || {}, n = s.row_total == null ? "" : (s.shown === s.row_total ? nf.format(s.row_total) + "건" : "전체 " + nf.format(s.row_total) + "건 중 " + s.shown + "건");
-  return [(s.sources || []).join(" · "), n, s.asof && "기준 " + s.asof].filter(Boolean).join(" · ");
+  return [(s.sources || []).map(srcName).join(" · "), n, s.asof && "기준 " + s.asof].filter(Boolean).join(" · ");
 }
 
 function tableEl(b, limit) {
@@ -348,14 +354,18 @@ function mapEl(b, narrow) {
     const r = frame.getBoundingClientRect(), k = W / r.width;
     view.mx += ((e.clientX - r.left) * k - W / 2) / view.S; view.my += ((e.clientY - r.top) * k - H / 2) / view.S; zoomBy(1);
   });
-  const wrap = el("div", "mapw"); wrap.append(frame, zb); box.append(wrap);
+  const wrap = el("div", "mapw"); wrap.append(frame, zb);
+  // 지도 귀퉁이 출처: 배경지도가 V-World이거나 지적도 · 건물 선이 V-World에서 왔으면 늘 보임
+  const vwTiles = tiles && /V-World/.test(tiles.attr || "");
+  if (vwTiles || fromVworld(b)) wrap.append(el("div", "mapcredit", (vwTiles ? "" : "지적도 ") + "© " + VW_CREDIT));
+  box.append(wrap);
   const lg = el("div", "legend");
   const key = (cls, label) => { const sp = el("span"), i = el("i", "mk mk-" + cls); sp.append(i, label); lg.append(sp); };
   key("tg", "대상 필지 " + target.length + "개");
   if (feats.some(f => f.layer === "이웃 필지")) key("nb", "이웃 필지");
   if (feats.some(f => f.layer === "건물")) key("bd", "건물 윤곽");
   lg.append(el("span", null, b.note || ""));
-  if (tiles && tiles.attr) lg.append(el("span", null, tiles.attr));
+  if (tiles && tiles.attr && !/V-World/.test(tiles.attr)) lg.append(el("span", null, tiles.attr));
   box.append(lg);
   return box;
 }
@@ -604,7 +614,7 @@ const CHECK = () => { const sv = svg("svg", { width: 12, height: 12, viewBox: "0
 function stampChip(item, ref, count) {
   const b = item.blocks.find(x => x.ref === ref) || item.blocks[0];
   if (!b) return null;
-  const s = b.source || {}, src = ((s.sources || [])[0] || b.title).replace(/\s*\(MST \d+\)/, "").replace(/ · 전월세/, "");
+  const s = b.source || {}, src = srcName((s.sources || [])[0] || b.title).replace(/\s*\(MST \d+\)/, "").replace(/ · 전월세/, "");
   const n = count ? ` ${nf.format(count)}건` : b.tool === "q_deal_list" && s.row_total ? ` ${nf.format(s.row_total)}건` : "", more = item.blocks.length > 1 ? ` 외 ${item.blocks.length - 1}` : "";
   // 숫자를 모두 원자료에서 찾았을 때만 「원자료 일치」. 계산값 · 조문 속 숫자는 못 찾을 수 있어 일부 일치는 표시하지 않음
   const v = item.verify, ok = v && v.checked && v.matched === v.checked;
@@ -618,7 +628,8 @@ function subjRow(sub) {
   if (!sub || !sub.name) return null;
   const row = el("div", "subj"), th = el("div", "thumb"), tx = el("div", "st");
   if (sub.parcel && sub.parcel.d) {
-    const sv = svg("svg", { viewBox: `-3 -3 ${sub.parcel.w + 6} ${sub.parcel.h + 6}`, role: "img", "aria-label": sub.name + " 필지 모양" });
+    const sv = svg("svg", { viewBox: `-3 -3 ${sub.parcel.w + 6} ${sub.parcel.h + 6}`, role: "img", "aria-label": sub.name + " 필지 모양(지적도 출처 " + VW_CREDIT + ")" });
+    sv.append(svg("title", {}, "필지 모양 · 출처 V-World 연속지적도(국토교통부)"));
     sv.append(svg("path", { d: sub.parcel.d, fill: "var(--survey)", "fill-opacity": .18, stroke: "var(--survey)", "stroke-width": 2.6, "stroke-linejoin": "round", "vector-effect": "non-scaling-stroke" }));
     th.append(sv); row.append(th);
   }
@@ -626,6 +637,7 @@ function subjRow(sub) {
   const addr = [String(sub.address || "").replace(/^서울특별시\s*/, ""), sub.build_year && sub.build_year + "년 준공",
     sub.households && nf.format(sub.households) + "세대", sub.parking_ph && "세대당 주차 " + sub.parking_ph + "대"].filter(Boolean).join(" · ");
   if (addr) tx.append(el("span", null, addr));
+  if (sub.parcel && sub.parcel.d) tx.append(el("small", "vwsrc", "필지 모양 © " + VW_CREDIT));
   row.append(tx); return row;
 }
 
