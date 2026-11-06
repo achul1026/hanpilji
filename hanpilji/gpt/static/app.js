@@ -568,7 +568,8 @@ function showDrawer() {
   clearTimeout(drawerTimer);
   if (!app.classList.contains("sheet")) {
     const a = document.activeElement;
-    drawerOpener = a && a !== document.body && !drawer.contains(a) ? a : lastTrigger;
+    drawerOpener = lastTrigger && lastTrigger.isConnected ? lastTrigger : a && a !== document.body && !drawer.contains(a) ? a : null;
+    lastTrigger = null;
   }
   app.classList.remove("menu");
   drawer.hidden = false; void drawer.offsetWidth;   // 나타날 때 움직임이 보이도록
