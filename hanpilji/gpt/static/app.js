@@ -552,6 +552,7 @@ function renderDrawer(item, ref, detail) {
 }
 // detail: 「더보기」 줄의 이름과 내용. 가리킨 원자료가 없으면 내용만 엶
 function openDrawer(item, ref, detail) {
+  if (item.el && !item.el.isConnected) return;   // 다른 대화로 옮긴 뒤 늦게 온 결과는 띄우지 않음
   if (!item.blocks.some(b => b.ref === ref)) { if (!detail) return; ref = null; }
   clearTimeout(drawerTimer); drawer.hidden = false;   // 크기를 재는 블록이 있어도 제대로 그려지게 먼저 보임
   renderDrawer(item, ref, detail);
@@ -560,16 +561,20 @@ function openDrawer(item, ref, detail) {
 }
 // 창을 띄우고 닫기. 닫으면 연 단추로 초점을 돌려줌. 다시 열 수 있게 위 단추를 보임
 const drawer = $("drawer");
-let drawerOpener = null, drawerTimer = 0;
+let drawerOpener = null, drawerTimer = 0, lastTrigger = null;
+// 마우스로 눌러도 초점이 안 가는 브라우저(사파리 등)를 위해 마지막으로 누른 단추를 기억
+document.addEventListener("click", e => { const t = e.target.closest && e.target.closest("button,a"); if (t && !drawer.contains(t)) lastTrigger = t; }, true);
 function showDrawer() {
   clearTimeout(drawerTimer);
   if (!app.classList.contains("sheet")) {
     const a = document.activeElement;
-    drawerOpener = a && a !== document.body && !drawer.contains(a) ? a : null;
+    drawerOpener = lastTrigger && lastTrigger.isConnected ? lastTrigger : a && a !== document.body && !drawer.contains(a) ? a : null;
+    lastTrigger = null;
   }
   app.classList.remove("menu");
   drawer.hidden = false; void drawer.offsetWidth;   // 나타날 때 움직임이 보이도록
   app.classList.add("sheet"); $("scrim").hidden = false;
+  $("side").inert = $("main").inert = true;   // 화면 읽기 프로그램도 창 뒤로 못 가게
   $("drawerBtn").hidden = !drawerItem;
   $("drawerClose").focus({ preventScroll: true });
 }
@@ -577,9 +582,10 @@ function closeSheets() {
   const wasOpen = app.classList.contains("sheet");
   app.classList.remove("sheet", "menu"); $("scrim").hidden = true;
   if (!wasOpen) return;
+  $("side").inert = $("main").inert = false;
   clearTimeout(drawerTimer);
   drawerTimer = setTimeout(() => { if (!app.classList.contains("sheet")) drawer.hidden = true; }, 240);
-  if (drawerOpener && drawerOpener.isConnected) drawerOpener.focus({ preventScroll: true });
+  if (drawerOpener && drawerOpener.isConnected) drawerOpener.focus({ preventScroll: true }); else q.focus({ preventScroll: true });
   drawerOpener = null;
 }
 $("drawerClose").onclick = closeSheets;
@@ -1074,7 +1080,7 @@ async function send(text, as) {
   } catch (e) { item.error = String(e.message || e); }
   renderAnswer(item, box);
   conv.items.push(item); conv.at = Date.now(); save(); renderConvs();
-  busy = false; go.disabled = !q.value.trim(); q.focus();
+  busy = false; go.disabled = !q.value.trim(); if (!app.classList.contains("sheet")) q.focus();
 }
 
 // ------------------------------------------------------------ 입력
