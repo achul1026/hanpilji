@@ -479,7 +479,7 @@ function cardEl(b, compact) {
   return box;
 }
 
-// 블록 하나. inline = 답 안에 짧게, 아니면 서랍에 전부. 기간을 바꾸면 다시 조회해 같은 자리에서 바꿈
+// 블록 하나. inline = 답 안에 짧게, 아니면 근거 자료 창에 전부. 기간을 바꾸면 다시 조회해 같은 자리에서 바꿈
 function blockEl(item, idx, inlineMode) {
   const b = item.blocks[idx], wrap = el("div", "blk"); wrap.dataset.ref = b.ref;
   const hd = el("div", "hd"), t = el("div", "t"), tools = el("div", "tools");
@@ -528,14 +528,14 @@ function blockEl(item, idx, inlineMode) {
   return wrap;
 }
 function alertLine(after, text) { const p = el("div", "err-msg", text); after.after(p); setTimeout(() => p.remove(), 5000); }
-// 답 안과 서랍에 같은 블록이 둘 다 떠 있으면 나머지 하나도 바꿈
+// 답 안과 근거 자료 창에 같은 블록이 둘 다 떠 있으면 나머지 하나도 바꿈
 function refreshTwin(item, idx, inlineMode) {
   const ref = String(item.blocks[idx].ref);
   if (inlineMode && drawerItem === item) renderDrawer(item, activeRef);
   if (!inlineMode && item.el) { const old = item.el.querySelector(`.inline .blk[data-ref="${ref}"]`); if (old) old.replaceWith(blockEl(item, idx, true)); }
 }
 
-// ------------------------------------------------------------ 근거 서랍
+// ------------------------------------------------------------ 근거 자료 창 (PC 모달 · 휴대폰 아래 시트)
 let drawerItem = null, activeRef = null;
 function renderDrawer(item, ref, detail) {
   drawerItem = item; activeRef = ref;
@@ -553,13 +553,47 @@ function renderDrawer(item, ref, detail) {
 // detail: 「더보기」 줄의 이름과 내용. 가리킨 원자료가 없으면 내용만 엶
 function openDrawer(item, ref, detail) {
   if (!item.blocks.some(b => b.ref === ref)) { if (!detail) return; ref = null; }
+  clearTimeout(drawerTimer); drawer.hidden = false;   // 크기를 재는 블록이 있어도 제대로 그려지게 먼저 보임
   renderDrawer(item, ref, detail);
-  app.classList.remove("nodrawer");
-  if (!wide()) { app.classList.add("sheet"); $("scrim").hidden = false; }
+  $("dbody").scrollTop = 0;
+  showDrawer();
 }
-function closeSheets() { app.classList.remove("sheet", "menu"); $("scrim").hidden = true; }
-$("drawerClose").onclick = () => { if (wide()) app.classList.add("nodrawer"); else closeSheets(); };
-$("drawerBtn").onclick = () => { app.classList.add("sheet"); $("scrim").hidden = false; };
+// 창을 띄우고 닫기. 닫으면 연 단추로 초점을 돌려줌. 다시 열 수 있게 위 단추를 보임
+const drawer = $("drawer");
+let drawerOpener = null, drawerTimer = 0;
+function showDrawer() {
+  clearTimeout(drawerTimer);
+  if (!app.classList.contains("sheet")) {
+    const a = document.activeElement;
+    drawerOpener = a && a !== document.body && !drawer.contains(a) ? a : null;
+  }
+  app.classList.remove("menu");
+  drawer.hidden = false; void drawer.offsetWidth;   // 나타날 때 움직임이 보이도록
+  app.classList.add("sheet"); $("scrim").hidden = false;
+  $("drawerBtn").hidden = !drawerItem;
+  $("drawerClose").focus({ preventScroll: true });
+}
+function closeSheets() {
+  const wasOpen = app.classList.contains("sheet");
+  app.classList.remove("sheet", "menu"); $("scrim").hidden = true;
+  if (!wasOpen) return;
+  clearTimeout(drawerTimer);
+  drawerTimer = setTimeout(() => { if (!app.classList.contains("sheet")) drawer.hidden = true; }, 240);
+  if (drawerOpener && drawerOpener.isConnected) drawerOpener.focus({ preventScroll: true });
+  drawerOpener = null;
+}
+$("drawerClose").onclick = closeSheets;
+$("drawerBtn").onclick = () => { if (drawerItem) showDrawer(); };
+document.addEventListener("keydown", e => {
+  if (e.key === "Escape" && !$("scrim").hidden) { e.preventDefault(); closeSheets(); return; }
+  // 창이 떠 있으면 Tab 이 창 밖으로 나가지 않게
+  if (e.key !== "Tab" || !app.classList.contains("sheet")) return;
+  const f = [...drawer.querySelectorAll('button,[href],input,select,textarea,[tabindex]:not([tabindex="-1"])')].filter(x => !x.disabled && x.offsetParent);
+  if (!f.length) return;
+  const first = f[0], last = f[f.length - 1];
+  if (e.shiftKey && (document.activeElement === first || !drawer.contains(document.activeElement))) { e.preventDefault(); last.focus(); }
+  else if (!e.shiftKey && (document.activeElement === last || !drawer.contains(document.activeElement))) { e.preventDefault(); first.focus(); }
+});
 $("menuBtn").onclick = () => { app.classList.add("menu"); $("scrim").hidden = false; };
 $("scrim").onclick = closeSheets;
 
@@ -979,7 +1013,7 @@ function openConv(c) {
   renderConvs(); scroll.scrollTop = scroll.scrollHeight;
 }
 const wide = () => !matchMedia("(max-width:1020px)").matches;
-function clearDrawer() { drawerItem = null; if (wide()) app.classList.add("nodrawer"); $("tabs").textContent = ""; const body = $("dbody"); body.textContent = ""; body.append(emptyDrawer.cloneNode(true)); }
+function clearDrawer() { drawerItem = null; $("drawerBtn").hidden = true; $("tabs").textContent = ""; const body = $("dbody"); body.textContent = ""; body.append(emptyDrawer.cloneNode(true)); }
 const emptyDrawer = $("dbody").firstElementChild.cloneNode(true);
 function reset() { cur = null; log.textContent = ""; showLog(false); $("topTitle").textContent = "한필지"; clearDrawer(); renderConvs(); q.focus(); }
 $("newChat").onclick = () => { reset(); closeSheets(); };
@@ -1040,7 +1074,6 @@ async function send(text, as) {
   } catch (e) { item.error = String(e.message || e); }
   renderAnswer(item, box);
   conv.items.push(item); conv.at = Date.now(); save(); renderConvs();
-  if (cur === conv && (item.kind === "report" || item.kind === "compare") && item.blocks.length && wide()) openDrawer(item, item.blocks[0].ref);
   busy = false; go.disabled = !q.value.trim(); q.focus();
 }
 
@@ -1051,4 +1084,3 @@ q.addEventListener("keydown", e => { if (e.key === "Enter" && !e.shiftKey && !e.
 $("form").onsubmit = e => { e.preventDefault(); send(); };
 for (const t of EXAMPLES) $("examples").append(btn("ex", t, () => send(t)));
 renderConvs(); showLog(false); grow();
-if (wide()) app.classList.add("nodrawer");
