@@ -131,6 +131,10 @@ def load_year(conn, run_id, rows, asof, year=None):
                 loaded += 1
         for why, row in samples:
             ingest.reject(conn, run_id, SOURCE, "core.fact_land_price", why, row)
+        # 임시 표는 통계가 없어 planner가 몇 줄인지 몰라, 아래 「빠진 필지 지우기」가 88만 × 88만 줄을 하나씩 맞대는
+        # 계획을 고른 적이 있음(개발서버 2026-11-10, 20분 넘게 안 끝남). 색인 + 통계로 어떤 계획이어도 빠르게
+        cur.execute("CREATE INDEX ON land_in (pnu, base_year)")
+        cur.execute("ANALYZE land_in")
         cur.execute("""INSERT INTO core.dim_region (lawd_cd, sido, sigungu, emd, source, asof)
                        SELECT DISTINCT ON (lawd_cd) lawd_cd, '서울특별시', sigungu, emd, %s, %s FROM land_in
                        ON CONFLICT (lawd_cd) DO UPDATE SET emd = coalesce(core.dim_region.emd, excluded.emd),
@@ -144,7 +148,8 @@ def load_year(conn, run_id, rows, asof, year=None):
                        ON CONFLICT (pnu, base_year, is_standard) DO UPDATE
                            SET price_per_m2 = excluded.price_per_m2, asof = excluded.asof
                            WHERE core.fact_land_price.source = excluded.source""", (SOURCE_LABEL, asof))
-        # 고친 파일에서 빠진 필지는 이 수집처 줄만 지움(다른 수집처 줄은 그대로)
+        # 고친 파일에서 빠진 필지는 이 수집처 줄만 지움(다른 수집처 줄은 그대로). 방금 넣은 줄까지 통계에 들어가게 먼저 ANALYZE
+        cur.execute("ANALYZE core.fact_land_price")
         for (y,) in cur.execute("SELECT DISTINCT base_year FROM land_in").fetchall():
             cur.execute("""DELETE FROM core.fact_land_price f WHERE f.base_year = %s AND f.source = %s
                            AND NOT EXISTS (SELECT 1 FROM land_in i WHERE i.pnu = f.pnu AND i.base_year = f.base_year)""",

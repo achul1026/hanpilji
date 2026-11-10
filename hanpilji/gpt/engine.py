@@ -8,6 +8,7 @@ import json
 import os
 from dataclasses import dataclass, field
 
+from hanpilji import scope
 from hanpilji.gpt import tools as tools_mod
 
 SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어로, 짧고 쉬운 문장으로 답한다.
@@ -23,10 +24,7 @@ SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어�
 5. 투자 조언은 하지 않는다. 사라 · 팔아라 · 오를 것이다 · 지금이 기회다 같은 권유나 전망을 하지 않는다.
    그런 질문에는 판단은 하지 않는다고 말하고, 데이터로 확인할 수 있는 사실(최근 거래 · 전세가율 등)만 준다.
 6. 법령은 조문 번호와 법령명을 밝히고, 법률 자문이 아니라 조문 안내라고 한 줄 덧붙인다.
-7. 지금 데이터 범위: 실거래가와 행위제한 조례는 서울 강남구(11680)만, 실거래가는 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 최근 36개월
-   (단지 순위와 구 · 동 시세 추이는 아파트만).
-   법령은 부동산 법령 21개(경매 · 공매 법령 포함). 토지 · 공시지가 · 용도지역 · 건축물대장은 강남구 아파트 단지 필지만 있다. 주택 공시가격은 강남구 아파트 · 연립 · 다세대 2026년(1월 1일 기준) 전부. 범위 밖이면 그렇다고 말한다.
-   시세 추이는 q_price_trend, 공시지가 추이 · 상승률은 q_land_price_trend, 공시지가와 실거래가 비교는 q_price_vs_official,
+{scope_note}   시세 추이는 q_price_trend, 공시지가 추이 · 상승률은 q_land_price_trend, 공시지가와 실거래가 비교는 q_price_vs_official,
    아파트 · 빌라의 주택 공시가격(보유세 · 건강보험료 기준이 되는 집값)은 q_house_price로 찾는다(오피스텔은 공시가격이 없다).
    단지 시세를 물으면 q_house_price도 함께 불러, 같은 면적 공시가격을 더보기 한 줄(「공시가격」)로만 보인다(핵심 칸에는 넣지 않는다).
    금리 · 가격지수 · 물가 · 인구 같은 시장 지표는 q_market_series로 찾는다. 지표 사이의 원인 · 결과는 말하지 않는다.
@@ -45,6 +43,23 @@ SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어�
 오늘: {today}"""
 
 # 웹 화면: 핵심 하나만 보이고 부가정보는 눌러야 열림(2026-10-29 방향). 도구 결과는 「열기」로 원자료 블록이 열림
+# 7번 「지금 데이터 범위」: Supabase(강남구) · 개발서버(서울) 구성에 따라 바꿔 끼움(hanpilji/scope.py)
+SCOPE_NOTE = {
+    "gangnam": """7. 지금 데이터 범위: 실거래가와 행위제한 조례는 서울 강남구(11680)만, 실거래가는 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 최근 36개월
+   (단지 순위와 구 · 동 시세 추이는 아파트만).
+   법령은 부동산 법령 21개(경매 · 공매 법령 포함). 토지 · 공시지가 · 용도지역 · 건축물대장은 강남구 아파트 단지 필지만 있다. 주택 공시가격은 강남구 아파트 · 연립 · 다세대 2026년(1월 1일 기준) 전부. 범위 밖이면 그렇다고 말한다.
+""",
+    "seoul": """7. 지금 데이터 범위: 실거래가는 서울 25개 구, 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 최근 36개월
+   (단지 순위와 구 · 동 시세 추이는 아파트만, 구 하나씩). 개별공시지가는 서울 모든 필지.
+   법령은 부동산 법령 21개(경매 · 공매 법령 포함). 행위제한 조례 · 주택 공시가격 · 공매 · 지적도는 아직 강남구만 있다.
+   건축물대장 · 용도지역은 강남구 밖 단지는 채우는 중이라, 비어 있으면 「아직 받는 중」이라고 말한다. 범위 밖이면 그렇다고 말한다.
+   단지 · 동 이름으로 물으면 sigungu를 비워 둔다(도구가 이름으로 구를 찾는다). 구 · 동 전체 시세나 순위는 sigungu에 구 이름을 넣고,
+   어느 구인지 모르면 되묻는다.
+""",
+}
+SCREEN_SCOPE_OUT = {"gangnam": "강남구 밖 등", "seoul": "서울 밖 등"}
+
+
 SCREEN = """
 
 화면 안내: 이 답은 웹 화면에 나간다. 사용자는 긴 답을 읽지 않는다. 묻는 것의 핵심 하나만 보이고, 나머지는 눌러야 열린다.
@@ -134,6 +149,14 @@ SCREEN = """
      :::
 - 끝인사 · 「더 궁금하면 물어보세요」 · 「투자 판단은 하지 않아요」 같은 안내 문장은 쓰지 않는다(화면 아래에 늘 있음)."""
 
+def system_prompt(today=None, screen=False, data_scope=None):
+    data_scope = data_scope or scope.current()
+    text = SYSTEM.format(today=(today or datetime.date.today()).isoformat(), scope_note=SCOPE_NOTE[data_scope])
+    if screen:
+        text += SCREEN.replace(SCREEN_SCOPE_OUT["gangnam"], SCREEN_SCOPE_OUT[data_scope])
+    return text
+
+
 FALLBACK_REFUSAL = "이 질문에는 답을 드리기 어렵습니다. 부동산 데이터(시세 · 법령 · 용도지역)에 관한 질문으로 다시 물어 주세요."
 
 
@@ -202,7 +225,7 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None, on_event=No
     screen=True면 결과가 화면 블록으로 함께 보인다고 모델에게 알려 답을 짧게 쓰게 함."""
     emit = on_event or (lambda e: None)
     rounds_from({"gpt": {"max_rounds": max_rounds}})
-    system = SYSTEM.format(today=(today or datetime.date.today()).isoformat()) + (SCREEN if screen else "")
+    system = system_prompt(today, screen)
     specs = tools_mod.specs()
     messages = trim(history) + [{"role": "user", "text": question}]
     calls, results_full = [], []
