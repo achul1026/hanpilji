@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from hanpilji import config as config_mod
+from hanpilji import config as config_mod, scope
 from hanpilji.gpt import blocks, engine, llm, report, tools, verify
 
 MAX_SESSIONS = 200
@@ -79,8 +79,29 @@ def map_config(env=None):
     return {"tiles": t}
 
 
-def page(name):
-    return (STATIC / name).read_text(encoding="utf-8")
+# 서울 범위(개발서버)일 때 화면 글의 「강남구만」 문구를 바꿈(hanpilji/scope.py). 지적도처럼 아직 강남구만 있는 것은 그대로
+PAGE_SEOUL = {
+    "index.html": [
+        ("서울 강남구 아파트 721단지<br>필지 1,168개 · 지적도 3만 4천 필지<br>실거래 36개월 · 법령 21개",
+         "서울 25개 구 실거래 36개월<br>아파트 · 오피스텔 · 연립다세대<br>개별공시지가 · 법령 21개"),
+        ("서울 강남구 · 실거래 매일 새로 받음", "서울 25개 구 · 실거래 매일 새로 받음"),
+        ("지금은 서울 강남구 데이터만 있습니다.", "지금은 서울 데이터만 있습니다."),
+    ],
+    "app.js": [
+        ("지금 데이터는 서울 강남구 아파트만 있습니다.", "지금 데이터는 서울 아파트 · 오피스텔 · 연립다세대만 있습니다."),
+        ("지금 데이터는 서울 강남구 아파트만 있어요.", "지금 데이터는 서울 아파트 · 오피스텔 · 연립다세대만 있어요."),
+        ('"강남구 아파트 · 오피스텔 · 연립다세대 실거래", "용도지역 · 건축 행위제한"',
+         '"서울 아파트 · 오피스텔 · 연립다세대 실거래", "용도지역 · 건축 행위제한(강남구)"'),
+    ],
+}
+
+
+def page(name, data_scope=None):
+    text = (STATIC / name).read_text(encoding="utf-8")
+    if (data_scope or scope.current()) == "seoul":
+        for old, new in PAGE_SEOUL.get(name, ()):
+            text = text.replace(old, new)
+    return text
 
 
 def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hour=TOOL_PER_HOUR,

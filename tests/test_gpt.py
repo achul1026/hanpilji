@@ -260,6 +260,74 @@ class AnthropicProvider(unittest.TestCase):
                 llm.make({})
 
 
+class SeoulScope(unittest.TestCase):
+    """개발서버(서울 25개 구) 구성: 범위 안내문 · 도구 설명 · 화면 글 · 단지 이름으로 구 찾기."""
+
+    def test_scope_from_env(self):
+        from hanpilji import scope
+        self.assertEqual(scope.current({}), "gangnam")
+        self.assertEqual(scope.current({"HANPILJI_DB_SCHEMA": "hanpilji"}), "seoul")
+        self.assertEqual(scope.current({"HANPILJI_DB_SCHEMA": "hanpilji", "HANPILJI_DATA_SCOPE": "gangnam"}), "gangnam")
+        self.assertEqual(scope.current({"HANPILJI_DATA_SCOPE": "Seoul"}), "seoul")
+
+    def test_sigungu_names(self):
+        self.assertEqual(tools._sigungu("마포구"), "11440")
+        self.assertEqual(tools._sigungu("서울특별시 송파구"), "11710")
+        self.assertEqual(tools._sigungu(None), "11680")
+
+    def test_specs(self):
+        plain = [{k: t[k] for k in ("name", "description", "input_schema")} for t in tools.TOOLS]
+        self.assertEqual(tools.specs("gangnam"), plain, "강남 구성은 그대로")
+        by = {t["name"]: t for t in tools.TOOLS}
+        for name, reps in tools.SEOUL_DESC.items():
+            for old, _ in reps:
+                self.assertIn(old, by[name]["description"], "바꿀 문구가 설명에 있어야 함(문구가 바뀌면 같이 고칠 것)")
+        seoul = {t["name"]: t for t in tools.specs("seoul")}
+        self.assertIn("서울 25개 구", seoul["q_complex_price"]["description"])
+        self.assertNotIn("강남구(11680)만", seoul["q_deal_list"]["description"])
+        self.assertIn("강남구(11680)만", seoul["q_zoning_check"]["description"], "조례는 아직 강남구만")
+        self.assertIn("마포구", seoul["q_complex_price"]["input_schema"]["properties"]["sigungu"]["description"])
+        self.assertIn("11680(강남구)", by["q_complex_price"]["input_schema"]["properties"]["sigungu"]["description"],
+                      "원래 정의는 바뀌지 않음")
+
+    def test_find_sigungu(self):
+        tool = tools.BY_NAME["q_complex_price"]
+        conn = mock.MagicMock()
+        conn.execute.return_value.fetchone.return_value = ("11440",)
+        self.assertEqual(tools.find_sigungu(conn, tool, {"name": "마포래미안푸르지오"}, "seoul"),
+                         {"name": "마포래미안푸르지오", "sigungu": "11440"})
+        self.assertIn("q_find_sigungu", conn.execute.call_args[0][0])
+        conn.reset_mock()
+        self.assertEqual(tools.find_sigungu(conn, tool, {"name": "x", "sigungu": "마포구"}, "seoul"),
+                         {"name": "x", "sigungu": "마포구"})
+        self.assertEqual(tools.find_sigungu(conn, tool, {"name": "x"}, "gangnam"), {"name": "x"})
+        conn.execute.assert_not_called()
+        conn.execute.return_value.fetchone.return_value = (None,)
+        self.assertEqual(tools.find_sigungu(conn, tool, {"name": "없는단지"}, "seoul"), {"name": "없는단지"})
+        conn.execute.side_effect = psycopg.errors.UndefinedFunction("없음")
+        self.assertEqual(tools.find_sigungu(conn, tool, {"name": "x"}, "seoul"), {"name": "x"}, "함수가 없는 DB면 그대로")
+        no_name = tools.BY_NAME["q_complex_rank"]
+        self.assertEqual(tools.find_sigungu(conn, no_name, {"metric": "trade_count"}, "seoul"), {"metric": "trade_count"})
+
+    def test_system_prompt(self):
+        a = engine.system_prompt(screen=True, data_scope="gangnam")
+        b = engine.system_prompt(screen=True, data_scope="seoul")
+        self.assertIn("실거래가와 행위제한 조례는 서울 강남구(11680)만", a)
+        self.assertIn("강남구 밖 등", a)
+        self.assertIn("실거래가는 서울 25개 구", b)
+        self.assertIn("서울 밖 등", b)
+        self.assertNotIn("{", b.split("오늘:")[0][-50:])
+
+    def test_pages(self):
+        from hanpilji.gpt import web
+        for name, reps in web.PAGE_SEOUL.items():
+            raw = web.page(name, "gangnam")
+            for old, new in reps:
+                self.assertEqual(raw.count(old), 1, f"{name}: 바꿀 문구가 한 번 있어야 함")
+                self.assertIn(new, web.page(name, "seoul"))
+        self.assertNotIn("지금은 서울 강남구 데이터만", web.page("index.html", "seoul"))
+
+
 @unittest.skipUnless(DSN, "HANPILJI_TEST_DSN 없음")
 class WithDb(unittest.TestCase):
     """실거래가 시험 응답(세곡푸르지오)을 넣고 실제 마트 함수로 도구를 돌림."""
@@ -285,6 +353,18 @@ class WithDb(unittest.TestCase):
             self.assertNotIn("row_total", out["rows"][0])
             json.dumps(out, ensure_ascii=False)   # 날짜 · 숫자가 JSON으로 바뀜
             self.assertEqual(tools.run(conn, "q_complex_price", {"name": "없는단지"})["row_total"], 0)
+
+    def test_find_sigungu(self):
+        with engine.connect(self.cfg) as conn:
+            find = lambda n: conn.execute("SELECT mart.q_find_sigungu(%s)", (n,)).fetchone()[0]
+            self.assertEqual(find("세곡 푸르지오"), "11680")
+            self.assertEqual(find("세곡동 123"), "11680", "단지 이름이 없으면 동 이름으로")
+            self.assertIsNone(find("없는단지이름"))
+            self.assertIsNone(find("세"), "한 글자는 찾지 않음")
+            with mock.patch.dict(os.environ, {"HANPILJI_DATA_SCOPE": "seoul"}):
+                out = tools.run(conn, "q_complex_price", {"name": "세곡 푸르지오"})
+            self.assertEqual(out["args"]["sigungu"], "11680")
+            self.assertGreater(out["row_total"], 0)
 
     def test_deal_list_and_rank(self):
         with engine.connect(self.cfg) as conn:

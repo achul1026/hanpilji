@@ -7,11 +7,15 @@
 import datetime
 import decimal
 
+import psycopg
+
+from hanpilji import regions, scope
 from hanpilji.collectors.market import SERIES
 
-# 시범 구가 아직 하나라 기본값으로 씀. 시군구 이름을 코드로 바꾸는 표(데이터가 있는 곳만)
-SIGUNGU = {"강남구": "11680", "서울 강남구": "11680", "서울특별시 강남구": "11680"}
+# 구를 정하지 못했을 때 쓰는 구(처음부터 데이터가 있던 강남구). 시군구 이름 → 코드 표는 서울 25개 구
+SIGUNGU = {f"{p}{n}": c for c, n in regions.SEOUL_NAMES.items() for p in ("", "서울 ", "서울특별시 ")}
 DEFAULT_SIGUNGU = "11680"
+NAME_ARGS = ("name", "query")   # 구를 비워 두면 이 인자(단지 · 동 · 주소 이름)로 구를 찾음(서울 범위일 때)
 
 ZONES = ("제1종전용주거지역 제2종전용주거지역 제1종일반주거지역 제2종일반주거지역 제3종일반주거지역 준주거지역 "
          "중심상업지역 일반상업지역 근린상업지역 유통상업지역 전용공업지역 일반공업지역 준공업지역 "
@@ -444,9 +448,56 @@ TOOLS = [
 BY_NAME = {t["name"]: t for t in TOOLS}
 
 
-def specs():
-    """LLM에 넘길 도구 정의(이름 · 설명 · 입력 형식만)."""
-    return [{k: t[k] for k in ("name", "description", "input_schema")} for t in TOOLS]
+# 서울 범위(개발서버)일 때 도구 설명의 강남구 문구를 바꿈. 도구마다 실제로 서울 전체가 있는 것만 바꾸고,
+# 아직 강남구만 있는 것(행위제한 조례 · 주택 공시가격 · 공매 · 지적도)은 그대로 둠
+SEOUL_DESC = {
+    "q_complex_price": [("지금 데이터는 서울 강남구(11680)만 있음.", "서울 25개 구.")],
+    "q_property_card": [("강남구(11680)만.", "서울 25개 구. 건축물대장 · 용도지역 · 필지는 강남구 밖은 채우는 중이라 빈 칸일 수 있음.")],
+    "q_deal_list": [("지금 데이터는 강남구(11680)만.", "서울 25개 구.")],
+    "q_complex_rank": [("지금 데이터는 강남구(11680)만.", "서울 25개 구. 순위는 구 하나 안에서만.")],
+    "q_price_trend": [("강남구(11680). ", "서울 25개 구(구 하나씩). ")],
+    "q_land_price_trend": [
+        ("주의: 지금 가진 필지는 아파트 단지가 선 필지(강남구 1,168개)뿐이라 「구 전체」도 아파트 단지 필지의 공시지가임. 그렇게 밝힐 것. ",
+         "서울 모든 필지(서울시 개별공시지가). "),
+        ("강남구(11680)만.", "서울 25개 구."),
+    ],
+    "q_price_vs_official": [("강남구(11680)만.", "서울 25개 구.")],
+}
+SEOUL_SIGUNGU_DESC = ("서울 구 이름(예: 마포구) 또는 코드 5자리. 단지 · 동 이름으로 찾을 때는 비워 두면 그 이름으로 구를 찾음. "
+                      "구 전체를 물을 때는 꼭 넣을 것(비우면 강남구)")
+
+
+def specs(data_scope=None):
+    """LLM에 넘길 도구 정의(이름 · 설명 · 입력 형식만). 서울 범위면 범위 문구를 바꿔서 줌."""
+    data_scope = data_scope or scope.current()
+    out = [{k: t[k] for k in ("name", "description", "input_schema")} for t in TOOLS]
+    if data_scope != "seoul":
+        return out
+    for t in out:
+        for old, new in SEOUL_DESC.get(t["name"], ()):
+            t["description"] = t["description"].replace(old, new)
+        props = t["input_schema"]["properties"]
+        if "sigungu" in props:
+            t["input_schema"] = {**t["input_schema"], "properties": {
+                **props, "sigungu": {**props["sigungu"], "description": SEOUL_SIGUNGU_DESC}}}
+    return out
+
+
+def find_sigungu(conn, tool, args, data_scope=None):
+    """서울 범위이고 모델이 구를 비워 두면, 단지 · 동 이름으로 구를 찾아 args에 채움(못 찾으면 그대로).
+    찾는 함수가 없는 DB(Supabase 강남 구성 등)면 조용히 넘어감."""
+    if (data_scope or scope.current()) != "seoul" or args.get("sigungu") not in (None, ""):
+        return args
+    if "sigungu" not in tool["input_schema"]["properties"]:
+        return args
+    name = next((args[k] for k in NAME_ARGS if isinstance(args.get(k), str) and args[k].strip()), None)
+    if name is None:
+        return args
+    try:
+        row = conn.execute("SELECT mart.q_find_sigungu(%s::text)", (name.strip(),)).fetchone()
+    except psycopg.Error:
+        return args
+    return {**args, "sigungu": row[0]} if row and row[0] else args
 
 
 class ToolError(ValueError):
@@ -506,6 +557,7 @@ def run(conn, name, args):
     """도구 하나를 실행해 JSON으로 보낼 수 있는 dict로 돌려줌.
     {"tool", "args", "shown", "row_total", "sources", "asof", "rows"}"""
     tool = check_args(name, args)
+    args = find_sigungu(conn, tool, args)
     cur = conn.execute(tool["sql"], tool["args"](args))
     cols = [d.name for d in cur.description]
     rows = [{c: v if c in SCREEN_KEYS else _plain(v) for c, v in zip(cols, r)} for r in cur.fetchall()]
