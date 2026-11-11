@@ -32,7 +32,7 @@ TOOL_LABEL = {
     "q_building_filter": "건축물대장 검색", "q_price_trend": "월별 시세 추이", "q_land_price_trend": "공시지가 추이",
     "q_price_vs_official": "공시지가 대비 실거래가", "q_house_price": "주택 공시가격", "q_market_series": "시장 지표",
     "q_auction_discount": "공매 물건 · 실거래 대비", "q_auction_checklist": "입찰 전 권리 확인 항목",
-    "q_parcel_map": "지적도 · 건물 윤곽", "q_policy_events": "정책 · 규제 변화", "q_policy_impact": "정책 전후 비교",
+    "q_parcel_map": "지적도 · 건물 윤곽", "q_nearby": "주변 역 · 학교", "q_policy_events": "정책 · 규제 변화", "q_policy_impact": "정책 전후 비교",
 }
 
 # 진행 표시 문구(도구를 부르는 동안 화면에 보임)
@@ -44,7 +44,7 @@ TOOL_DOING = {
     "q_land_price_trend": "공시지가 추이를 만드는 중", "q_price_vs_official": "공시지가와 실거래가를 맞대는 중",
     "q_house_price": "주택 공시가격을 찾는 중",
     "q_market_series": "시장 지표를 찾는 중", "q_auction_discount": "공매 물건을 실거래와 맞대는 중",
-    "q_auction_checklist": "입찰 전 확인 항목을 찾는 중", "q_parcel_map": "지적도를 펼치는 중",
+    "q_auction_checklist": "입찰 전 확인 항목을 찾는 중", "q_parcel_map": "지적도를 펼치는 중", "q_nearby": "가까운 역 · 학교를 찾는 중",
     "q_policy_events": "정책 · 규제 변화를 찾는 중", "q_policy_impact": "정책 전후 거래와 가격을 맞대는 중",
 }
 
@@ -68,6 +68,8 @@ COL = {   # 열 이름 → (보이는 이름, 형식)
     "est_market_price": ("실거래 기준 추정", "won"), "discount_pct": ("실거래 대비 할인", "pct"), "label": ("비고", "text"),
     "step": ("순서", "int"), "item": ("항목", "text"), "what_to_check": ("무엇을", "text"), "where_to_look": ("어디서", "text"),
     "article_no": ("조문", "text"),
+    "place_name": ("이름", "text"), "detail": ("노선 · 구분", "text"), "distance_m": ("직선거리(m)", "int"),
+    "walk_min": ("도보 어림(분)", "int"),
     "dong": ("동", "text"), "ho": ("호", "text"), "unit_count": ("호 수", "int"), "official_median": ("공시가격(중간)", "won"),
     "official_min": ("공시가격 최저", "won"), "official_max": ("공시가격 최고", "won"), "official_yoy_pct": ("공시가격 전년비", "pct"),
     "base_year": ("공시 연도", "int"), "official_ratio": ("매매 평균 대비", "pct"),

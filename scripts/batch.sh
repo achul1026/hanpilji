@@ -33,7 +33,7 @@ failed=()
 # .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh sh nrg onbid law market bld vworld luinfo house_price land_price freshness"
+KEYS="apt offi rh sh nrg onbid law market bld vworld vworld_geom luinfo house_price land_price poi freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
@@ -83,6 +83,10 @@ case "$WHAT" in
     if [ -n "${VWORLD_KEY:-}" ]; then
       step vworld "토지특성 · 토지이용계획(V-World, 서울 단지 필지)" 180 \
         "$PY" -m hanpilji.collectors.vworld --sigungu seoul --complex-only --max-calls "${HANPILJI_VWORLD_MAX_CALLS:-9000}"
+      # 지적도(연속지적도 필지 경계) · 건물 윤곽. 서울을 약 500m 칸 5,451개로 나눠 칸마다 받고, 받은 지 180일 지난 칸만 다시.
+      # 처음엔 칸이 많아 하루 HANPILJI_VWORLD_GEOM_MAX_CALLS(기본 5,000)번씩 사흘쯤 이어 받음
+      step vworld_geom "지적도 · 건물 윤곽(V-World, 서울)" 180 \
+        "$PY" -m hanpilji.collectors.vworld_geom --fetch-seoul --max-calls "${HANPILJI_VWORLD_GEOM_MAX_CALLS:-5000}"
     else
       echo "-- 건너뜀 V-World (.env에 VWORLD_KEY 없음)" >> "$LOG"
     fi
@@ -101,6 +105,8 @@ case "$WHAT" in
     step house_price "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
     # 서울 개별공시지가(서울 열린데이터광장 파일). 새 해 파일이 올라왔거나 고쳐졌을 때만 받음
     step land_price "개별공시지가(서울)" 30 "$PY" -m hanpilji.collectors.seoul_land_price
+    # 주변 정보: 학교 · 지하철역 위치(공공데이터포털 표준데이터, 인증키 없음). sql/22_poi.sql을 먼저 넣어야 함
+    step poi "주변 정보(학교 · 지하철역)" 20 "$PY" -m hanpilji.collectors.poi
     ;;
   *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;;
 esac

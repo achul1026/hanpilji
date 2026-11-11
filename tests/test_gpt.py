@@ -33,7 +33,7 @@ class Tools(unittest.TestCase):
         self.assertEqual({t["name"] for t in tools.specs()},
                          {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
                           "q_building_filter", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_market_series",
-                          "q_house_price", "q_auction_discount", "q_auction_checklist", "q_parcel_map", "q_policy_events", "q_policy_impact"})
+                          "q_house_price", "q_auction_discount", "q_auction_checklist", "q_parcel_map", "q_nearby", "q_policy_events", "q_policy_impact"})
         for t in tools.TOOLS:
             self.assertTrue(t["sql"].startswith("SELECT * FROM mart."), "도구는 mart 함수만 부름")
 
@@ -286,7 +286,7 @@ class SeoulScope(unittest.TestCase):
         self.assertIn("서울 25개 구", seoul["q_complex_price"]["description"])
         self.assertNotIn("강남구(11680)만", seoul["q_deal_list"]["description"])
         self.assertNotIn("강남구(11680)만", seoul["q_zoning_check"]["description"], "조례는 서울 복사본")
-        self.assertIn("강남구(11680)만", seoul["q_parcel_map"]["description"], "지적도는 아직 강남구만")
+        self.assertNotIn("강남구(11680)만", seoul["q_parcel_map"]["description"], "지적도도 서울(채우는 중)")
         self.assertIn("마포구", seoul["q_complex_price"]["input_schema"]["properties"]["sigungu"]["description"])
         self.assertIn("11680(강남구)", by["q_complex_price"]["input_schema"]["properties"]["sigungu"]["description"],
                       "원래 정의는 바뀌지 않음")

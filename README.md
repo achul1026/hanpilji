@@ -80,6 +80,9 @@ python -m hanpilji.collectors.vworld --from-dir vworld_raw                     #
 # 지적도(연속지적도 필지 경계) · 건물 윤곽 → core.geo_parcel · geo_building (PostGIS: init_db.sh --postgis)
 python scripts/vworld_fetch_geom_gangnam.py                                     # 국내 PC, 강남구를 약 500m 칸으로 → zip
 python -m hanpilji.collectors.vworld_geom --from-zip vworld_geom_11680.zip       # 받은 zip 적재(경위도 → 5186)
+python -m hanpilji.collectors.vworld_geom --fetch-seoul --max-calls 5000         # 국내 IP 서버: 서울을 칸(약 500m)으로 나눠 바로 받기, 이어 받기
+# 주변 정보: 학교 · 지하철역 위치(공공데이터포털 표준데이터, 인증키 없음) → core.ref_poi (sql/22_poi.sql, PostGIS)
+python -m hanpilji.collectors.poi                     # 서울 둘레 학교 · 지하철역. --only school|station
 
 # 시장 · 거시 지표 (키: ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀) → core.fact_market
 python -m hanpilji.collectors.market                  # 금리 · 물가(ECOS) · 아파트 가격지수(R-ONE) · 인구 · 세대(KOSIS) 10년
@@ -335,11 +338,11 @@ HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용
 
 ### 서버 배치
 
-[`scripts/batch.sh`](scripts/batch.sh) `daily|weekly|monthly`는 같은 수집기를 서버 cron에서 돌려 스키마 하나(`HANPILJI_DB_SCHEMA`)로 합친 DB에 씁니다. 실거래(아파트 · 오피스텔 · 연립다세대 · 단독다가구 매매 · 전월세 · 상업업무용 매매) · 건축물대장 · 주택 공시가격 · 공시지가 · 공매는 서울 25개 구를 받습니다. 서버는 국내 IP라 V-World(지목 · 토지대장 면적 · 공시지가 이력 · 토지이용계획)도 매일 바로 받습니다(`.env`에 `VWORLD_KEY`가 있을 때, 서울 단지 필지만 `--complex-only`, 하루 `HANPILJI_VWORLD_MAX_CALLS` 기본 9,000번). 행위제한은 강남구로 받고 서울 다른 구에 복사합니다(`luinfo --copy-to seoul`). 서울은 자치구 조례 없이 서울시 도시계획조례 하나라 구마다 답이 같습니다(2026-11-11 강남 · 마포 · 노원 비교). 설정은 저장소 옆 `.env`에서 읽고, `HANPILJI_BATCH_SKIP=onbid,law`처럼 단계를 뺄 수 있습니다.
+[`scripts/batch.sh`](scripts/batch.sh) `daily|weekly|monthly`는 같은 수집기를 서버 cron에서 돌려 스키마 하나(`HANPILJI_DB_SCHEMA`)로 합친 DB에 씁니다. 실거래(아파트 · 오피스텔 · 연립다세대 · 단독다가구 매매 · 전월세 · 상업업무용 매매) · 건축물대장 · 주택 공시가격 · 공시지가 · 공매는 서울 25개 구를 받습니다. 서버는 국내 IP라 V-World(지목 · 토지대장 면적 · 공시지가 이력 · 토지이용계획)도 매일 바로 받습니다(`.env`에 `VWORLD_KEY`가 있을 때, 서울 단지 필지만 `--complex-only`, 하루 `HANPILJI_VWORLD_MAX_CALLS` 기본 9,000번). 지적도 · 건물 윤곽도 서울을 약 500m 칸 5,451개로 나눠 매일 이어 받습니다(`vworld_geom --fetch-seoul`, 하루 `HANPILJI_VWORLD_GEOM_MAX_CALLS` 기본 5,000번, 칸마다 180일 지나면 다시). 주변 정보(학교 · 지하철역)는 매달 공공데이터포털 표준데이터로 바꿉니다(`poi`). 행위제한은 강남구로 받고 서울 다른 구에 복사합니다(`luinfo --copy-to seoul`). 서울은 자치구 조례 없이 서울시 도시계획조례 하나라 구마다 답이 같습니다(2026-11-11 강남 · 마포 · 노원 비교). 설정은 저장소 옆 `.env`에서 읽고, `HANPILJI_BATCH_SKIP=onbid,law`처럼 단계를 뺄 수 있습니다.
 
 **공공데이터포털 하루 한도를 나눠 씀.** 한도는 계정 · API마다 하나이고 자정에 다시 찹니다. 같은 계정을 Actions(강남 매일)와 다른 서비스도 쓰므로, 서버 배치는 실거래 API마다 · 건축물대장 전체로 하루 `HANPILJI_DG_MAX_CALLS`(기본 9,000번, 개발계정 한도 10,000 중 1,000을 남김)까지만 부릅니다. 닿으면 하루 한도에 걸렸을 때와 같이 그 종류만 멈추고 다음 날 이어 받습니다(실패로 세지 않음). 평소 실거래는 최근 3개월만 다시 받아 API마다 하루 75~150번이라, 상한에 닿는 건 서울을 처음 채울 때뿐입니다. 다른 서비스가 대량 수집을 하는 날에는 `.env`에서 이 값을 낮추세요.
 
-**웹 · GPT의 데이터 범위 안내.** `HANPILJI_DB_SCHEMA`가 있으면(서버 구성) GPT 안내문 · 도구 설명 · 화면 글이 「서울 25개 구」로 바뀌고, 없으면(Supabase 구성) 「강남구」 그대로입니다. 직접 정하려면 `HANPILJI_DATA_SCOPE=seoul|gangnam`. 서울 구성에서는 모델이 구를 비워 두면 `mart.q_find_sigungu`(`sql/20_find_sigungu.sql`)가 단지 · 동 이름으로 구를 찾아 채웁니다. 지적도는 아직 강남구만이라 그 도구 설명은 그대로 둡니다.
+**웹 · GPT의 데이터 범위 안내.** `HANPILJI_DB_SCHEMA`가 있으면(서버 구성) GPT 안내문 · 도구 설명 · 화면 글이 「서울 25개 구」로 바뀌고, 없으면(Supabase 구성) 「강남구」 그대로입니다. 직접 정하려면 `HANPILJI_DATA_SCOPE=seoul|gangnam`. 서울 구성에서는 모델이 구를 비워 두면 `mart.q_find_sigungu`(`sql/20_find_sigungu.sql`)가 단지 · 동 이름으로 구를 찾아 채웁니다. 지적도는 서울을 채우는 중이라 도구 설명에 그렇게 적습니다. 가까운 역 · 학교(`q_nearby`)는 단지 필지 안 한 점에서 직선거리로 찾고, 도보 분은 분속 67m 어림값입니다. 학교 배정(학군)은 데이터에 없습니다.
 
 **새 서버에서 처음 채울 때.** 단지의 필지번호(PNU)는 실거래의 동 이름을 법정동 코드로 바꿔 만드는데, 서울 동 코드표는 월간 `land_price`(서울 개별공시지가)가 채웁니다. 그래서 처음에는 `seoul_land_price`를 한 번 먼저 돌리고, `sql/10_property.sql`의 「stg 원본에서 한 번 채움」 UPDATE로 이미 받은 단지의 필지번호를 다시 채운 뒤 건축물대장을 받으세요. 순서가 바뀌면 강남구 밖 단지는 건축물대장 대상에 들지 않습니다.
 
@@ -517,6 +520,7 @@ hanpilji/
 │   │   ├── rtms.py          # 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 → core.fact_deal · fact_rent
 │   │   ├── bld.py           # 건축물대장 → core.dim_building · bridge_parcel_zone · dim_complex
 │   │   ├── vworld.py        # V-World 토지특성 · 토지이용계획 → dim_parcel 지목 · fact_land_price · bridge_parcel_zone
+│   │   ├── poi.py           # 학교 · 지하철역 위치(공공데이터포털 표준데이터) → core.ref_poi
 │   │   ├── vworld_geom.py   # V-World 연속지적도 · 도로명주소 건물(국내 PC에서 받은 zip) → core.geo_parcel · geo_building
 │   │   ├── market.py        # ECOS · R-ONE · KOSIS → core.fact_market
 │   │   └── onbid.py         # 온비드 공매 물건 → core.fact_auction
