@@ -62,9 +62,9 @@ BEGIN
 
     -- 법령: 법령(법제처 법령ID)마다 한 줄(현행 조문 수, 시행일). 개정으로 이름이 바뀌어도 한 줄(최근 이름)
     RETURN QUERY
-    SELECT '법령'::text, (array_agg(w.law_name ORDER BY w.effective_date DESC NULLS LAST, w.asof DESC))[1], coalesce(max(w.law_kind), '') || ' · 현행 조문', count(*),
+    SELECT '법령'::text, (array_agg(w.law_name ORDER BY w.effective_date DESC NULLS LAST, w.asof DESC, w.article_id DESC))[1], coalesce(max(w.law_kind), '') || ' · 현행 조문', count(*),
            NULL::text, '시행 ' || max(w.effective_date)::text, max(w.asof), ARRAY['law_go_kr']
-    FROM core.doc_law w WHERE w.is_current GROUP BY w.law_id ORDER BY max(w.law_name), w.law_id;
+    FROM core.doc_law w WHERE w.is_current GROUP BY w.law_id ORDER BY 2, w.law_id;
 
     -- 규제 · 정책
     RETURN QUERY

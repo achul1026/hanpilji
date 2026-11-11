@@ -161,6 +161,9 @@ class Pipeline(unittest.TestCase):
     def test_6_data_status_rows(self):
         """법령은 법령ID마다 한 줄 + 가장 새 시행일의 이름, dim_stat에 없는 지표는 source_ids NULL."""
         lawd = self.q("SELECT lawd_cd FROM core.dim_region LIMIT 1")
+        clean = ("DELETE FROM core.doc_law WHERE law_id = 't-ds'", "DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'")
+        for sql in clean:   # 앞 실행이 중간에 멈춰 남긴 줄도 지우고 시작
+            self.q(sql)
         try:
             with psycopg.connect(DSN) as c:
                 for aid, name, eff in (("t-ds-1", "옛이름법", "2020-01-01"), ("t-ds-2", "새이름법", "2025-01-01")):
@@ -177,8 +180,8 @@ class Pipeline(unittest.TestCase):
                 st = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = 'zz_t_ds'")
                 self.assertEqual(st, [(None,)], "출처 미등록은 NULL(직접 입력 []과 구별)")
         finally:
-            self.q("DELETE FROM core.doc_law WHERE law_id = 't-ds'")
-            self.q("DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'")
+            for sql in clean:
+                self.q(sql)
 
 
 if __name__ == "__main__":
