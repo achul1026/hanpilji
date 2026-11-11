@@ -51,10 +51,66 @@ function row(it) {
     el("td", { "data-k": "출처" }, ...srcs));
 }
 
+const PAGE = 10;  // 한 쪽에 보여 줄 데이터 수
+let data = null;
+const view = { g: 0, p: 0 };
+
+// 주소 #g2-p1 = 셋째 분류의 둘째 쪽(새로 고침 · 뒤로 가기에도 같은 쪽)
+function readHash() {
+  const m = /^#g(\d+)(?:-p(\d+))?$/.exec(location.hash);
+  const g = m ? Math.min(Number(m[1]), data.groups.length - 1) : 0;
+  const pages = Math.max(1, Math.ceil(data.groups[g].items.length / PAGE));
+  return { g, p: m && m[2] ? Math.min(Number(m[2]), pages - 1) : 0 };
+}
+function go(g, p) {
+  const h = p ? `#g${g}-p${p}` : `#g${g}`;
+  if (location.hash !== h) history.pushState(null, "", h);
+  show(g, p);
+}
+
+function pager(g, p, pages) {
+  if (pages < 2) return null;
+  const btn = (label, to, attrs) => {
+    const b = el("button", Object.assign({ type: "button" }, attrs), label);
+    if (to == null) b.disabled = true; else b.addEventListener("click", () => go(g, to));
+    return b;
+  };
+  return el("nav", { class: "dpager", "aria-label": "쪽" },
+    btn("‹ 이전", p > 0 ? p - 1 : null, { "aria-label": "이전 쪽" }),
+    ...Array.from({ length: pages }, (_, i) =>
+      btn(String(i + 1), i === p ? null : i, i === p ? { "aria-current": "page", class: "on" } : null)),
+    btn("다음 ›", p < pages - 1 ? p + 1 : null, { "aria-label": "다음 쪽" }));
+}
+
+function show(g, p) {
+  view.g = g; view.p = p;
+  const grp = data.groups[g];
+  const pages = Math.max(1, Math.ceil(grp.items.length / PAGE));
+  const part = grp.items.slice(p * PAGE, (p + 1) * PAGE);
+  document.querySelectorAll(".dnav button").forEach((b, i) => {
+    b.classList.toggle("on", i === g);
+    b.setAttribute("aria-selected", i === g ? "true" : "false");
+  });
+  const from = p * PAGE + 1, to = p * PAGE + part.length;
+  document.getElementById("dpanel").replaceChildren(
+    el("section", { class: "dgroup", id: `g${g}`, role: "tabpanel" },
+      el("h2", {}, grp.name, el("small", {}, ` ${grp.items.length}개 · ${fmt(grp.items.reduce((a, x) => a + x.rows, 0))}줄` +
+        (pages > 1 ? ` · ${from}~${to}번째` : ""))),
+      el("table", { class: "dtable" },
+        el("thead", {}, el("tr", {}, ...["데이터", "양", "데이터 기간", "최종 업데이트", "출처"].map((h) => el("th", {}, h)))),
+        el("tbody", {}, ...part.map(row))),
+      pager(g, p, pages)));
+}
+
 function render(d) {
+  data = d;
   const items = d.groups.flatMap((g) => g.items);
   const srcCount = new Set(items.flatMap((i) => i.sources.map((s) => s.name))).size;
   const latest = items.map((i) => i.checked).filter(Boolean).sort().pop();
+  if (!d.groups.length) {
+    out.replaceChildren(el("p", { class: "dmsg" }, "아직 보여 드릴 데이터가 없어요."));
+    return;
+  }
   out.replaceChildren(
     el("div", { class: "dsum" },
       el("div", {}, el("b", {}, d.total_size || "-"), el("span", {}, d.table_count ? `전체 데이터 용량 (표 ${d.table_count}개)` : "전체 데이터 용량")),
@@ -62,15 +118,17 @@ function render(d) {
       el("div", {}, el("b", {}, String(items.length)), el("span", {}, "데이터 종류")),
       el("div", {}, el("b", {}, String(srcCount)), el("span", {}, "출처(수집처)")),
       el("div", {}, el("b", {}, latest || "-"), el("span", {}, "가장 최근 수집"))),
-    el("nav", { class: "dnav", "aria-label": "분류" }, ...d.groups.map((g, i) =>
-      el("a", { href: `#g${i}` }, `${g.name} ${g.items.length}`))),
-    ...d.groups.map((g, i) => el("section", { class: "dgroup", id: `g${i}` },
-      el("h2", {}, g.name, el("small", {}, ` ${g.items.length}개 · ${fmt(g.items.reduce((a, x) => a + x.rows, 0))}줄`)),
-      el("table", { class: "dtable" },
-        el("thead", {}, el("tr", {}, ...["데이터", "양", "데이터 기간", "최종 업데이트", "출처"].map((h) => el("th", {}, h)))),
-        el("tbody", {}, ...g.items.map(row))))),
+    el("nav", { class: "dnav", role: "tablist", "aria-label": "분류" }, ...d.groups.map((g, i) => {
+      const b = el("button", { type: "button", role: "tab" }, g.name, el("span", {}, String(g.items.length)));
+      b.addEventListener("click", () => go(i, 0));
+      return b;
+    })),
+    el("div", { id: "dpanel" }),
     el("p", { class: "dnote" }, `숫자를 센 때: ${d.checked_at}`));
+  const v = readHash();
+  show(v.g, v.p);
 }
+window.addEventListener("popstate", () => { if (data) { const v = readHash(); show(v.g, v.p); } });
 
 (async () => {
   try {
