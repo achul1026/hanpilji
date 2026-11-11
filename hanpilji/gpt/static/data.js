@@ -46,7 +46,7 @@ function row(it) {
     el("td", { "data-k": "데이터" }, el("span", { class: "lbl" }, it.label), it.sources.length ? el("span", { class: "sub" }, it.detail) : null),
     el("td", { class: "num", "data-k": "양" }, fmt(it.rows) + "건"),
     el("td", { class: "mono", "data-k": "기간" }, period(it.period_from, it.period_to)),
-    el("td", { class: "mono" + (old ? " old" : ""), "data-k": "최종 업데이트", title: old ? "갱신 주기보다 오래됐어요" : null },
+    el("td", { class: "mono" + (old ? " old" : ""), "data-k": "최종 업데이트", title: old ? "갱신 주기보다 오래됨" : null },
       it.updated || "-", it.checked ? el("span", { class: "sub", title: `수집처에서 마지막으로 받아 온 때 ${it.checked}` }, `수집 확인 ${it.checked.slice(5)}`) : null),
     el("td", { "data-k": "출처" }, ...srcs));
 }
@@ -108,7 +108,7 @@ function render(d) {
   const srcCount = new Set(items.flatMap((i) => i.sources.map((s) => s.name))).size;
   const latest = items.map((i) => i.checked).filter(Boolean).sort().pop();
   if (!d.groups.length) {
-    out.replaceChildren(el("p", { class: "dmsg" }, "아직 보여 드릴 데이터가 없어요."));
+    out.replaceChildren(el("p", { class: "dmsg" }, "아직 보여 줄 데이터가 없음."));
     return;
   }
   out.replaceChildren(
@@ -134,9 +134,9 @@ window.addEventListener("popstate", () => { if (data) { const v = readHash(); sh
   try {
     const r = await fetch("/api/data-status", { headers: { "X-Token": token } });
     const j = await r.json().catch(() => ({}));
-    if (!r.ok) throw new Error(j.error || "읽지 못했어요");
+    if (!r.ok) throw new Error(j.error || "읽지 못함");
     render(j);
   } catch (e) {
-    out.replaceChildren(el("p", { class: "dmsg" }, `데이터 현황을 읽지 못했어요. ${e.message}`));
+    out.replaceChildren(el("p", { class: "dmsg" }, `데이터 현황을 읽지 못함. ${e.message}`));
   }
 })();
