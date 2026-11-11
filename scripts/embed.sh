@@ -12,7 +12,8 @@ CPUS="${HANPILJI_EMBED_CPUS:-2}"
 LOG_DIR="$B/logs"; mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$(date +%Y%m%d_%H%M)_embed.log"
 
-[ -x "$B/venv-embed/bin/python" ] || { echo "venv-embed 없음: 건너뜀" >> "$LOG"; exit 0; }
+# venv-embed는 컨테이너 안에서 만들어 bin/python 링크가 호스트에서는 끊겨 보임 → pyvenv.cfg로 확인
+[ -f "$B/venv-embed/pyvenv.cfg" ] || { echo "venv-embed 없음: 건너뜀" >> "$LOG"; exit 0; }
 ls -d "$B"/models/bge-m3-* >/dev/null 2>&1 || { echo "모델 폴더 없음: 건너뜀" >> "$LOG"; exit 0; }
 
 exec 9>"$LOG_DIR/.batch.lock"
