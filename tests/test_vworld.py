@@ -188,6 +188,24 @@ class Load(unittest.TestCase):
         self.assertEqual(vworld.main(["--config", self.cfg, "--pnu", PNU], fetch=counting), 0)
         self.assertEqual(calls, [], "최근에 받은 필지는 다시 부르지 않음")
 
+    def test_5_complex_only(self):
+        """--complex-only: 단지가 선 필지만 고름(서울 전체 필지는 받지 않음)."""
+        with psycopg.connect(DSN) as c:
+            c.execute("INSERT INTO core.dim_parcel (pnu, lawd_cd, jibun, source, asof) "
+                      "VALUES ('1168011800100010000', '1168011800', '1', 't-vw', '2026-10-28') ON CONFLICT DO NOTHING")
+        try:
+            with tempfile.TemporaryDirectory() as d:
+                out = Path(d) / "p.txt"
+                vworld.main(["--config", self.cfg, "--complex-only", "--export-pnus", str(out)])
+                got = out.read_text(encoding="utf-8").split()
+                self.assertIn(PNU, got)
+                self.assertNotIn("1168011800100010000", got, "단지가 없는 필지는 뺌")
+                vworld.main(["--config", self.cfg, "--export-pnus", str(out)])
+                self.assertIn("1168011800100010000", out.read_text(encoding="utf-8").split(), "기본은 구의 필지 전부")
+        finally:
+            with psycopg.connect(DSN) as c:
+                c.execute("DELETE FROM core.dim_parcel WHERE pnu = '1168011800100010000'")
+
     def test_4_export_and_from_dir(self):
         with tempfile.TemporaryDirectory() as d:
             pnus = Path(d) / "pnus.txt"

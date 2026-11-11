@@ -148,6 +148,15 @@ class WithDb(unittest.TestCase):
         with mock.patch.dict(os.environ, {"DATA_GO_KR_KEY": "k"}):
             self.assertEqual(onbid.main(["--config", self.cfg], http_get=fixture_get, today=TODAY), 0)
 
+    def test_region_names_seoul_fallback(self):
+        with psycopg.connect(DSN) as c:
+            self.assertEqual(tuple(onbid.region_names(c, "11680")), ("서울특별시", "강남구"))
+            c.execute("DELETE FROM core.dim_region WHERE lawd_cd = '1144000000'")
+            self.assertEqual(tuple(onbid.region_names(c, "11440")), ("서울특별시", "마포구"), "구 줄이 없어도 서울 구 이름")
+            with self.assertRaises(SystemExit):
+                onbid.region_names(c, "41135")
+            c.rollback()   # 지운 구 줄은 되돌림
+
     def test_collect_and_discount(self):
         self.collect()
         self.collect()

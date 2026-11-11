@@ -285,7 +285,8 @@ class SeoulScope(unittest.TestCase):
         seoul = {t["name"]: t for t in tools.specs("seoul")}
         self.assertIn("서울 25개 구", seoul["q_complex_price"]["description"])
         self.assertNotIn("강남구(11680)만", seoul["q_deal_list"]["description"])
-        self.assertIn("강남구(11680)만", seoul["q_zoning_check"]["description"], "조례는 아직 강남구만")
+        self.assertNotIn("강남구(11680)만", seoul["q_zoning_check"]["description"], "조례는 서울 복사본")
+        self.assertIn("강남구(11680)만", seoul["q_parcel_map"]["description"], "지적도는 아직 강남구만")
         self.assertIn("마포구", seoul["q_complex_price"]["input_schema"]["properties"]["sigungu"]["description"])
         self.assertIn("11680(강남구)", by["q_complex_price"]["input_schema"]["properties"]["sigungu"]["description"],
                       "원래 정의는 바뀌지 않음")
