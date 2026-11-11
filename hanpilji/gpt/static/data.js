@@ -36,33 +36,38 @@ function row(it) {
     ? it.sources.map((s) => {
         const href = s.url && safeUrl(s.url);
         const name = href ? el("a", { href, target: "_blank", rel: "noopener" }, s.name) : s.name;
-        const sub = [s.operator, s.cycle && `${s.cycle} 갱신`, s.license].filter(Boolean).join(" · ");
-        return el("span", { class: "src" }, name, sub ? el("span", { class: "sub" }, sub) : null);
+        const sub = [s.operator, s.cycle && `${s.cycle} 갱신`].filter(Boolean).join(" · ");
+        return el("span", { class: "src" }, name, sub ? el("span", { class: "sub" }, sub) : null,
+          s.license ? el("span", { class: "sub" }, s.license) : null);
       })
     : [el("span", { class: "src" }, "직접 입력", el("span", { class: "sub" }, it.detail))];
-  const old = stale(it.updated, it.sources.map((s) => s.cycle));
+  const old = stale(it.checked, it.sources.map((s) => s.cycle));
   return el("tr", {},
     el("td", { "data-k": "데이터" }, el("span", { class: "lbl" }, it.label), it.sources.length ? el("span", { class: "sub" }, it.detail) : null),
     el("td", { class: "num", "data-k": "양" }, fmt(it.rows) + "줄"),
     el("td", { class: "mono", "data-k": "기간" }, period(it.period_from, it.period_to)),
-    el("td", { class: "mono" + (old ? " old" : ""), "data-k": "최신화", title: old ? "갱신 주기보다 오래됐어요" : null }, it.updated || "-"),
+    el("td", { class: "mono" + (old ? " old" : ""), "data-k": "최종 업데이트", title: old ? "갱신 주기보다 오래됐어요" : null },
+      it.updated || "-", it.checked ? el("span", { class: "sub", title: `수집처에서 마지막으로 받아 온 때 ${it.checked}` }, `수집 확인 ${it.checked.slice(5)}`) : null),
     el("td", { "data-k": "출처" }, ...srcs));
 }
 
 function render(d) {
   const items = d.groups.flatMap((g) => g.items);
   const srcCount = new Set(items.flatMap((i) => i.sources.map((s) => s.name))).size;
-  const latest = items.map((i) => i.updated).filter(Boolean).sort().pop();
+  const latest = items.map((i) => i.checked).filter(Boolean).sort().pop();
   out.replaceChildren(
     el("div", { class: "dsum" },
+      el("div", {}, el("b", {}, d.total_size || "-"), el("span", {}, d.table_count ? `전체 데이터 용량 (표 ${d.table_count}개)` : "전체 데이터 용량")),
       el("div", {}, el("b", {}, fmt(d.total_rows)), el("span", {}, "전체 줄 수")),
-      el("div", {}, el("b", {}, String(items.length)), el("span", {}, "데이터 묶음")),
+      el("div", {}, el("b", {}, String(items.length)), el("span", {}, "데이터 종류")),
       el("div", {}, el("b", {}, String(srcCount)), el("span", {}, "출처(수집처)")),
-      el("div", {}, el("b", {}, latest || "-"), el("span", {}, "가장 최근 최신화"))),
-    ...d.groups.map((g) => el("section", { class: "dgroup" },
-      el("h2", {}, g.name),
+      el("div", {}, el("b", {}, latest || "-"), el("span", {}, "가장 최근 수집"))),
+    el("nav", { class: "dnav", "aria-label": "분류" }, ...d.groups.map((g, i) =>
+      el("a", { href: `#g${i}` }, `${g.name} ${g.items.length}`))),
+    ...d.groups.map((g, i) => el("section", { class: "dgroup", id: `g${i}` },
+      el("h2", {}, g.name, el("small", {}, ` ${g.items.length}개 · ${fmt(g.items.reduce((a, x) => a + x.rows, 0))}줄`)),
       el("table", { class: "dtable" },
-        el("thead", {}, el("tr", {}, ...["데이터", "양", "데이터 기간", "최신화", "출처"].map((h) => el("th", {}, h)))),
+        el("thead", {}, el("tr", {}, ...["데이터", "양", "데이터 기간", "최종 업데이트", "출처"].map((h) => el("th", {}, h)))),
         el("tbody", {}, ...g.items.map(row))))),
     el("p", { class: "dnote" }, `숫자를 센 때: ${d.checked_at}`));
 }

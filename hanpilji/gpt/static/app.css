@@ -389,17 +389,22 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .dsum div{background:var(--sheet);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:150px}
 .dsum b{display:block;font:700 22px/1.2 var(--mono)}
 .dsum span{font-size:12.5px;color:var(--muted)}
-.dgroup{margin:0 0 30px}
+.dgroup{margin:0 0 30px;scroll-margin-top:12px}
+.dgroup h2 small{font:500 13px/1 var(--body);color:var(--muted)}
+.dnav{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 22px}
+.dnav a{font-size:13px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--ink2);background:var(--sheet)}
+.dnav a:hover{border-color:var(--survey);color:var(--survey)}
 .dgroup h2{font:700 17px/1.3 var(--display);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
 .dtable{width:100%;table-layout:fixed;border-collapse:collapse;background:var(--sheet);font-size:13.5px}
 .dtable th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
 .dtable td{padding:10px;border-bottom:1px solid var(--grid);vertical-align:top}
 .dtable td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 .dtable td.mono{font-family:var(--mono);font-size:12.5px}
-.dtable th:nth-child(1){width:27%}.dtable th:nth-child(2){width:13%;text-align:right}.dtable th:nth-child(3){width:20%}.dtable th:nth-child(4){width:15%}
+.dtable td.mono .sub{font-family:var(--body);white-space:normal}
+.dtable th:nth-child(1){width:27%}.dtable th:nth-child(2){width:13%;text-align:right}.dtable th:nth-child(3){width:20%}.dtable th:nth-child(4){width:16%}
 .dtable .lbl{font-weight:600}
 .dtable .sub{display:block;color:var(--muted);font-size:12px;font-weight:400}
-.dtable .src{display:block}
+.dtable .src{display:block;word-break:normal;overflow-wrap:anywhere}
 .dtable .src+.src{margin-top:6px}
 .dtable .src a{text-decoration:none}.dtable .src a:hover{text-decoration:underline}
 .dtable .old{color:var(--warn)}
