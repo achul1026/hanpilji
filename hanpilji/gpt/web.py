@@ -28,7 +28,7 @@ from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hanpilji import config as config_mod, scope
-from hanpilji.gpt import blocks, engine, llm, report, tools, verify
+from hanpilji.gpt import blocks, datastatus, engine, llm, report, tools, verify
 
 MAX_SESSIONS = 200
 MAX_QUESTION = 1000
@@ -45,7 +45,8 @@ ASK_FAILED = "답을 만드는 중 오류가 났습니다. 잠시 뒤 다시 물
 STATIC = Path(__file__).with_name("static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
          "/app.css": ("app.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
-         "/favicon.svg": ("favicon.svg", "image/svg+xml")}
+         "/favicon.svg": ("favicon.svg", "image/svg+xml"),
+         "/data": ("data.html", "text/html; charset=utf-8"), "/data.js": ("data.js", "text/javascript; charset=utf-8")}
 TOOL_PER_HOUR = 240           # 블록 기간 바꾸기(모델 없이 DB만 읽음)는 넉넉히
 
 # 배경지도 타일 주소. {key}는 V-World 키, {style}은 화면 색(밝음 white · 어두움 midnight)으로 채움
@@ -179,6 +180,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 self._report(url.path, qs)
             elif url.path == "/api/auto":
                 self._auto(qs.get("q", ""))
+            elif url.path == "/api/data-status":
+                self._data_status()
             else:
                 self._json(404, {"error": "없는 주소"})
 
@@ -226,6 +229,17 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 print(f"오류: {e!r}", file=sys.stderr)
                 out = None
             self._json(200, out or {"kind": "ask"})
+
+        def _data_status(self):
+            """데이터 현황(모델 없이 마트 함수 둘, 1시간 기억). 화면 /data 가 부름."""
+            if not self._rate_ok("tool", tool_per_hour):
+                return self._json(429, {"error": "너무 자주 열었습니다. 잠시 뒤 다시 해 주세요."})
+            try:
+                out = datastatus.get(lambda: engine.connect(cfg))
+            except Exception as e:
+                print(f"오류: {e!r}", file=sys.stderr)
+                return self._json(500, {"error": "데이터 현황을 읽는 중 오류가 났습니다."})
+            self._json(200, out)
 
         def _body(self):
             """요청 JSON 객체를 읽음. 틀리면 (None, 오류 응답 코드, 문구)."""

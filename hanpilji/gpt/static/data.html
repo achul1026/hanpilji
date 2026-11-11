@@ -1,0 +1,34 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>데이터 현황 · 한필지</title>
+<meta name="description" content="한필지가 지금 DB에 가진 데이터의 양 · 기간 · 마지막으로 새로 받은 때 · 출처">
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="preconnect" href="https://cdn.jsdelivr.net" crossorigin>
+<link rel="stylesheet" href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/variable/pretendardvariable-dynamic-subset.min.css">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="dpage">
+  <header>
+    <a class="brand" href="/" aria-label="한필지 처음 화면">
+      <svg width="28" height="28" viewBox="0 0 34 34" aria-hidden="true"><rect x="1.5" y="1.5" width="31" height="31" rx="4" fill="none" stroke="currentColor" stroke-width="2.2"/><path d="M1.5 20 L14 13 L22 22 L32.5 17 M14 13 L14 1.5 M22 22 L22 32.5" fill="none" stroke="currentColor" stroke-width="1.5"/><rect x="14.6" y="14.2" width="6.6" height="6.6" fill="var(--seal)" transform="rotate(8 18 17.5)"/></svg>
+      <span>한필지</span>
+    </a>
+    <a class="back" href="/">← 질문하러 가기</a>
+  </header>
+  <h1>데이터 현황</h1>
+  <p class="lede">한필지가 지금 DB에 가진 데이터예요. 묶음마다 양, 데이터 기간, 마지막으로 새로 받은 때, 출처를 보여 드려요.</p>
+  <div id="out" aria-live="polite"><p class="dmsg">데이터를 세는 중이에요. 몇 초 걸릴 수 있어요.</p></div>
+  <p class="dnote">
+    · 양은 DB에 들어 있는 줄 수예요. 실거래는 거래 한 건, 공시가격은 집 한 호, 법령은 조문 하나가 한 줄이에요.<br>
+    · 최신화는 수집처에서 마지막으로 성공적으로 받아 온 때(한국 시각)예요. 새로 받을 게 없던 날에도 확인한 시각이 남아요.<br>
+    · 이 화면의 숫자는 한 시간마다 다시 세요.
+  </p>
+</div>
+<script src="/data.js"></script>
+</body>
+</html>

@@ -373,3 +373,44 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .situ{max-width:520px;margin:14px 0 4px;padding:13px 14px;border:1px solid color-mix(in srgb,var(--survey) 30%,var(--line));border-radius:14px;background:var(--survey-soft)}
 .situ p{margin:0 0 10px;font-size:14.5px;font-weight:650;color:var(--ink)}
 .situ .qchip{background:var(--sheet)}
+
+/* 사이드바 「데이터 현황 자세히 보기」 */
+.scopebtn{display:flex;align-items:center;justify-content:center;gap:6px;margin:10px 0 2px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--sheet);color:var(--ink);font-size:12.5px;font-weight:600;text-decoration:none}
+.scopebtn:hover{border-color:var(--survey);color:var(--survey)}
+
+/* 데이터 현황 화면(/data) */
+.dpage{max-width:1080px;margin:0 auto;padding:22px 20px 60px}
+.dpage header{display:flex;align-items:center;justify-content:space-between;gap:12px;margin-bottom:22px}
+.dpage .back{font-size:14px;text-decoration:none;color:var(--muted)}
+.dpage .back:hover{color:var(--survey)}
+.dpage h1{font:800 28px/1.25 var(--display);letter-spacing:-.02em;margin:0 0 6px}
+.dpage .lede{color:var(--muted);margin:0 0 18px;font-size:14.5px}
+.dsum{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 26px}
+.dsum div{background:var(--sheet);border:1px solid var(--line);border-radius:10px;padding:12px 16px;min-width:150px}
+.dsum b{display:block;font:700 22px/1.2 var(--mono)}
+.dsum span{font-size:12.5px;color:var(--muted)}
+.dgroup{margin:0 0 30px}
+.dgroup h2{font:700 17px/1.3 var(--display);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
+.dtable{width:100%;table-layout:fixed;border-collapse:collapse;background:var(--sheet);font-size:13.5px}
+.dtable th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
+.dtable td{padding:10px;border-bottom:1px solid var(--grid);vertical-align:top}
+.dtable td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
+.dtable td.mono{font-family:var(--mono);font-size:12.5px}
+.dtable th:nth-child(1){width:27%}.dtable th:nth-child(2){width:13%;text-align:right}.dtable th:nth-child(3){width:20%}.dtable th:nth-child(4){width:15%}
+.dtable .lbl{font-weight:600}
+.dtable .sub{display:block;color:var(--muted);font-size:12px;font-weight:400}
+.dtable .src{display:block}
+.dtable .src+.src{margin-top:6px}
+.dtable .src a{text-decoration:none}.dtable .src a:hover{text-decoration:underline}
+.dtable .old{color:var(--warn)}
+.dnote{font-size:12.5px;color:var(--muted);margin-top:26px;line-height:1.7}
+.dmsg{padding:30px;text-align:center;color:var(--muted)}
+@media (max-width:760px){
+  .dpage{padding:16px 14px 40px}
+  .dtable thead{display:none}
+  .dtable,.dtable tbody,.dtable tr,.dtable td{display:block;width:100%}
+  .dtable tr{border-bottom:1px solid var(--line);padding:8px 0}
+  .dtable td{border:0;padding:3px 10px}
+  .dtable td.num,.dtable td.mono{text-align:left}
+  .dtable td[data-k]::before{content:attr(data-k);display:inline-block;min-width:76px;color:var(--muted);font-size:12px;font-family:var(--body)}
+}
