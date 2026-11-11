@@ -45,6 +45,9 @@ class Admrul(unittest.TestCase):
         last = r["parts"][1]["body"]
         self.assertIn("한다.\n다만,", last, "<br/>은 줄바꿈")
         self.assertNotIn("<img", last)
+        many = BODY.replace("<조문내용>".encode(), "<조문내용>제1조(목적) 이 지침은 &lt;별표&gt; 기준을 정한다.</조문내용><조문내용>".encode(), 1)
+        self.assertEqual([p["label"] for p in admrul.parse_body(many)["parts"]][:2], ["제1조", "100 총칙"],
+                         "조마다 <조문내용>이 따로 와도 모두 넣음")
         with self.assertRaises(ValueError):
             admrul.parse_body(BODY.replace(b">2066025<", b">../x<"))
         with self.assertRaises(NotVerified):

@@ -125,10 +125,11 @@ def parse_body(xml_bytes):
         raise ValueError("행정규칙일련번호 · 행정규칙ID(숫자) · 이름이 없는 응답")
     # 조문내용 속 CDATA 하나 = 조 · 절 하나. ElementTree는 CDATA 경계를 지우므로 원문에서 나눔
     raw = xml_bytes.decode("utf-8", "replace")
-    m = re.search(r"<조문내용>(.*?)</조문내용>", raw, re.S)
-    chunks = re.findall(r"<!\[CDATA\[(.*?)\]\]>", m.group(1), re.S) if m else []
-    if m and not chunks:   # CDATA 없이 글만 온 경우
-        chunks = [html.unescape(m.group(1))]
+    # 조문형식(조문형식여부 Y)이면 <조문내용>이 조마다 따로 올 수 있어 모두 모음
+    chunks = []
+    for block in re.findall(r"<조문내용>(.*?)</조문내용>", raw, re.S):
+        found = re.findall(r"<!\[CDATA\[(.*?)\]\]>", block, re.S)
+        chunks += found if found else [html.unescape(block)]   # CDATA 없이 글만 온 경우
     parts = []
     for c in chunks:
         text = tidy(c)
