@@ -99,6 +99,16 @@ BEGIN
                FROM core.kb_concept c JOIN core.kb_topic k USING (topic_id) GROUP BY k.subject ORDER BY 2$q$;
     END IF;
 
+    -- 의미 검색 벡터(sql/28_kb_vector.sql을 넣은 DB에만 있음): 종류마다 한 줄. 양 = 벡터를 만든 조각 수
+    IF to_regclass('core.kb_chunk') IS NOT NULL THEN
+        RETURN QUERY EXECUTE
+            $q$SELECT '해설 자료'::text, '의미 검색 벡터: ' || k.kind,
+                      '만든 조각 ' || count(k.embedding) || ' / 전체 ' || count(*)
+                      || CASE WHEN count(k.embedding) < count(*) THEN ' (만드는 중)' ELSE '' END,
+                      count(k.embedding), NULL::text, NULL::text, max(k.embedded_at)::date, ARRAY['kb_embed']
+               FROM core.kb_chunk k GROUP BY k.kind ORDER BY 2$q$;
+    END IF;
+
     -- 규제 · 정책
     RETURN QUERY
     SELECT '규제 · 정책'::text, '용도지역 행위제한'::text, '용도지역 x 건물 종류(가능 · 조건부 · 불가)'::text, count(*),

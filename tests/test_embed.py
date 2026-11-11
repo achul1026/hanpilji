@@ -8,7 +8,9 @@ import os
 import tempfile
 import unittest
 from pathlib import Path
+from unittest import mock
 
+from hanpilji import embedding
 from hanpilji.embedding import DIM, MODEL_NAME, to_literal
 
 DSN = os.environ.get("HANPILJI_TEST_DSN")
@@ -35,6 +37,47 @@ class Unit(unittest.TestCase):
     def test_literal(self):
         self.assertEqual(to_literal([0.5, -0.25]), "[0.500000,-0.250000]")
         self.assertIn("bge-m3", MODEL_NAME)
+
+    def test_query_enabled_needs_switch_and_memory(self):
+        on = {"HANPILJI_EMBED_QUERY": "1"}
+        self.assertFalse(embedding.query_enabled({}, mem=8 << 30), "켜지 않으면 모델을 올리지 않음")
+        self.assertFalse(embedding.query_enabled(on, mem=512 << 20), "메모리 512MiB면 꺼진 채로(서버가 꺼지지 않게)")
+        self.assertTrue(embedding.query_enabled(on, mem=2 << 30))
+
+    def test_query_literal_falls_back_to_none(self):
+        with mock.patch.object(embedding, "query_embedder", return_value=None):
+            self.assertIsNone(embedding.query_literal("전세금"))
+        broken = mock.Mock(encode=mock.Mock(side_effect=RuntimeError("x")))
+        with mock.patch.object(embedding, "query_embedder", return_value=broken):
+            self.assertIsNone(embedding.query_literal("전세금"), "벡터를 못 만들어도 오류 없이 글자 검색으로")
+
+    def test_kb_block(self):
+        from hanpilji.gpt import blocks
+        out = {"tool": "q_kb_search", "args": {"query": "임차권 등기"}, "ref": 1, "shown": 2, "row_total": 2,
+               "sources": [], "asof": None,
+               "rows": [{"kind": "법령", "title": "주택임대차보호법", "label": "제3조의3(임차권등기명령)", "body": "①"},
+                        {"kind": "판례", "title": "2024다321973", "label": "2025-05-15", "body": "[1]"}]}
+        b = blocks.block(out)
+        items = b["items"]
+        self.assertIn("%EC%A0%9C3%EC%A1%B0%EC%9D%983", items[0]["url"], "법령은 조 번호로 법제처 링크")
+        self.assertEqual((items[1]["title"], items[1]["subtitle"], items[1]["url"]), ("2024다321973", "판례 · 2025-05-15", None))
+
+
+class Eval(unittest.TestCase):
+    def test_questions_and_rank(self):
+        import importlib.util
+        import tomllib
+        root = Path(__file__).resolve().parent.parent
+        qs = tomllib.loads((root / "data" / "kb_eval" / "questions.toml").read_text(encoding="utf-8"))["q"]
+        self.assertEqual(len(qs), 30)
+        self.assertTrue(all(q["q"].strip() and q["want"] and all("|" in w for w in q["want"]) for q in qs))
+        spec = importlib.util.spec_from_file_location("kb_eval", root / "scripts" / "kb_eval.py")
+        mod = importlib.util.module_from_spec(spec)
+        with mock.patch.dict("sys.modules", {"onnxruntime": mock.Mock()}):
+            spec.loader.exec_module(mod)
+        rows = [("주택임대차보호법", "제3조의2(보증금의 회수)"), ("주택임대차보호법", "제3조(대항력 등)")]
+        self.assertEqual(mod.rank(rows, ["주택임대차보호법|제3조("]), 2, "제3조의2는 제3조가 아님")
+        self.assertIsNone(mod.rank(rows, ["상가건물|"]))
 
 
 def _has_vector():
@@ -98,6 +141,13 @@ class Load(unittest.TestCase):
         self.assertEqual(only_vec, [("지렛대 효과", None)], "글자가 안 맞아도 의미로 찾음")
         no_vec = self.q("SELECT title FROM mart.q_kb_search('환원율', NULL, 30, ARRAY['개념'])")
         self.assertIn(("환원율",), no_vec, "벡터 없이도 글자 검색은 됨")
+
+        from hanpilji.gpt import tools
+        with self.psycopg.connect(DSN) as c, mock.patch.object(embedding, "query_literal", return_value=vec):
+            out = tools.run(c, "q_kb_search", {"query": "지렛대", "kind": "개념", "limit": 3})
+        self.assertEqual(out["rows"][0]["title"], "지렛대 효과")
+        self.assertEqual(len(out["sources"]), 1, "출처는 위로 한 번만")
+        self.assertTrue(out["asof"] and out["row_total"] >= 1)
 
         with self.psycopg.connect(DSN) as c:
             c.execute("DELETE FROM core.kb_concept WHERE concept_id = 'C901'")

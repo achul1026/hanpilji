@@ -1,4 +1,4 @@
-"""GPT가 부를 수 있는 도구 = mart 함수 16개. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
+"""GPT가 부를 수 있는 도구 = mart 함수들. GPT는 SQL을 짜지 않고 이름과 인자만 고름.
 
 도구 결과에는 보여 준 줄 수(shown) · 전체 건수(row_total) · 출처 · 기준일을 늘 붙여서
 엔진이 답 끝에 근거를 기계적으로 달 수 있게 함.
@@ -9,7 +9,7 @@ import decimal
 
 import psycopg
 
-from hanpilji import regions, scope
+from hanpilji import embedding, regions, scope
 from hanpilji.collectors.market import SERIES
 
 # 구를 정하지 못했을 때 쓰는 구(처음부터 데이터가 있던 강남구). 시군구 이름 → 코드 표는 서울 25개 구
@@ -167,6 +167,32 @@ TOOLS = [
         },
         "sql": "SELECT * FROM mart.q_law_search(%s::text, %s::text)",
         "args": lambda a: (a["query"], a.get("law_name") or None),
+    },
+    {
+        "name": "q_kb_search",
+        "description": (
+            "부동산 지식 DB 통합 검색: 법령 조문 · 대법원 판례 · 행정규칙(감정평가 실무기준 · 지구단위계획수립지침 등) · "
+            "정부 해설서(주택임대차보호법 해설집 · 상가건물 임대차 Q&A · 전세사기 피해예방 안내서) · "
+            "개념 노트(부동산학개론 용어 · 공식). 글자와 뜻을 함께 봐서 문구가 달라도 찾음. "
+            "제도 · 절차 · 권리 · 분쟁 대처 · 개념 질문이면 먼저 부를 것. 생활 말 대신 법률 용어로 바꿔 물으면 더 정확함"
+            "(예: 집주인이 바뀌면 세입자는 → 임대인 지위 승계 주택 임차인 대항력). 판례만 · 개념만처럼 좁히려면 kind. "
+            "법령명과 조문 낱말을 정확히 알면 q_law_search가 더 빠름."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "찾을 내용(법률 용어로 짧게). 예: 임차권등기명령 보증금 반환"},
+                "kind": {"type": "string", "enum": ["법령", "판례", "행정규칙", "해설서", "개념"],
+                         "description": "한 종류만 볼 때만"},
+                "limit": {"type": "integer", "description": "몇 개(1~10, 기본 6)"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_kb_search(%s::text, %s::public.vector, %s::int, %s::text[])",
+        # 질문 벡터(모델이 있을 때만)는 run()이 만들어 넘김. 없으면 글자 검색만
+        "embed": "query",
+        "args": lambda a, vec=None: (a["query"], vec, max(1, min(int(a.get("limit") or 6), 10)),
+                                     [a["kind"]] if a.get("kind") else None),
     },
     {
         "name": "q_zoning_check",
@@ -587,7 +613,8 @@ def run(conn, name, args):
     {"tool", "args", "shown", "row_total", "sources", "asof", "rows"}"""
     tool = check_args(name, args)
     args = find_sigungu(conn, tool, args)
-    cur = conn.execute(tool["sql"], tool["args"](args))
+    params = tool["args"](args, embedding.query_literal(args[tool["embed"]])) if tool.get("embed") else tool["args"](args)
+    cur = conn.execute(tool["sql"], params)
     cols = [d.name for d in cur.description]
     rows = [{c: v if c in SCREEN_KEYS else _plain(v) for c, v in zip(cols, r)} for r in cur.fetchall()]
     total = rows[0].pop("row_total") if rows else 0

@@ -192,7 +192,7 @@ class Load(unittest.TestCase):
         self.assertEqual(guide.main(["--config", self.cfg, "--dir", str(self.gdir)]), 0)
         self.assertEqual(self.q("SELECT count(*) FROM core.doc_guide_part WHERE doc_id = 'pdf:lease'"), [(1,)])
         self.assertEqual(self.q("SELECT topic_id FROM core.kb_topic_guide WHERE doc_id = 'pdf:lease'"), [("M13",)])
-        st = self.q("SELECT row_count, source_ids FROM mart.q_data_status() WHERE grp = '해설 자료' ORDER BY 1")
+        st = self.q("SELECT row_count, source_ids FROM mart.q_data_status() WHERE grp = '해설 자료' AND label NOT LIKE '의미 검색%' ORDER BY 1")
         self.assertEqual(st, [(1, ["gov_guide_pdf"]), (2, ["law_go_kr_admrul"])])
 
         (self.gdir / "catalog.toml").write_text("", encoding="utf-8")

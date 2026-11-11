@@ -28,7 +28,7 @@ MONTHS_CHOICES = {
 
 TOOL_LABEL = {
     "q_property_card": "단지 종합 카드", "q_complex_price": "면적별 시세", "q_deal_list": "실거래 목록",
-    "q_complex_rank": "단지 순위", "q_law_search": "법령 조문", "q_zoning_check": "행위제한(지을 수 있는 건물)",
+    "q_complex_rank": "단지 순위", "q_law_search": "법령 조문", "q_kb_search": "법령 · 판례 · 해설", "q_zoning_check": "행위제한(지을 수 있는 건물)",
     "q_building_filter": "건축물대장 검색", "q_price_trend": "월별 시세 추이", "q_land_price_trend": "공시지가 추이",
     "q_price_vs_official": "공시지가 대비 실거래가", "q_house_price": "주택 공시가격", "q_market_series": "시장 지표",
     "q_auction_discount": "공매 물건 · 실거래 대비", "q_auction_checklist": "입찰 전 권리 확인 항목",
@@ -39,7 +39,7 @@ TOOL_LABEL = {
 TOOL_DOING = {
     "q_property_card": "단지 기록을 모으는 중", "q_complex_price": "실거래가에서 시세를 셈하는 중",
     "q_deal_list": "실거래 목록을 찾는 중", "q_complex_rank": "단지 순위를 매기는 중",
-    "q_law_search": "법령 조문을 찾는 중", "q_zoning_check": "행위제한 규칙을 찾는 중",
+    "q_law_search": "법령 조문을 찾는 중", "q_kb_search": "법령 · 판례 · 해설 자료를 찾는 중", "q_zoning_check": "행위제한 규칙을 찾는 중",
     "q_building_filter": "건축물대장을 찾는 중", "q_price_trend": "월별 시세 추이를 만드는 중",
     "q_land_price_trend": "공시지가 추이를 만드는 중", "q_price_vs_official": "공시지가와 실거래가를 맞대는 중",
     "q_house_price": "주택 공시가격을 찾는 중",
@@ -110,6 +110,8 @@ def _title(out):
         return f"{a.get('zone', '')} · {a.get('act', '')} {label}"
     if tool == "q_law_search":
         return " · ".join(x for x in (a.get("law_name") or "법령 조문", a.get("query")) if x)
+    if tool == "q_kb_search":
+        return " · ".join(x for x in (a.get("kind") or label, a.get("query")) if x)
     if tool == "q_policy_impact":
         name = next((r.get("metric") for r in rows if r.get("section") == "정책"), None)
         return f"{name or a.get('event', '')} {label}".strip()
@@ -128,6 +130,22 @@ def _law(out):
         items.append({"title": f"{r.get('law_name', '')} {art}".strip(), "subtitle": r.get("article_title") or "",
                       "body": r.get("body") or "", "meta": f"시행 {r['effective_date']}" if r.get("effective_date") else "",
                       "url": LAW_URL.format(law=quote(r.get("law_name", "")), article=quote(art)) if art else None})
+    words = [w for w in str((out.get("args") or {}).get("query", "")).split() if len(w) >= 2]
+    return {"kind": "document", "items": items, "highlight": words}
+
+
+def _kb(out):
+    """지식 DB 검색 결과 → 문서 블록. 법령은 법제처 조문 링크, 나머지는 종류 · 위치만."""
+    items = []
+    for r in out["rows"]:
+        kind, title, label = r.get("kind") or "", r.get("title") or "", r.get("label") or ""
+        url = None
+        if kind == "법령" and label:
+            art = label.split("(")[0]
+            url = LAW_URL.format(law=quote(title), article=quote(art))
+        items.append({"title": f"{title} {label}".strip() if kind == "법령" else title,
+                      "subtitle": kind if kind == "법령" else f"{kind} · {label}".strip(" ·"),
+                      "body": r.get("body") or "", "meta": "", "url": url})
     words = [w for w in str((out.get("args") or {}).get("query", "")).split() if len(w) >= 2]
     return {"kind": "document", "items": items, "highlight": words}
 
@@ -219,6 +237,8 @@ def _shape(out):
     tool, rows = out["tool"], out["rows"]
     if tool == "q_law_search":
         return _law(out)
+    if tool == "q_kb_search":
+        return _kb(out)
     if tool == "q_property_card":
         return {"kind": "card", "rows": rows}
     if tool == "q_parcel_map":
