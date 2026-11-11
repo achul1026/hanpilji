@@ -180,6 +180,12 @@ class Pipeline(unittest.TestCase):
             rows = self.q("SELECT label, row_count, source_ids FROM mart.q_data_status() WHERE grp = '법령'"
                           " AND label IN ('옛이름법', '새이름법')")
             self.assertEqual(rows, [("새이름법", 2, ["law_go_kr"])], "이름이 바뀌어도 한 줄, 최근 이름")
+            with psycopg.connect(DSN) as c:   # 시행일 · 기준일이 같으면 article_id가 큰 쪽 이름
+                c.execute("UPDATE core.doc_law SET effective_date = '2025-01-01', law_name = 'ㄱ동점법'"
+                          " WHERE article_id = 't-ds-1'")
+                c.execute("UPDATE core.doc_law SET law_name = 'ㄴ동점법' WHERE article_id = 't-ds-2'")
+            tie = self.q("SELECT label FROM mart.q_data_status() WHERE grp = '법령' AND label LIKE '%동점법'")
+            self.assertEqual(tie, [("ㄴ동점법",)], "동점이면 article_id 순(t-ds-2)")
             if lawd:
                 st = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = 'zz_t_ds'")
                 self.assertEqual(st, [(None,)], "출처 미등록은 NULL(직접 입력 []과 구별)")
