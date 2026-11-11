@@ -1,6 +1,6 @@
 """국토교통부 토지이용규제정보서비스(행위제한) API → stg.luinfo_raw → core.reg_rule.
 
-    DATA_GO_KR_KEY=... python -m hanpilji.collectors.luinfo [--sigungu 11680] [--zone UQA122] [--act 아파트]
+    DATA_GO_KR_KEY=... python -m hanpilji.collectors.luinfo [--sigungu 11680] [--zone UQA122] [--act 아파트] [--copy-to seoul]
 
 토지이음 행위제한 CSV 대신 쓸 수 있는 길. 시군구 x 용도지역 x 행위마다 한 번 호출하고,
 조례까지 반영된 결과라서 core.reg_rule에는 시군구 코드를 붙여 넣음(조례 기준).
@@ -16,7 +16,7 @@ import sys
 
 
 from hanpilji import db, config as config_mod
-from hanpilji import datagokr, ingest
+from hanpilji import datagokr, ingest, regions
 
 SOURCE = "dg_luinfo"
 PATH = "arLandUseInfoService/DTarLandUseInfo"
@@ -147,6 +147,33 @@ def load(conn, run_id, sigungu, ucode, act_query, obj, asof):
     return loaded, rejected
 
 
+COPY_MARK = "결과를 같은 시 조례로 복사"
+
+
+def copy_rules(conn, src, targets):
+    """src 구의 행위제한 규칙을 targets 구에 덮어씀(src 자신은 건너뜀) → (src 규칙 줄 수, 복사한 구 수).
+    src에서 사라진 규칙은 targets에서도 지우되, 이 함수가 복사해 넣은 줄(source가 COPY_MARK로 끝남)만 지움."""
+    targets = [t for t in targets if t != src]
+    n = conn.execute("SELECT count(*) FROM core.reg_rule WHERE sigungu_cd = %s", (src,)).fetchone()[0]
+    if not n or not targets:
+        return n, 0
+    label = f"국토교통부 토지이용규제정보서비스(행위제한) · {src} 결과를 같은 시 조례로 복사"   # COPY_MARK로 끝남
+    conn.execute(
+        """INSERT INTO core.reg_rule (zone_cd, sigungu_cd, act_name, allowed, condition_text, article_id, source, asof)
+           SELECT r.zone_cd, t.sgg, r.act_name, r.allowed, r.condition_text, r.article_id, %s, r.asof
+           FROM core.reg_rule r CROSS JOIN unnest(%s::text[]) AS t(sgg)
+           WHERE r.sigungu_cd = %s
+           ON CONFLICT (zone_cd, coalesce(sigungu_cd, ''), act_name)
+           DO UPDATE SET allowed = excluded.allowed, condition_text = excluded.condition_text,
+                         article_id = excluded.article_id, source = excluded.source, asof = excluded.asof""",
+        (label, targets, src))
+    conn.execute(
+        """DELETE FROM core.reg_rule d WHERE d.sigungu_cd = ANY(%s) AND d.source LIKE %s AND NOT EXISTS (
+               SELECT 1 FROM core.reg_rule r WHERE r.sigungu_cd = %s AND r.zone_cd = d.zone_cd AND r.act_name = d.act_name)""",
+        (targets, "%" + COPY_MARK, src))
+    return n, len(targets)
+
+
 def main(argv=None, fetch=datagokr.fetch):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
@@ -154,9 +181,12 @@ def main(argv=None, fetch=datagokr.fetch):
     ap.add_argument("--zone", action="append", help="UQ 코드(기본: dim_zone의 uq 코드 전부)")
     ap.add_argument("--act", action="append", help="행위 이름(기본: config [luinfo] acts)")
     ap.add_argument("--refresh", action="store_true", help="최근에 받은 조합도 다시 받음")
+    ap.add_argument("--copy-to", action="append", metavar="SIGUNGU",
+                    help="받은 구(--sigungu 첫 구)의 규칙을 이 구들에 복사(시군구 5자리 또는 seoul). "
+                         "서울은 자치구 조례가 없고 서울시 도시계획조례 하나라 구마다 답이 같음(2026-11-11 강남 · 마포 · 노원 비교)")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
-    sigungus = args.sigungu or cfg["pilot"]["sigungu"]
+    sigungus = regions.expand(args.sigungu or cfg["pilot"]["sigungu"])
     acts = args.act or cfg.get("luinfo", {}).get("acts", [])
     refresh_days = cfg.get("luinfo", {}).get("refresh_days", 30)
     today = datetime.date.today()
@@ -195,7 +225,16 @@ def main(argv=None, fetch=datagokr.fetch):
                     print(f"failed {key}: {e}", file=sys.stderr)
                     if datagokr.is_fatal(e):  # 키 · 한도 문제는 다음 호출도 똑같이 실패하므로 멈춤
                         break
-            ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, rejected)
+            note = None
+            if args.copy_to and failed:   # 일부 조합이 실패하면 원본이 덜 찬 상태라 복사하지 않음(지난 복사본 그대로)
+                note = f"실패 {failed}건이라 다른 구로 복사하지 않음 — 다시 돌리면 실패한 조합만 받고 복사함"
+                print(note, file=sys.stderr)
+            elif args.copy_to:
+                n, targets = copy_rules(conn, sigungus[0], regions.expand(args.copy_to))
+                conn.commit()
+                note = f"{sigungus[0]} 규칙 {n}줄을 {targets}개 구에 복사"
+                print(note)
+            ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, rejected, note)
             finished = True
         finally:
             if not finished:  # 예상 못 한 오류 · 중단에도 실행 기록을 「running」으로 남기지 않음

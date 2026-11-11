@@ -3,6 +3,7 @@ bridge_parcel_zone(토지이용계획).
 
     VWORLD_KEY=... python -m hanpilji.collectors.vworld [--sigungu 11680] [--pnu 1168011800105270000] [--max-calls 900]
 
+서버 배치(국내 IP)는 바로 부름: --sigungu seoul --complex-only (서울 단지 필지만, 매일 이어 받음).
 V-World는 해외 IP(클라우드)의 연결을 끊음(2026-10-28 확인). 그럴 때는 받기와 적재를 나눔:
     python -m hanpilji.collectors.vworld --export-pnus pnus.txt            # 클라우드: 받을 필지 목록
     VWORLD_KEY=... python -m hanpilji.collectors.vworld --fetch-only pnus.txt --out vworld_raw   # 국내 PC: DB 없이 받기만
@@ -27,7 +28,7 @@ import urllib.error
 import urllib.parse
 from pathlib import Path
 
-from hanpilji import db, ingest
+from hanpilji import db, ingest, regions
 
 SOURCE = "vworld_ned"
 LAND_LABEL = "V-World 토지특성"
@@ -298,8 +299,10 @@ def load(conn, pnu, got, asof):
 def main(argv=None, fetch=fetch):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
-    ap.add_argument("--sigungu", action="append", help="시군구 5자리(기본: config [pilot])")
+    ap.add_argument("--sigungu", action="append", help="시군구 5자리 또는 seoul(서울 25개 구). 기본: config [pilot]")
     ap.add_argument("--pnu", action="append", help="이 필지만(기본: 그 구의 필지 전부)")
+    ap.add_argument("--complex-only", action="store_true",
+                    help="단지(core.dim_complex)가 선 필지만. 서울 전체 필지(약 88만)는 너무 많아 서버 배치는 이것만 받음")
     ap.add_argument("--max-calls", type=int, help="이번 실행의 최대 호출 수(하루 한도를 나눠 쓸 때)")
     ap.add_argument("--refresh", action="store_true", help="최근에 받은 필지도 다시 받음")
     ap.add_argument("--export-pnus", metavar="FILE", help="받을 필지 목록을 파일로 쓰고 끝(--fetch-only용)")
@@ -315,12 +318,21 @@ def main(argv=None, fetch=fetch):
     vcfg = cfg.get("vworld", {})
     refresh_days = vcfg.get("refresh_days", 30)
     max_calls = args.max_calls if args.max_calls is not None else vcfg.get("max_calls")
-    sigungus = args.sigungu or cfg["pilot"]["sigungu"]
+    sigungus = regions.expand(args.sigungu or cfg["pilot"]["sigungu"])
     today = datetime.date.today()
     caller = DirCaller(args.from_dir) if args.from_dir else Caller(fetch, cfg["storage"]["raw_dir"], max_calls)
     with db.connect(cfg["db"]["dsn"]) as conn:
-        pnus = args.pnu or [r[0] for r in conn.execute(
-            "SELECT pnu FROM core.dim_parcel WHERE left(pnu, 5) = ANY(%s) ORDER BY pnu", (sigungus,)).fetchall()]
+        if args.pnu:
+            pnus = args.pnu
+        elif args.complex_only:   # 단지 대표 필지 + 단지 건물이 선 필지(건축물대장). 단지 카드(q_property_card)가 보는 필지와 같음
+            pnus = [r[0] for r in conn.execute(
+                """SELECT pnu FROM core.dim_complex WHERE pnu IS NOT NULL AND left(pnu, 5) = ANY(%s)
+                   UNION SELECT pb.pnu FROM core.bridge_complex_building cb
+                         JOIN core.bridge_parcel_building pb USING (bld_pk) WHERE left(pb.pnu, 5) = ANY(%s)
+                   ORDER BY 1""", (sigungus, sigungus)).fetchall()]
+        else:
+            pnus = [r[0] for r in conn.execute(
+                "SELECT pnu FROM core.dim_parcel WHERE left(pnu, 5) = ANY(%s) ORDER BY pnu", (sigungus,)).fetchall()]
         if args.export_pnus:
             Path(args.export_pnus).write_text("\n".join(pnus) + "\n", encoding="utf-8")
             print(f"필지 {len(pnus)}개 → {args.export_pnus}")

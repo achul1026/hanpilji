@@ -21,7 +21,7 @@ import re
 import sys
 
 from hanpilji import db, config as config_mod
-from hanpilji import datagokr, ingest
+from hanpilji import datagokr, ingest, regions
 
 SOURCE = "onbid"
 SOURCE_LABEL = "한국자산관리공사 온비드 공매"
@@ -207,15 +207,22 @@ def load(conn, req_key, rows, today):
 
 def region_names(conn, sigungu_cd):
     row = conn.execute("SELECT sido, sigungu FROM core.dim_region WHERE lawd_cd = %s", (sigungu_cd + "00000",)).fetchone()
-    if not row or not row[1]:
-        raise SystemExit(f"core.dim_region에 시군구 {sigungu_cd}가 없음")
-    return row
+    if row and row[1]:
+        return row
+    if sigungu_cd in regions.SEOUL_NAMES:   # 서울 구 줄이 아직 없는 DB(sql/21_seoul_regions.sql 전): 구 줄을 만들어
+        name = regions.SEOUL_NAMES[sigungu_cd]   # load가 공매 물건에 구 코드를 붙일 수 있게 함
+        conn.execute("""INSERT INTO core.dim_region (lawd_cd, sido, sigungu, emd, source, asof)
+                        VALUES (%s, '서울특별시', %s, NULL, '행정표준코드 법정동코드', current_date)
+                        ON CONFLICT (lawd_cd) DO UPDATE SET sido = excluded.sido, sigungu = excluded.sigungu""",
+                     (sigungu_cd + "00000", name))
+        return "서울특별시", name
+    raise SystemExit(f"core.dim_region에 시군구 {sigungu_cd}가 없음")
 
 
 def main(argv=None, http_get=ingest.http_get, today=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
-    ap.add_argument("--sigungu", action="append", help="시군구 코드 5자리(기본 config [pilot] sigungu)")
+    ap.add_argument("--sigungu", action="append", help="시군구 코드 5자리 또는 seoul(서울 25개 구). 기본 config [pilot] sigungu")
     ap.add_argument("--div", action="append", help="재산유형 코드(기본 config [onbid] prpt_divs)")
     ap.add_argument("--max-calls", type=int, help="이번 실행의 최대 호출 수")
     args = ap.parse_args(argv)
@@ -230,7 +237,7 @@ def main(argv=None, http_get=ingest.http_get, today=None):
         loaded = rejected = 0
         status, note = "done", None
         try:
-            for sgg in args.sigungu or cfg["pilot"]["sigungu"]:
+            for sgg in regions.expand(args.sigungu or cfg["pilot"]["sigungu"]):
                 sido, name = region_names(conn, sgg)
                 for req_key, rows in collect(f, sido, name, divs):
                     task = ingest.add_task(conn, run_id, SOURCE, req_key)

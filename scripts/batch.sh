@@ -33,7 +33,7 @@ failed=()
 # .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh sh nrg onbid law market bld luinfo house_price land_price freshness"
+KEYS="apt offi rh sh nrg onbid law market bld vworld luinfo house_price land_price freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
@@ -71,10 +71,21 @@ case "$WHAT" in
     step rh "실거래(연립다세대, 서울)" 120 "${RTMS[@]}" --only rh_trade --only rh_rent
     step sh "실거래(단독다가구 매매 · 전월세, 서울)" 120 "${RTMS[@]}" --only sh_trade --only sh_rent
     step nrg "실거래(상업업무용 매매, 서울)" 120 "${RTMS[@]}" --only nrg_trade
-    step onbid "공매(온비드)" 30 "$PY" -m hanpilji.collectors.onbid
+    # 공매는 서울 25개 구 × 재산유형 5개(구마다 보통 10번 안팎 호출)
+    step onbid "공매(온비드, 서울)" 60 "$PY" -m hanpilji.collectors.onbid --sigungu seoul --max-calls 2000
     # 건축물대장(서울 아파트 · 오피스텔 단지 필지). 필지마다 4번 호출이라 서울은 수만 번 → 매일 9,000번씩 이어 받고,
     # 받은 지 30일(config [bld] refresh_days) 지난 필지만 다시 받음. 실거래 단계 뒤라 새 단지도 그날 붙음
     step bld "건축물대장(서울)" 240 "$PY" -m hanpilji.collectors.bld --sigungu seoul --max-calls "$DG_MAX"
+    # V-World 토지특성(지목 · 토지대장 면적 · 공시지가 이력) · 토지이용계획(용도지역 · 지구). V-World는 해외 IP를 막아
+    # 클라우드에서는 못 받고 국내 IP인 서버에서만 받음. 서울 단지 필지만(필지마다 2번 안팎), 받은 지 30일 지난 필지만 다시.
+    # 공공데이터포털 한도와 따로라 건축물대장과 겹치지 않음. .env에 VWORLD_KEY가 없으면 건너뜀.
+    # 키를 받을 때 적은 서비스 URL이 http://localhost가 아니면 .env에 VWORLD_DOMAIN=그 URL도 적어야 함(다르면 키 오류로 멈춤)
+    if [ -n "${VWORLD_KEY:-}" ]; then
+      step vworld "토지특성 · 토지이용계획(V-World, 서울 단지 필지)" 180 \
+        "$PY" -m hanpilji.collectors.vworld --sigungu seoul --complex-only --max-calls "${HANPILJI_VWORLD_MAX_CALLS:-9000}"
+    else
+      echo "-- 건너뜀 V-World (.env에 VWORLD_KEY 없음)" >> "$LOG"
+    fi
     ;;
   weekly)
     # 법제처 본문은 open.law.go.kr에서 받은 ID(.env의 LAW_OC)와 그 ID에 등록한 이 서버의 IP가 있어야 받음.
@@ -84,7 +95,9 @@ case "$WHAT" in
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)
-    step luinfo "행위제한" 60 "$PY" -m hanpilji.collectors.luinfo --refresh
+    # 행위제한은 강남구로 받고 서울 다른 구에 복사(서울은 자치구 조례 없이 서울시 도시계획조례 하나라 구마다 답이 같음,
+    # 2026-11-11 강남 · 마포 · 노원 비교). 구마다 받으면 576번 × 25개 구라 하루 한도(1,000)로 보름이 걸림
+    step luinfo "행위제한(서울)" 60 "$PY" -m hanpilji.collectors.luinfo --refresh --sigungu 11680 --copy-to seoul
     step house_price "주택 공시가격(서울)" 60 "$PY" -m hanpilji.collectors.house_price --sigungu seoul
     # 서울 개별공시지가(서울 열린데이터광장 파일). 새 해 파일이 올라왔거나 고쳐졌을 때만 받음
     step land_price "개별공시지가(서울)" 30 "$PY" -m hanpilji.collectors.seoul_land_price
