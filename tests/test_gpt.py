@@ -750,11 +750,33 @@ class Web(unittest.TestCase):
             if "q_data_size" in q:
                 raise RuntimeError("없는 함수")
             r = mock.MagicMock()
-            r.fetchall.return_value = []
+            r.fetchall.return_value = [old_row] if "q_data_status" in q else []
             return r
         conn2 = mock.MagicMock()
         conn2.execute.side_effect = failing
-        self.assertIsNone(datastatus.fetch(conn2)["total_size"], "용량 함수가 없어도 화면은 나옴")
+        got2 = datastatus.fetch(conn2)
+        self.assertIsNone(got2["total_size"], "용량 함수가 없어도")
+        self.assertEqual((got2["total_rows"], got2["groups"][0]["items"][0]["label"]), (5, "아파트 매매"),
+                         "나머지 데이터는 그대로 나옴")
+
+        unknown = ("시장 지표", "zz", "지표 설명 없음", 2, None, None, None, None)
+        manual = ("규제 · 정책", "정책 발표", "직접", 1, None, None, None, [])
+        flags = [g["items"][0]["manual"] for g in datastatus.build([unknown, manual], [])["groups"]]
+        self.assertEqual(flags, [True, False], "출처 미등록(None)과 직접 입력([])을 구별")
+
+        # 용량을 못 센 결과는 짧게만 기억
+        class Conn:
+            def __enter__(self): return conn2
+            def __exit__(self, *a): return False
+        calls = []
+        datastatus.clear()
+        try:
+            with mock.patch.object(datastatus.time, "monotonic", side_effect=[0, 400, 400]):
+                datastatus.get(lambda: calls.append(1) or Conn())
+                datastatus.get(lambda: calls.append(1) or Conn())
+            self.assertEqual(len(calls), 2, "RETRY_SECONDS가 지나면 다시 셈")
+        finally:
+            datastatus.clear()
         del datetime
 
     def test_page_never_uses_innerhtml(self):

@@ -40,7 +40,7 @@ function row(it) {
         return el("span", { class: "src" }, name, sub ? el("span", { class: "sub" }, sub) : null,
           s.license ? el("span", { class: "sub" }, s.license) : null);
       })
-    : [el("span", { class: "src" }, "직접 입력", el("span", { class: "sub" }, it.detail))];
+    : [el("span", { class: "src" }, it.manual === false ? "출처 미등록" : "직접 입력", el("span", { class: "sub" }, it.detail))];
   const old = stale(it.checked, it.sources.map((s) => s.cycle));
   return el("tr", {},
     el("td", { "data-k": "데이터" }, el("span", { class: "lbl" }, it.label), it.sources.length ? el("span", { class: "sub" }, it.detail) : null),

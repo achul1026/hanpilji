@@ -9,11 +9,12 @@ import threading
 import time
 
 CACHE_SECONDS = 3600
+RETRY_SECONDS = 300   # 용량을 못 셌을 때는 이만큼만 기억하고 다시 셈
 GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "규제 · 정책", "시장 지표", "기타"]
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
 _lock = threading.Lock()
-_cache = {"at": None, "data": None}
+_cache = {"at": None, "data": None, "ttl": CACHE_SECONDS}
 
 
 def _kst(ts):
@@ -51,6 +52,7 @@ def build(status_rows, source_rows, size_row=None, now=None):
         srcs = [sources[i] for i in (ids or []) if i in sources]
         lasts = [s["last_success"] for s in srcs if s["last_success"]]
         item = {"label": label, "detail": detail, "rows": int(count),
+                "manual": ids is not None and len(ids) == 0,   # [] = 직접 입력, None = 출처 미등록
                 "period_from": p_from, "period_to": p_to,
                 "updated": (updated.isoformat() if hasattr(updated, "isoformat") else str(updated)) if updated else None,
                 "checked": _kst(max(lasts)) if lasts else None,
@@ -81,14 +83,15 @@ def fetch(conn):
 def get(connect, max_age=CACHE_SECONDS):
     """기억해 둔 값이 max_age초보다 새것이면 그대로, 아니면 DB에서 다시 셈. connect()는 DB 연결을 여는 함수."""
     with _lock:
-        if _cache["data"] is not None and time.monotonic() - _cache["at"] < max_age:
+        if _cache["data"] is not None and time.monotonic() - _cache["at"] < min(max_age, _cache["ttl"]):
             return _cache["data"]
         with connect() as conn:
             data = fetch(conn)
-        _cache.update(at=time.monotonic(), data=data)
+        ttl = CACHE_SECONDS if data["total_bytes"] is not None else RETRY_SECONDS
+        _cache.update(at=time.monotonic(), data=data, ttl=ttl)
         return data
 
 
 def clear():
     with _lock:
-        _cache.update(at=None, data=None)
+        _cache.update(at=None, data=None, ttl=CACHE_SECONDS)

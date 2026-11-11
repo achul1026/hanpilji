@@ -60,11 +60,11 @@ BEGIN
                       NULL::text, NULL::text, max(asof), ARRAY['vworld_geom'] FROM core.geo_building$q$;
     END IF;
 
-    -- 법령: 법령(법제처 법령ID)마다 한 줄(현행 조문 수, 시행일)
+    -- 법령: 법령(법제처 법령ID)마다 한 줄(현행 조문 수, 시행일). 개정으로 이름이 바뀌어도 한 줄(최근 이름)
     RETURN QUERY
-    SELECT '법령'::text, w.law_name, coalesce(max(w.law_kind), '') || ' · 현행 조문', count(*),
+    SELECT '법령'::text, max(w.law_name), coalesce(max(w.law_kind), '') || ' · 현행 조문', count(*),
            NULL::text, '시행 ' || max(w.effective_date)::text, max(w.asof), ARRAY['law_go_kr']
-    FROM core.doc_law w WHERE w.is_current GROUP BY w.law_id, w.law_name ORDER BY w.law_name, w.law_id;
+    FROM core.doc_law w WHERE w.is_current GROUP BY w.law_id ORDER BY max(w.law_name), w.law_id;
 
     -- 규제 · 정책
     RETURN QUERY
@@ -80,14 +80,14 @@ BEGIN
            min(e.announce_date)::text, max(e.announce_date)::text, max(e.asof), ARRAY[]::text[]
     FROM core.ref_policy_event e;
 
-    -- 시장 지표: 지표마다 한 줄
+    -- 시장 지표: 지표마다 한 줄. dim_stat에 없는 지표는 source_ids를 NULL로(직접 입력([])과 구별, 화면엔 「출처 미등록」)
     RETURN QUERY
     SELECT '시장 지표'::text, coalesce(st.name, m.stat_id),
            CASE WHEN st.stat_id IS NULL THEN '지표 설명 없음(dim_stat에 없음) · ' || min(m.source)
                 ELSE coalesce(st.unit, '') || ' · ' || CASE st.cycle WHEN 'M' THEN '월' WHEN 'Q' THEN '분기'
                      WHEN 'A' THEN '연' ELSE st.cycle END || ' · ' || st.source END, count(*),
            min(m.period), max(m.period), max(m.asof),
-           CASE WHEN st.source_id IS NULL THEN ARRAY[]::text[] ELSE ARRAY[st.source_id] END
+           CASE WHEN st.source_id IS NULL THEN NULL::text[] ELSE ARRAY[st.source_id] END
     FROM core.fact_market m LEFT JOIN core.dim_stat st USING (stat_id)
     GROUP BY m.stat_id, st.stat_id, st.name, st.unit, st.cycle, st.source, st.source_id
     ORDER BY st.source_id NULLS LAST, coalesce(st.name, m.stat_id);
