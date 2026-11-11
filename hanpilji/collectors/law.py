@@ -194,6 +194,7 @@ def load_law(conn, run_id, mst, meta, articles, annexes):
                    body, search_text, effective_date, is_current, source, asof)
                VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, true, %s, %s)
                ON CONFLICT (article_id) DO UPDATE SET
+                   law_name = excluded.law_name, law_kind = excluded.law_kind,
                    article_title = excluded.article_title, body = excluded.body,
                    search_text = excluded.search_text, is_current = true, asof = excluded.asof""",
             [(f"{meta['law_id']}:{a['no']}-{a['branch'] or 0}:{meta['effective_date']}",
