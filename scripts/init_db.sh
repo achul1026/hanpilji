@@ -8,11 +8,12 @@ files=(00_schemas.sql 01_ops.sql 02_core.sql)
 for a in "$@"; do
   case "$a" in
     --postgis)  files+=(03_core_postgis.sql); geo=1 ;;
-    --pgvector) files+=(04_core_pgvector.sql) ;;
+    --pgvector) files+=(04_core_pgvector.sql); vec=1 ;;
   esac
 done
-files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql 11_building.sql 12_vworld.sql 13_market.sql 14_auction.sql 16_policy.sql 17_house_price.sql 18_property_card.sql 19_seoul_land_price.sql 20_find_sigungu.sql 21_seoul_regions.sql 23_data_status.sql 24_kb_topics.sql 25_prec.sql 26_guide.sql)
+files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql 11_building.sql 12_vworld.sql 13_market.sql 14_auction.sql 16_policy.sql 17_house_price.sql 18_property_card.sql 19_seoul_land_price.sql 20_find_sigungu.sql 21_seoul_regions.sql 23_data_status.sql 24_kb_topics.sql 25_prec.sql 26_guide.sql 27_concepts.sql)
 [ -n "${geo:-}" ] && files+=(15_geo.sql 22_poi.sql)   # 지적도 · 건물 윤곽 · 지도 함수(PostGIS 필요)
+[ -n "${vec:-}" ] && files+=(28_kb_vector.sql)       # 지식 DB 의미 검색(pgvector 필요)
 for f in "${files[@]}"; do
   echo "== $f"
   PGOPTIONS="--client-min-messages=warning" psql "$DSN" -v ON_ERROR_STOP=1 -q -f "$f"
