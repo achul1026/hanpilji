@@ -158,6 +158,28 @@ class Pipeline(unittest.TestCase):
             with self.assertRaises(psycopg.errors.InsufficientPrivilege):
                 c.execute("SELECT count(*) FROM core.doc_law")
 
+    def test_6_data_status_rows(self):
+        """법령은 법령ID마다 한 줄 + 가장 새 시행일의 이름, dim_stat에 없는 지표는 source_ids NULL."""
+        lawd = self.q("SELECT lawd_cd FROM core.dim_region LIMIT 1")
+        try:
+            with psycopg.connect(DSN) as c:
+                for aid, name, eff in (("t-ds-1", "옛이름법", "2020-01-01"), ("t-ds-2", "새이름법", "2025-01-01")):
+                    c.execute("INSERT INTO core.doc_law (article_id, law_id, law_name, article_no, article_title, body,"
+                              " search_text, effective_date, source, asof) VALUES (%s, 't-ds', %s, '제1조', 't', 'b', 'b',"
+                              " %s, 't-ds', current_date)", (aid, name, eff))
+                if lawd:
+                    c.execute("INSERT INTO core.fact_market (lawd_cd, stat_id, period, value, source, asof)"
+                              " VALUES (%s, 'zz_t_ds', '202601', 1, '어딘가 표', current_date)", (lawd[0][0],))
+            rows = self.q("SELECT label, row_count, source_ids FROM mart.q_data_status() WHERE grp = '법령'"
+                          " AND label IN ('옛이름법', '새이름법')")
+            self.assertEqual(rows, [("새이름법", 2, ["law_go_kr"])], "이름이 바뀌어도 한 줄, 최근 이름")
+            if lawd:
+                st = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = 'zz_t_ds'")
+                self.assertEqual(st, [(None,)], "출처 미등록은 NULL(직접 입력 []과 구별)")
+        finally:
+            self.q("DELETE FROM core.doc_law WHERE law_id = 't-ds'")
+            self.q("DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'")
+
 
 if __name__ == "__main__":
     unittest.main()
