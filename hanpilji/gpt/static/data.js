@@ -44,7 +44,7 @@ function row(it) {
   const old = stale(it.checked, it.sources.map((s) => s.cycle));
   return el("tr", {},
     el("td", { "data-k": "데이터" }, el("span", { class: "lbl" }, it.label), it.sources.length ? el("span", { class: "sub" }, it.detail) : null),
-    el("td", { class: "num", "data-k": "양" }, fmt(it.rows) + "줄"),
+    el("td", { class: "num", "data-k": "양" }, fmt(it.rows) + "건"),
     el("td", { class: "mono", "data-k": "기간" }, period(it.period_from, it.period_to)),
     el("td", { class: "mono" + (old ? " old" : ""), "data-k": "최종 업데이트", title: old ? "갱신 주기보다 오래됐어요" : null },
       it.updated || "-", it.checked ? el("span", { class: "sub", title: `수집처에서 마지막으로 받아 온 때 ${it.checked}` }, `수집 확인 ${it.checked.slice(5)}`) : null),
@@ -94,7 +94,7 @@ function show(g, p) {
   const from = p * PAGE + 1, to = p * PAGE + part.length;
   document.getElementById("dpanel").replaceChildren(
     el("section", { class: "dgroup", id: `g${g}`, role: "tabpanel" },
-      el("h2", {}, grp.name, el("small", {}, ` ${grp.items.length}개 · ${fmt(grp.items.reduce((a, x) => a + x.rows, 0))}줄` +
+      el("h2", {}, grp.name, el("small", {}, ` ${grp.items.length}개 · ${fmt(grp.items.reduce((a, x) => a + x.rows, 0))}건` +
         (pages > 1 ? ` · ${from}~${to}번째` : ""))),
       el("table", { class: "dtable" },
         el("thead", {}, el("tr", {}, ...["데이터", "양", "데이터 기간", "최종 업데이트", "출처"].map((h) => el("th", {}, h)))),
@@ -114,7 +114,7 @@ function render(d) {
   out.replaceChildren(
     el("div", { class: "dsum" },
       el("div", {}, el("b", {}, d.total_size || "-"), el("span", {}, d.table_count ? `전체 데이터 용량 (표 ${d.table_count}개)` : "전체 데이터 용량")),
-      el("div", {}, el("b", {}, fmt(d.total_rows)), el("span", {}, "전체 줄 수")),
+      el("div", {}, el("b", {}, fmt(d.total_rows)), el("span", {}, "전체 데이터 건수")),
       el("div", {}, el("b", {}, String(items.length)), el("span", {}, "데이터 종류")),
       el("div", {}, el("b", {}, String(srcCount)), el("span", {}, "출처(수집처)")),
       el("div", {}, el("b", {}, latest || "-"), el("span", {}, "가장 최근 수집"))),
