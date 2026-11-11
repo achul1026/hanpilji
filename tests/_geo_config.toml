@@ -1,0 +1,7 @@
+[db]
+dsn = "postgresql://postgres@/hanpilji?host=/var/tmp/pgt&port=5433"
+[storage]
+raw_dir = "./raw"
+[law]
+oc = "t"
+names = []
