@@ -161,6 +161,10 @@ class Pipeline(unittest.TestCase):
     def test_6_data_status_rows(self):
         """법령은 법령ID마다 한 줄 + 가장 새 시행일의 이름, dim_stat에 없는 지표는 source_ids NULL."""
         lawd = self.q("SELECT lawd_cd FROM core.dim_region LIMIT 1")
+        clean = ("DELETE FROM core.doc_law WHERE law_id = 't-ds'", "DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'",
+                 "DELETE FROM core.fact_deal WHERE deal_id = 't-ds'")
+        for sql in clean:   # 앞 실행이 중간에 멈춰 남긴 줄도 지우고 시작
+            self.q(sql)
         try:
             with psycopg.connect(DSN) as c:
                 for aid, name, eff in (("t-ds-1", "옛이름법", "2020-01-01"), ("t-ds-2", "새이름법", "2025-01-01")):
@@ -168,18 +172,48 @@ class Pipeline(unittest.TestCase):
                               " search_text, effective_date, source, asof) VALUES (%s, 't-ds', %s, '제1조', 't', 'b', 'b',"
                               " %s, 't-ds', current_date)", (aid, name, eff))
                 if lawd:
+                    c.execute("INSERT INTO core.fact_deal (deal_id, lawd_cd, deal_type, contract_date, amount, area,"
+                              " source, asof) VALUES ('t-ds', %s, '오피스텔', '2026-01-01', 1, 1,"
+                              " '국토교통부 오피스텔 매매 실거래가', current_date)", (lawd[0][0],))
                     c.execute("INSERT INTO core.fact_market (lawd_cd, stat_id, period, value, source, asof)"
                               " VALUES (%s, 'zz_t_ds', '202601', 1, '어딘가 표', current_date)", (lawd[0][0],))
             rows = self.q("SELECT label, row_count, source_ids FROM mart.q_data_status() WHERE grp = '법령'"
                           " AND label IN ('옛이름법', '새이름법')")
             self.assertEqual(rows, [("새이름법", 2, ["law_go_kr"])], "이름이 바뀌어도 한 줄, 최근 이름")
+            with psycopg.connect(DSN) as c:   # 시행일 · 기준일이 같으면 article_id가 큰 쪽 이름
+                c.execute("UPDATE core.doc_law SET effective_date = '2025-01-01', law_name = 'ㄱ동점법'"
+                          " WHERE article_id = 't-ds-1'")
+                c.execute("UPDATE core.doc_law SET law_name = 'ㄴ동점법' WHERE article_id = 't-ds-2'")
+            tie = self.q("SELECT label FROM mart.q_data_status() WHERE grp = '법령' AND label LIKE '%동점법'")
+            self.assertEqual(tie, [("ㄴ동점법",)], "동점이면 article_id 순(t-ds-2)")
             if lawd:
                 st = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = 'zz_t_ds'")
                 self.assertEqual(st, [(None,)], "출처 미등록은 NULL(직접 입력 []과 구별)")
+                deal = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = '국토교통부 오피스텔 매매 실거래가'")
+                self.assertEqual(deal, [(["dg_offi_trade"],)], "실거래는 출처 문구가 들어 있어도 수집처 id를 찾음")
         finally:
-            self.q("DELETE FROM core.doc_law WHERE law_id = 't-ds'")
-            self.q("DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'")
+            for sql in clean:
+                self.q(sql)
 
+
+    def test_7_kb_topics(self):
+        """시험 목차 52단원, 조문 범위(제103조~제106조)에 든 현행 조문만 단원에 연결."""
+        self.assertEqual(self.q("SELECT count(*) FROM mart.q_kb_topics()")[0][0], 52)
+        self.assertEqual(self.q("SELECT unit FROM mart.q_kb_topics() WHERE topic_id = 'M01'"), [("법률행위",)])
+        clean = "DELETE FROM core.doc_law WHERE law_id = 't-kb'"
+        self.q(clean)
+        try:
+            with psycopg.connect(DSN) as c:
+                for aid, no in (("t-kb-1", "제104조"), ("t-kb-2", "제106조의2"), ("t-kb-3", "제200조")):
+                    c.execute("INSERT INTO core.doc_law (article_id, law_id, law_name, article_no, article_title, body,"
+                              " search_text, effective_date, source, asof) VALUES (%s, 't-kb', '민법', %s, 't', 'b', 'b',"
+                              " '2025-01-01', 't-kb', current_date)", (aid, no))
+            got = [r[1] for r in self.q("SELECT * FROM mart.q_kb_topic_articles('M01')")]
+            self.assertEqual(got, ["제104조", "제106조의2"], "범위 안 조문만, 조 번호 순")
+            self.assertEqual(self.q("SELECT article_count FROM mart.q_kb_topics('민법 및 민사특별법')"
+                                    " WHERE topic_id = 'M01'"), [(2,)])
+        finally:
+            self.q(clean)
 
 if __name__ == "__main__":
     unittest.main()

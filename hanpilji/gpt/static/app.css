@@ -397,7 +397,7 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .dgroup h2{font:700 17px/1.3 var(--display);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
 .dtable{width:100%;table-layout:fixed;border-collapse:collapse;background:var(--sheet);font-size:13.5px}
 .dtable th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
-.dtable td{padding:10px;border-bottom:1px solid var(--grid);vertical-align:top}
+.dtable td{padding:10px;border-bottom:1px solid var(--grid);vertical-align:top;white-space:normal;word-break:keep-all;overflow-wrap:anywhere}
 .dtable td.num{text-align:right;font-family:var(--mono);white-space:nowrap}
 .dtable td.mono{font-family:var(--mono);font-size:12.5px}
 .dtable td.mono .sub{font-family:var(--body);white-space:normal}
