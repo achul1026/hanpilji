@@ -709,23 +709,29 @@ class Web(unittest.TestCase):
         import datetime
         from hanpilji.gpt import datastatus
         utc = datetime.timezone.utc
-        status = [("실거래", "아파트 매매", "매매", 50, "2024-01-01", "2026-11-10", ["dg_apt_trade"]),
-                  ("실거래", "오피스텔 매매", "매매", 0, None, None, ["dg_offi_trade"]),
-                  ("법령 · 규제 · 정책", "토지거래허가구역", "직접 입력", 3, None, "2027-04-26", []),
-                  ("시장 · 기타", "학교", "위치", 2, None, "2026-11-01", ["poi_school", "없는것"])]
+        day = datetime.date(2026, 11, 10)
+        status = [("실거래", "아파트 매매", "매매", 50, "2024-01-01", "2026-11-10", day, ["dg_apt_trade"]),
+                  ("실거래", "오피스텔 매매", "매매", 0, None, None, None, ["dg_offi_trade"]),
+                  ("법령", "민법", "법률 · 현행 조문", 1118, None, "시행 2025-01-31", "2026-11-09", ["law_go_kr"]),
+                  ("규제 · 정책", "토지거래허가구역: 서울", "보도", 1, "2025-10-20", "2026-12-31", day, []),
+                  ("기타", "학교 위치", "주변 정보", 2, None, None, None, ["poi_school", "없는것"])]
         sources = [("dg_apt_trade", "아파트 매매 실거래가", "국토교통부", "매일", "제한 없음", "https://x",
                     datetime.datetime(2026, 11, 10, 20, 7, tzinfo=utc), 120),
                    ("poi_school", "학교 위치", "교육부", "분기", None, None, None, None)]
-        got = datastatus.build(status, sources, now=datetime.datetime(2026, 11, 11, 1, 0, tzinfo=utc))
+        got = datastatus.build(status, sources, (3 * 1024 ** 3 + 512 * 1024 ** 2, 52),
+                               now=datetime.datetime(2026, 11, 11, 1, 0, tzinfo=utc))
         self.assertEqual(got["checked_at"], "2026-11-11 10:00")
-        self.assertEqual(got["total_rows"], 55)
-        self.assertEqual([g["name"] for g in got["groups"]], ["실거래", "법령 · 규제 · 정책", "시장 · 기타"])
+        self.assertEqual((got["total_rows"], got["total_size"], got["table_count"]), (1171, "3.5 GB", 52))
+        self.assertEqual([g["name"] for g in got["groups"]], ["실거래", "법령", "규제 · 정책", "기타"])
         deal = got["groups"][0]["items"]
-        self.assertEqual(len(deal), 1, "줄이 0인 묶음은 뺌")
-        self.assertEqual(deal[0]["updated"], "2026-11-11 05:07", "최신화는 한국 시각")
-        self.assertEqual(deal[0]["sources"][0]["last_rows"], 120)
-        school = got["groups"][2]["items"][0]
-        self.assertEqual((school["updated"], len(school["sources"])), (None, 1), "모르는 수집처 id는 건너뜀")
+        self.assertEqual(len(deal), 1, "줄이 0인 것은 뺌")
+        self.assertEqual((deal[0]["updated"], deal[0]["checked"]), ("2026-11-10", "2026-11-11 05:07"),
+                         "최종 업데이트는 데이터 기준일, 수집 확인은 한국 시각")
+        self.assertEqual(got["groups"][1]["items"][0]["updated"], "2026-11-09", "글자로 와도 그대로")
+        school = got["groups"][3]["items"][0]
+        self.assertEqual((school["checked"], len(school["sources"])), (None, 1), "모르는 수집처 id는 건너뜀")
+        self.assertIsNone(datastatus.build([], [])["total_size"], "용량을 모르면 비움")
+        self.assertEqual(datastatus._size(900), "900 B")
 
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
