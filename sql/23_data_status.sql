@@ -103,7 +103,7 @@ BEGIN
     IF to_regclass('core.kb_chunk') IS NOT NULL THEN
         RETURN QUERY EXECUTE
             $q$SELECT '해설 자료'::text, '의미 검색 벡터: ' || k.kind,
-                      'bge-m3 · 만든 조각 ' || count(k.embedding) || ' / 전체 ' || count(*)
+                      '만든 조각 ' || count(k.embedding) || ' / 전체 ' || count(*)
                       || CASE WHEN count(k.embedding) < count(*) THEN ' (만드는 중)' ELSE '' END,
                       count(k.embedding), NULL::text, NULL::text, max(k.embedded_at)::date, ARRAY['kb_embed']
                FROM core.kb_chunk k GROUP BY k.kind ORDER BY 2$q$;
