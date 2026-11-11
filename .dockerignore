@@ -5,6 +5,7 @@ docs/
 tests/
 sql/
 scripts/
+!scripts/fetch_embed_model.py
 **/__pycache__
 *.pyc
 .env
