@@ -209,8 +209,13 @@ def region_names(conn, sigungu_cd):
     row = conn.execute("SELECT sido, sigungu FROM core.dim_region WHERE lawd_cd = %s", (sigungu_cd + "00000",)).fetchone()
     if row and row[1]:
         return row
-    if sigungu_cd in regions.SEOUL_NAMES:   # 서울 구 줄이 아직 없는 DB(sql/21_seoul_regions.sql 전)
-        return "서울특별시", regions.SEOUL_NAMES[sigungu_cd]
+    if sigungu_cd in regions.SEOUL_NAMES:   # 서울 구 줄이 아직 없는 DB(sql/21_seoul_regions.sql 전): 구 줄을 만들어
+        name = regions.SEOUL_NAMES[sigungu_cd]   # load가 공매 물건에 구 코드를 붙일 수 있게 함
+        conn.execute("""INSERT INTO core.dim_region (lawd_cd, sido, sigungu, emd, source, asof)
+                        VALUES (%s, '서울특별시', %s, NULL, '행정표준코드 법정동코드', current_date)
+                        ON CONFLICT (lawd_cd) DO UPDATE SET sido = excluded.sido, sigungu = excluded.sigungu""",
+                     (sigungu_cd + "00000", name))
+        return "서울특별시", name
     raise SystemExit(f"core.dim_region에 시군구 {sigungu_cd}가 없음")
 
 

@@ -153,6 +153,8 @@ class WithDb(unittest.TestCase):
             self.assertEqual(tuple(onbid.region_names(c, "11680")), ("서울특별시", "강남구"))
             c.execute("DELETE FROM core.dim_region WHERE lawd_cd = '1144000000'")
             self.assertEqual(tuple(onbid.region_names(c, "11440")), ("서울특별시", "마포구"), "구 줄이 없어도 서울 구 이름")
+            self.assertEqual(c.execute("SELECT sigungu FROM core.dim_region WHERE lawd_cd = '1144000000'").fetchone(),
+                             ("마포구",), "공매 물건에 구 코드가 붙게 구 줄을 만듦")
             with self.assertRaises(SystemExit):
                 onbid.region_names(c, "41135")
             c.rollback()   # 지운 구 줄은 되돌림

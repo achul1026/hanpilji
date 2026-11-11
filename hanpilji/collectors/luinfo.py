@@ -147,14 +147,17 @@ def load(conn, run_id, sigungu, ucode, act_query, obj, asof):
     return loaded, rejected
 
 
+COPY_MARK = "결과를 같은 시 조례로 복사"
+
+
 def copy_rules(conn, src, targets):
     """src 구의 행위제한 규칙을 targets 구에 덮어씀(src 자신은 건너뜀) → (src 규칙 줄 수, 복사한 구 수).
-    src에서 사라진 규칙은 targets에서도 지움."""
+    src에서 사라진 규칙은 targets에서도 지우되, 이 함수가 복사해 넣은 줄(source가 COPY_MARK로 끝남)만 지움."""
     targets = [t for t in targets if t != src]
     n = conn.execute("SELECT count(*) FROM core.reg_rule WHERE sigungu_cd = %s", (src,)).fetchone()[0]
     if not n or not targets:
         return n, 0
-    label = f"국토교통부 토지이용규제정보서비스(행위제한) · {src} 결과를 같은 시 조례로 복사"
+    label = f"국토교통부 토지이용규제정보서비스(행위제한) · {src} 결과를 같은 시 조례로 복사"   # COPY_MARK로 끝남
     conn.execute(
         """INSERT INTO core.reg_rule (zone_cd, sigungu_cd, act_name, allowed, condition_text, article_id, source, asof)
            SELECT r.zone_cd, t.sgg, r.act_name, r.allowed, r.condition_text, r.article_id, %s, r.asof
@@ -165,9 +168,9 @@ def copy_rules(conn, src, targets):
                          article_id = excluded.article_id, source = excluded.source, asof = excluded.asof""",
         (label, targets, src))
     conn.execute(
-        """DELETE FROM core.reg_rule d WHERE d.sigungu_cd = ANY(%s) AND NOT EXISTS (
+        """DELETE FROM core.reg_rule d WHERE d.sigungu_cd = ANY(%s) AND d.source LIKE %s AND NOT EXISTS (
                SELECT 1 FROM core.reg_rule r WHERE r.sigungu_cd = %s AND r.zone_cd = d.zone_cd AND r.act_name = d.act_name)""",
-        (targets, src))
+        (targets, "%" + COPY_MARK, src))
     return n, len(targets)
 
 
@@ -223,7 +226,10 @@ def main(argv=None, fetch=datagokr.fetch):
                     if datagokr.is_fatal(e):  # 키 · 한도 문제는 다음 호출도 똑같이 실패하므로 멈춤
                         break
             note = None
-            if args.copy_to:
+            if args.copy_to and failed:   # 일부 조합이 실패하면 원본이 덜 찬 상태라 복사하지 않음(지난 복사본 그대로)
+                note = f"실패 {failed}건이라 다른 구로 복사하지 않음 — 다시 돌리면 실패한 조합만 받고 복사함"
+                print(note, file=sys.stderr)
+            elif args.copy_to:
                 n, targets = copy_rules(conn, sigungus[0], regions.expand(args.copy_to))
                 conn.commit()
                 note = f"{sigungus[0]} 규칙 {n}줄을 {targets}개 구에 복사"

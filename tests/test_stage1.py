@@ -263,16 +263,18 @@ class Stage1Pipeline(unittest.TestCase):
             zone = c.execute("SELECT zone_cd FROM core.dim_zone WHERE code_system = 'uq' ORDER BY 1 LIMIT 1").fetchone()[0]
             c.execute("DELETE FROM core.reg_rule WHERE sigungu_cd IN ('11680', '11440', '11350')")
             c.execute("INSERT INTO core.reg_rule (zone_cd, sigungu_cd, act_name, allowed, source, asof) VALUES "
-                      "(%s, '11680', '시험식당', '가능', 't', '2026-11-11'), (%s, '11440', '옛규칙', '불가', 't', '2026-11-01')",
-                      (zone, zone))
+                      "(%s, '11680', '시험식당', '가능', 't', '2026-11-11'), (%s, '11440', '옛규칙', '불가', %s, '2026-11-01'),"
+                      " (%s, '11440', '따로넣은규칙', '불가', 't', '2026-11-01')",
+                      (zone, zone, "옛 " + luinfo.COPY_MARK, zone))
             self.assertEqual(luinfo.copy_rules(c, "11680", ["11680", "11440", "11350"]), (1, 2))
             got = c.execute("SELECT sigungu_cd, act_name, allowed FROM core.reg_rule "
                             "WHERE sigungu_cd IN ('11680', '11440', '11350') ORDER BY 1").fetchall()
-            self.assertEqual(got, [("11350", "시험식당", "가능"), ("11440", "시험식당", "가능"), ("11680", "시험식당", "가능")])
+            self.assertEqual(got, [("11350", "시험식당", "가능"), ("11440", "따로넣은규칙", "불가"), ("11440", "시험식당", "가능"),
+                                   ("11680", "시험식당", "가능")], "지난 복사본에만 있던 규칙은 지우고, 따로 넣은 규칙은 둠")
             self.assertEqual(luinfo.copy_rules(c, "11680", ["11440"]), (1, 1), "두 번 돌려도 같음")
-            self.assertEqual(c.execute("SELECT count(*) FROM core.reg_rule WHERE sigungu_cd = '11440'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT count(*) FROM core.reg_rule WHERE sigungu_cd = '11440'").fetchone()[0], 2)
             self.assertEqual(luinfo.copy_rules(c, "11110", ["11440"]), (0, 0), "원본이 비면 지우지 않음")
-            self.assertEqual(c.execute("SELECT count(*) FROM core.reg_rule WHERE sigungu_cd = '11440'").fetchone()[0], 1)
+            self.assertEqual(c.execute("SELECT count(*) FROM core.reg_rule WHERE sigungu_cd = '11440'").fetchone()[0], 2)
             c.execute("DELETE FROM core.reg_rule WHERE sigungu_cd IN ('11680', '11440', '11350')")
 
     def test_2_complex_price(self):

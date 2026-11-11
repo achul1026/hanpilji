@@ -78,7 +78,8 @@ case "$WHAT" in
     step bld "건축물대장(서울)" 240 "$PY" -m hanpilji.collectors.bld --sigungu seoul --max-calls "$DG_MAX"
     # V-World 토지특성(지목 · 토지대장 면적 · 공시지가 이력) · 토지이용계획(용도지역 · 지구). V-World는 해외 IP를 막아
     # 클라우드에서는 못 받고 국내 IP인 서버에서만 받음. 서울 단지 필지만(필지마다 2번 안팎), 받은 지 30일 지난 필지만 다시.
-    # 공공데이터포털 한도와 따로라 건축물대장과 겹치지 않음. .env에 VWORLD_KEY가 없으면 건너뜀
+    # 공공데이터포털 한도와 따로라 건축물대장과 겹치지 않음. .env에 VWORLD_KEY가 없으면 건너뜀.
+    # 키를 받을 때 적은 서비스 URL이 http://localhost가 아니면 .env에 VWORLD_DOMAIN=그 URL도 적어야 함(다르면 키 오류로 멈춤)
     if [ -n "${VWORLD_KEY:-}" ]; then
       step vworld "토지특성 · 토지이용계획(V-World, 서울 단지 필지)" 180 \
         "$PY" -m hanpilji.collectors.vworld --sigungu seoul --complex-only --max-calls "${HANPILJI_VWORLD_MAX_CALLS:-9000}"
