@@ -33,7 +33,7 @@ failed=()
 # .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh sh nrg onbid law prec admrul guide market bld vworld vworld_geom luinfo house_price land_price poi freshness"
+KEYS="apt offi rh sh nrg onbid law prec admrul guide concepts market bld vworld vworld_geom luinfo house_price land_price poi freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
@@ -102,6 +102,8 @@ case "$WHAT" in
     step admrul "행정규칙" 15 "$PY" -m hanpilji.collectors.admrul
     # 정부 해설 책자(data/guides, 저장소에 든 쪽 단위 글). 바뀐 것만 다시 넣음(git pull로 새 판이 들어오면 반영)
     step guide "해설서" 5 "$PY" -m hanpilji.collectors.guide
+    # 개념 노트(data/concepts, 직접 쓴 글). 바뀐 노트만 다시 넣음
+    step concepts "개념 노트" 5 "$PY" -m hanpilji.collectors.concepts
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)

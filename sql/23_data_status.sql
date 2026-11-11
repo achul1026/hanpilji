@@ -91,6 +91,14 @@ BEGIN
                FROM core.doc_guide g ORDER BY g.kind DESC, g.title$q$;
     END IF;
 
+    -- 개념 노트(sql/27_concepts.sql을 넣은 DB에만 있음): 과목마다 한 줄
+    IF to_regclass('core.kb_concept') IS NOT NULL THEN
+        RETURN QUERY EXECUTE
+            $q$SELECT '해설 자료'::text, '개념 노트: ' || k.subject, '한필지가 직접 쓴 개념 · 공식 · 예시'::text,
+                      count(*), NULL::text, NULL::text, max(c.asof), ARRAY['kb_concept_note']
+               FROM core.kb_concept c JOIN core.kb_topic k USING (topic_id) GROUP BY k.subject ORDER BY 2$q$;
+    END IF;
+
     -- 규제 · 정책
     RETURN QUERY
     SELECT '규제 · 정책'::text, '용도지역 행위제한'::text, '용도지역 x 건물 종류(가능 · 조건부 · 불가)'::text, count(*),
