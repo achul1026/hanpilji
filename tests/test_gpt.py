@@ -733,6 +733,30 @@ class Web(unittest.TestCase):
         self.assertIsNone(datastatus.build([], [])["total_size"], "용량을 모르면 비움")
         self.assertEqual(datastatus._size(900), "900 B")
 
+    def test_data_status_fetch(self):
+        import datetime
+        from hanpilji.gpt import datastatus
+        old_row = ("실거래", "아파트 매매", "매매", 5, None, None, ["dg_apt_trade"])   # 예전 7열 함수
+        conn = mock.MagicMock()
+        conn.execute.return_value.fetchall.side_effect = [[old_row], []]
+        conn.execute.return_value.fetchone.return_value = (2048, 3)
+        got = datastatus.fetch(conn)
+        sqls = [c.args[0] for c in conn.execute.call_args_list]
+        self.assertTrue(any("q_data_size" in q for q in sqls), "용량 함수를 부름")
+        self.assertEqual((got["total_size"], got["table_count"], got["total_rows"]), ("2 KB", 3, 5))
+        self.assertIsNone(got["groups"][0]["items"][0]["updated"], "예전 7열 결과도 읽음")
+
+        def failing(q):
+            if "q_data_size" in q:
+                raise RuntimeError("없는 함수")
+            r = mock.MagicMock()
+            r.fetchall.return_value = []
+            return r
+        conn2 = mock.MagicMock()
+        conn2.execute.side_effect = failing
+        self.assertIsNone(datastatus.fetch(conn2)["total_size"], "용량 함수가 없어도 화면은 나옴")
+        del datetime
+
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
         js = web.page("app.js")

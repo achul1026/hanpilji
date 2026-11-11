@@ -4,6 +4,7 @@
 결과를 CACHE_SECONDS 동안 기억해 두고 씀(데이터는 하루 한 번 새로 받으므로 1시간이면 충분).
 """
 import datetime
+import sys
 import threading
 import time
 
@@ -41,7 +42,10 @@ def build(status_rows, source_rows, size_row=None, now=None):
                         "url": url, "last_success": last, "last_rows": rows}
     groups = {g: [] for g in GROUPS}
     total = 0
-    for grp, label, detail, count, p_from, p_to, updated, ids in status_rows:
+    for r in status_rows:
+        if len(r) == 7:   # updated 열이 없던 예전 함수(서버 SQL을 아직 안 바꿨을 때)
+            r = (*r[:6], None, r[6])
+        grp, label, detail, count, p_from, p_to, updated, ids = r
         if not count:
             continue
         srcs = [sources[i] for i in (ids or []) if i in sources]
@@ -66,7 +70,11 @@ def build(status_rows, source_rows, size_row=None, now=None):
 def fetch(conn):
     status = conn.execute("SELECT * FROM mart.q_data_status()").fetchall()
     sources = conn.execute("SELECT * FROM mart.q_data_sources()").fetchall()
-    size = conn.execute("SELECT * FROM mart.q_data_size()").fetchone()
+    try:   # 서버에 q_data_size를 아직 안 넣었으면 용량만 비우고 나머지는 보여 줌
+        size = conn.execute("SELECT * FROM mart.q_data_size()").fetchone()
+    except Exception as e:
+        print(f"용량 조회 오류: {e!r}", file=sys.stderr)
+        size = None
     return build(status, sources, size)
 
 
