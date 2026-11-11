@@ -34,6 +34,9 @@ class Notes(unittest.TestCase):
                 Path(t, "notes_1.toml").write_text(body, encoding="utf-8")
                 with self.assertRaises(ValueError):
                     concepts.load_notes(t)
+            Path(t, "notes_1.toml").write_text("# 아직 비어 있음\n", encoding="utf-8")
+            with self.assertRaises(ValueError):   # 파일은 있는데 노트가 하나도 없음 → DB를 비우지 않게 멈춤
+                concepts.load_notes(t)
             with self.assertRaises(ValueError):   # 노트 파일이 없음
                 concepts.load_notes(Path(t) / "none")
 
@@ -57,13 +60,17 @@ class Load(unittest.TestCase):
         cls.dir.mkdir()
         os.environ.pop("HANPILJI_DSN", None)
         with psycopg.connect(DSN) as c:
-            cls.saved = c.execute("SELECT count(*) FROM core.kb_concept").fetchone()[0]
+            # 시험 DB에 이미 든 노트는 따로 옮겨 두었다가 끝나면 되돌림
+            c.execute("DROP TABLE IF EXISTS public._kb_concept_saved")
+            c.execute("CREATE TABLE public._kb_concept_saved AS SELECT * FROM core.kb_concept")
             c.execute("DELETE FROM core.kb_concept")
 
     @classmethod
     def tearDownClass(cls):
         with cls.psycopg.connect(DSN) as c:
             c.execute("DELETE FROM core.kb_concept")
+            c.execute("INSERT INTO core.kb_concept SELECT * FROM public._kb_concept_saved")
+            c.execute("DROP TABLE public._kb_concept_saved")
         cls.tmp.cleanup()
 
     def q(self, sql, *args):
@@ -77,11 +84,12 @@ class Load(unittest.TestCase):
         self.write('[[note]]\nid = "C001"\ntopic = "G10"\nterm = "지렛대 효과"\nsummary = "빌린 돈으로 수익률을 키움"\n'
                    'body = "총자본수익률이 저당 금리보다 높으면 정의 레버리지"\nformula = "자기자본수익률 = 이익 ÷ 자기자본"\n'
                    'data = ["q_deal_list"]\nlaws = ["민법 제99조"]\n'
-                   '[[note]]\nid = "C002"\ntopic = "G16"\nterm = "환원율"\nsummary = "순수익을 가액으로 바꾸는 비율"\n'
+                   '[[note]]\nid = "C002"\ntopic = "G16"\nterm = "환원율"\nsummary = "순수익(NOI)을 가액으로 바꾸는 비율"\n'
                    'body = "직접환원법에서 쓴다"\n')
         self.assertEqual(concepts.main(["--config", self.cfg, "--dir", str(self.dir)]), 0)
         got = self.q("SELECT term, unit, formula, law_refs FROM mart.q_concept_search('레버리지 금리')")
         self.assertEqual(got, [("지렛대 효과", "투자분석과 화폐의 시간가치", "자기자본수익률 = 이익 ÷ 자기자본", ["민법 제99조"])])
+        self.assertEqual(self.q("SELECT term FROM mart.q_concept_search('noi')"), [("환원율",)], "대소문자 무시")
         self.assertEqual(self.q("SELECT concept_id FROM mart.q_kb_topic_concepts('G16')"), [("C002",)])
         st = self.q("SELECT label, row_count FROM mart.q_data_status() WHERE label LIKE '개념 노트%'")
         self.assertEqual(st, [("개념 노트: 부동산학개론", 2)])

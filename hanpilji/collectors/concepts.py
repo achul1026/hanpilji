@@ -49,6 +49,8 @@ def load_notes(folder):
                 notes.append(n)
     if bad:
         raise ValueError("; ".join(bad))
+    if not notes:
+        raise ValueError(f"{folder}의 notes_*.toml에 [[note]]가 하나도 없음(DB의 노트를 지우지 않으려고 멈춤)")
     return notes
 
 
@@ -62,7 +64,7 @@ def check_refs(conn, notes):
     """data에 적힌 함수 · 지표가 DB에 있는지. 없는 것 목록."""
     funcs = {r[0] for r in conn.execute(
         """SELECT p.proname FROM pg_proc p JOIN pg_namespace s ON s.oid = p.pronamespace
-           WHERE p.proname LIKE 'q\\_%%' AND s.nspname IN ('mart', current_schema(), 'hanpilji')""").fetchall()}
+           WHERE left(p.proname, 2) = 'q_' AND s.nspname IN ('mart', current_schema(), 'hanpilji')""").fetchall()}
     stats = {r[0] for r in conn.execute("SELECT stat_id FROM core.dim_stat").fetchall()}
     missing = []
     for n in notes:
@@ -87,41 +89,52 @@ def main(argv=None):
     today = datetime.datetime.now(KST).date()
     with db.connect(cfg["db"]["dsn"]) as conn:
         run_id = ingest.start_run(conn, SOURCE)
-        valid = {r[0] for r in conn.execute("SELECT topic_id FROM core.kb_topic").fetchall()}
-        bad_topic = [f"{n['id']}:{n['topic']}" for n in notes if n["topic"] not in valid]
-        missing = check_refs(conn, notes)
-        if bad_topic:
-            print(f"failed  없는 단원: {', '.join(bad_topic)}", file=sys.stderr)
-            ingest.finish_run(conn, run_id, "failed", 0, len(bad_topic), ("없는 단원: " + ", ".join(bad_topic))[:500])
-            return 1
-        old = dict(conn.execute("SELECT concept_id, version_id FROM core.kb_concept").fetchall())
-        changed = 0
-        for n in notes:
-            v = version(n)
-            if old.get(n["id"]) == v:
-                continue
-            text = "\n".join(str(x) for x in (n["term"], n["summary"], n["body"], n.get("formula"), n.get("example")) if x)
-            conn.execute(
-                """INSERT INTO core.kb_concept (concept_id, topic_id, term, summary, body, formula, example, data_refs,
-                                                law_refs, search_text, version_id, source, asof)
-                   VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
-                   ON CONFLICT (concept_id) DO UPDATE SET topic_id = excluded.topic_id, term = excluded.term,
-                       summary = excluded.summary, body = excluded.body, formula = excluded.formula,
-                       example = excluded.example, data_refs = excluded.data_refs, law_refs = excluded.law_refs,
-                       search_text = excluded.search_text, version_id = excluded.version_id, asof = excluded.asof""",
-                (n["id"], n["topic"], n["term"].strip(), n["summary"].strip(), n["body"].strip(),
-                 (n.get("formula") or "").strip() or None, (n.get("example") or "").strip() or None,
-                 list(n.get("data", [])), list(n.get("laws", [])), search_text(text), v,
-                 "한필지 개념 노트(직접 작성)", today))
-            changed += 1
-        gone = conn.execute("DELETE FROM core.kb_concept WHERE NOT (concept_id = ANY(%s)) RETURNING concept_id",
-                            ([n["id"] for n in notes],)).fetchall()
-        conn.commit()
-        note = f"없는 데이터 연결: {', '.join(missing)}"[:500] if missing else None
-        if missing:
-            print(f"주의  {note}", file=sys.stderr)
-        print(f"done  노트 {len(notes)}개 중 바뀐 {changed}개 · 지운 {len(gone)}개")
-        ingest.finish_run(conn, run_id, "done", changed, len(missing), note)
+        try:
+            return load(conn, run_id, notes, today)
+        except Exception as e:
+            conn.rollback()
+            ingest.finish_run(conn, run_id, "failed", 0, 0, str(e)[:500])
+            raise
+
+
+def load(conn, run_id, notes, today):
+    # 두 번 겹쳐 돌면 늦게 끝난 쪽이 앞 판을 덮지 않게, 한 번에 하나만
+    conn.execute("SELECT pg_advisory_xact_lock(hashtext('hanpilji.kb_concept'))")
+    valid = {r[0] for r in conn.execute("SELECT topic_id FROM core.kb_topic").fetchall()}
+    bad_topic = [f"{n['id']}:{n['topic']}" for n in notes if n["topic"] not in valid]
+    missing = check_refs(conn, notes)
+    if bad_topic:
+        print(f"failed  없는 단원: {', '.join(bad_topic)}", file=sys.stderr)
+        ingest.finish_run(conn, run_id, "failed", 0, len(bad_topic), ("없는 단원: " + ", ".join(bad_topic))[:500])
+        return 1
+    old = dict(conn.execute("SELECT concept_id, version_id FROM core.kb_concept").fetchall())
+    changed = 0
+    for n in notes:
+        v = version(n)
+        if old.get(n["id"]) == v:
+            continue
+        text = "\n".join(str(x) for x in (n["term"], n["summary"], n["body"], n.get("formula"), n.get("example")) if x)
+        conn.execute(
+            """INSERT INTO core.kb_concept (concept_id, topic_id, term, summary, body, formula, example, data_refs,
+                                            law_refs, search_text, version_id, source, asof)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
+               ON CONFLICT (concept_id) DO UPDATE SET topic_id = excluded.topic_id, term = excluded.term,
+                   summary = excluded.summary, body = excluded.body, formula = excluded.formula,
+                   example = excluded.example, data_refs = excluded.data_refs, law_refs = excluded.law_refs,
+                   search_text = excluded.search_text, version_id = excluded.version_id, asof = excluded.asof""",
+            (n["id"], n["topic"], n["term"].strip(), n["summary"].strip(), n["body"].strip(),
+             (n.get("formula") or "").strip() or None, (n.get("example") or "").strip() or None,
+             list(n.get("data", [])), list(n.get("laws", [])), search_text(text), v,
+             "한필지 개념 노트(직접 작성)", today))
+        changed += 1
+    gone = conn.execute("DELETE FROM core.kb_concept WHERE NOT (concept_id = ANY(%s)) RETURNING concept_id",
+                        ([n["id"] for n in notes],)).fetchall()
+    note = f"없는 데이터 연결: {', '.join(missing)}"[:500] if missing else None
+    if missing:
+        print(f"주의  {note}", file=sys.stderr)
+    # 노트 반영과 실행 기록을 한 번에 커밋(finish_run이 커밋)
+    ingest.finish_run(conn, run_id, "done", changed, len(missing), note)
+    print(f"done  노트 {len(notes)}개 중 바뀐 {changed}개 · 지운 {len(gone)}개")
     return 0
 
 

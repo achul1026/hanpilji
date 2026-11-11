@@ -27,7 +27,7 @@ INSERT INTO ops.ingest_source (source_id, name, operator, method, daily_limit, e
   '직접 작성, 법령 근거는 각 노트에 표시', NULL)
 ON CONFLICT (source_id) DO NOTHING;
 
--- 낱말 절반 이상이 들어 있는 노트. 용어에 낱말이 들어 있으면 가산
+-- 낱말 절반 이상이 들어 있는 노트(대소문자 무시: npv = NPV). 용어에 낱말이 들어 있으면 가산
 DROP FUNCTION IF EXISTS mart.q_concept_search(text, int);
 CREATE FUNCTION mart.q_concept_search(p_query text, p_limit int DEFAULT 5)
 RETURNS TABLE (term text, topic_id text, unit text, summary text, body text, formula text, example text,
@@ -41,8 +41,8 @@ LANGUAGE sql STABLE AS $$
                      + CASE WHEN t.in_term > 0 THEN 0.2 ELSE 0 END)::real AS score
         FROM core.kb_concept c CROSS JOIN q
         CROSS JOIN LATERAL (SELECT count(*) AS matched FROM unnest(q.words) w
-                            WHERE strpos(c.search_text, w) > 0) m
-        CROSS JOIN LATERAL (SELECT count(*) AS in_term FROM unnest(q.words) w WHERE strpos(c.term, w) > 0) t
+                            WHERE strpos(lower(c.search_text), lower(w)) > 0) m
+        CROSS JOIN LATERAL (SELECT count(*) AS in_term FROM unnest(q.words) w WHERE strpos(lower(c.term), lower(w)) > 0) t
         WHERE q.n > 0 AND m.matched * 2 >= q.n
     )
     SELECT h.term, h.topic_id, k.unit, h.summary, h.body, h.formula, h.example, h.data_refs, h.law_refs, h.score,
