@@ -771,8 +771,10 @@ class Web(unittest.TestCase):
         calls = []
         datastatus.clear()
         try:
-            with mock.patch.object(datastatus.time, "monotonic", side_effect=[0, 400, 400]):
+            with mock.patch.object(datastatus.time, "monotonic", side_effect=[0, 100, 400, 400]):
                 datastatus.get(lambda: calls.append(1) or Conn())
+                datastatus.get(lambda: calls.append(1) or Conn())
+                self.assertEqual(len(calls), 1, "RETRY_SECONDS 안에서는 기억해 둔 값")
                 datastatus.get(lambda: calls.append(1) or Conn())
             self.assertEqual(len(calls), 2, "RETRY_SECONDS가 지나면 다시 셈")
         finally:
