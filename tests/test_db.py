@@ -190,5 +190,24 @@ class Pipeline(unittest.TestCase):
                 self.q(sql)
 
 
+    def test_7_kb_topics(self):
+        """시험 목차 52단원, 조문 범위(제103조~제106조)에 든 현행 조문만 단원에 연결."""
+        self.assertEqual(self.q("SELECT count(*) FROM mart.q_kb_topics()")[0][0], 52)
+        self.assertEqual(self.q("SELECT unit FROM mart.q_kb_topics() WHERE topic_id = 'M01'"), [("법률행위",)])
+        clean = "DELETE FROM core.doc_law WHERE law_id = 't-kb'"
+        self.q(clean)
+        try:
+            with psycopg.connect(DSN) as c:
+                for aid, no in (("t-kb-1", "제104조"), ("t-kb-2", "제106조의2"), ("t-kb-3", "제200조")):
+                    c.execute("INSERT INTO core.doc_law (article_id, law_id, law_name, article_no, article_title, body,"
+                              " search_text, effective_date, source, asof) VALUES (%s, 't-kb', '민법', %s, 't', 'b', 'b',"
+                              " '2025-01-01', 't-kb', current_date)", (aid, no))
+            got = [r[1] for r in self.q("SELECT * FROM mart.q_kb_topic_articles('M01')")]
+            self.assertEqual(got, ["제104조", "제106조의2"], "범위 안 조문만, 조 번호 순")
+            self.assertEqual(self.q("SELECT article_count FROM mart.q_kb_topics('민법 및 민사특별법')"
+                                    " WHERE topic_id = 'M01'"), [(2,)])
+        finally:
+            self.q(clean)
+
 if __name__ == "__main__":
     unittest.main()

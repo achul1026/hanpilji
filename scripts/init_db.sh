@@ -11,7 +11,7 @@ for a in "$@"; do
     --pgvector) files+=(04_core_pgvector.sql) ;;
   esac
 done
-files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql 11_building.sql 12_vworld.sql 13_market.sql 14_auction.sql 16_policy.sql 17_house_price.sql 18_property_card.sql 19_seoul_land_price.sql 20_find_sigungu.sql 21_seoul_regions.sql 23_data_status.sql)
+files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql 11_building.sql 12_vworld.sql 13_market.sql 14_auction.sql 16_policy.sql 17_house_price.sql 18_property_card.sql 19_seoul_land_price.sql 20_find_sigungu.sql 21_seoul_regions.sql 23_data_status.sql 24_kb_topics.sql)
 [ -n "${geo:-}" ] && files+=(15_geo.sql 22_poi.sql)   # 지적도 · 건물 윤곽 · 지도 함수(PostGIS 필요)
 for f in "${files[@]}"; do
   echo "== $f"
