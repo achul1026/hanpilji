@@ -206,6 +206,8 @@ class BoxCaller:
             try:
                 data = self.http_get(f"{DATA_URL}?{q}")
             except urllib.error.HTTPError as e:
+                if e.code >= 500 or vworld.is_fatal(e):   # 인증 · 한도(401 · 403 · 429)나 재시도 뒤에도 서버 오류면 오늘은 멈춤
+                    raise vworld.ApiError(f"HTTP {e.code} — 인증 · 한도 · 서버 오류라 멈춤") from None
                 data = e.read()
             except Exception as e:   # 연결 오류 문구에 키가 섞여 나오지 않게
                 raise RuntimeError(str(e).replace(self.key, "***")) from None
@@ -280,10 +282,17 @@ def main(argv=None, http_get=ingest.http_get):
     cfg = config_mod.load(args.config)
     if args.fetch_seoul:
         refresh_days = cfg.get("vworld_geom", {}).get("refresh_days", 180)
+        vworld.api_key()   # 키가 없으면 수집 기록을 남기기 전에 멈춤
         with db.connect(cfg["db"]["dsn"]) as conn:
             run_id = ingest.start_run(conn, SOURCE)
-            done, skipped, failed, calls, note = fetch_seoul(conn, http_get=http_get, max_calls=args.max_calls,
-                                                             refresh_days=refresh_days)
+            try:
+                done, skipped, failed, calls, note = fetch_seoul(conn, http_get=http_get, max_calls=args.max_calls,
+                                                                 refresh_days=refresh_days)
+            except Exception as e:
+                conn.rollback()
+                ingest.finish_run(conn, run_id, "failed", note=str(e)[:500])
+                conn.commit()
+                raise
             ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded=done,
                               note=note or f"칸 {done}개 · 호출 {calls}회")
         return 1 if failed else 0

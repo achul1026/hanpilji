@@ -91,11 +91,13 @@ class Nearby(unittest.TestCase):
             self.assertEqual(c.execute("SELECT count(*) FROM core.ref_poi").fetchone()[0], 2)
             rows = c.execute("SELECT kind, place_name, distance_m, walk_min, row_total FROM mart.q_nearby('11680', '시험주변렉슬')").fetchall()
         self.assertEqual([r[:2] for r in rows], [("지하철역", "시험역"), ("초등학교", "시험초등학교")], "역이 먼저")
-        self.assertTrue(all(0 < r[2] < 400 for r in rows), rows)
+        # 필지 가운데(127.05475, 37.4906)에서 손으로 셈: 역 dx 22m · dy 322m → 약 323m, 학교 dx 110m · dy 155m → 약 190m
+        for r, want in zip(rows, (323, 190)):
+            self.assertAlmostEqual(r[2], want, delta=10, msg=rows)
         self.assertEqual(rows[0][3], -(-rows[0][2] // 67))
         with self.psycopg.connect(DSN) as c:
             self.assertEqual(c.execute("SELECT count(*) FROM mart.q_nearby('11680', '시험주변렉슬', 200)").fetchone()[0], 1,
-                             "반경 200m면 역(약 250m)은 빠짐")
+                             "반경 200m면 역(약 323m)은 빠짐")
             self.assertEqual(c.execute("SELECT count(*) FROM mart.q_nearby('11680', '없는단지')").fetchone()[0], 0)
 
 

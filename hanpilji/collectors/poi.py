@@ -21,8 +21,8 @@ from hanpilji import ingest
 
 PORTAL = "https://www.data.go.kr"
 PER_PAGE = 10000
-# 서울을 넉넉히 덮는 경위도 범위(지적도 칸과 같음)
-BBOX = (126.760, 37.410, 127.190, 37.720)
+# 서울(지적도 칸 126.760~127.190 · 37.410~37.720)에 q_nearby 최대 반경 3km를 더한 경위도 범위
+BBOX = (126.725, 37.383, 127.225, 37.747)
 SETS = {
     "school": {"pk": "15021148", "source_id": "poi_school", "label": "전국초중등학교위치표준데이터"},
     "station": {"pk": "15013205", "source_id": "poi_station", "label": "전국도시철도역사정보표준데이터"},

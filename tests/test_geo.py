@@ -181,3 +181,18 @@ class Load(unittest.TestCase):
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoxCallerErrors(unittest.TestCase):
+    def test_http_limit_or_server_error_is_fatal(self):
+        import io
+        import urllib.error
+        from hanpilji.collectors import vworld, vworld_geom
+        for code in (403, 429, 503):
+            def get(url, code=code):
+                raise urllib.error.HTTPError(url, code, "x", {}, io.BytesIO(b"<html>error</html>"))
+            with mock.patch.dict("os.environ", {"VWORLD_KEY": "k"}):
+                caller = vworld_geom.BoxCaller(get)
+            with self.assertRaises(vworld.ApiError) as e:
+                caller.box("LP_PA_CBND_BUBUN", (0, 0, 1, 1))
+            self.assertTrue(vworld.is_fatal(e.exception), code)
