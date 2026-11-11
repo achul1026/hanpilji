@@ -71,6 +71,14 @@ BEGIN
            NULL::text, '시행 ' || max(w.effective_date)::text, max(w.asof), ARRAY['law_go_kr']
     FROM core.doc_law w WHERE w.is_current GROUP BY w.law_id ORDER BY 2, w.law_id;
 
+    -- 판례(sql/25_prec.sql을 넣은 DB에만 있음)
+    IF to_regclass('core.doc_prec') IS NOT NULL THEN
+        RETURN QUERY EXECUTE
+            $q$SELECT '법령'::text, '대법원 판례'::text, '시험 단원 주제어로 찾은 판시사항 · 판결요지 · 전문'::text,
+                      count(*), min(decided_on)::text, max(decided_on)::text, max(asof), ARRAY['law_go_kr_prec']
+               FROM core.doc_prec$q$;
+    END IF;
+
     -- 규제 · 정책
     RETURN QUERY
     SELECT '규제 · 정책'::text, '용도지역 행위제한'::text, '용도지역 x 건물 종류(가능 · 조건부 · 불가)'::text, count(*),

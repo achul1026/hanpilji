@@ -33,7 +33,7 @@ failed=()
 # .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh sh nrg onbid law market bld vworld vworld_geom luinfo house_price land_price poi freshness"
+KEYS="apt offi rh sh nrg onbid law prec market bld vworld vworld_geom luinfo house_price land_price poi freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
@@ -96,6 +96,8 @@ case "$WHAT" in
     # 테스트 계정(test)은 2026-11-01부터 막힘(2026-11-04 확인). ID가 test면 수집기가 로그에 「주의」를 남기고,
     # 개정만 감지해 본문은 「본문 대기」로 둠
     step law "법령" 20 "$PY" -m hanpilji.collectors.law
+    # 판례: 시험 단원 주제어(config.toml [prec])마다 대법원 판례. 이미 받은 판례는 본문을 다시 받지 않음
+    step prec "판례" 30 "$PY" -m hanpilji.collectors.prec
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)
