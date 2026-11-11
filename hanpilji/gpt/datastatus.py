@@ -10,7 +10,7 @@ import time
 
 CACHE_SECONDS = 3600
 RETRY_SECONDS = 300   # 용량을 못 셌을 때는 이만큼만 기억하고 다시 셈
-GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "규제 · 정책", "시장 지표", "기타"]
+GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "해설 자료", "규제 · 정책", "시장 지표", "기타"]
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
 _lock = threading.Lock()

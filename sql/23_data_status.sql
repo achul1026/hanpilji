@@ -79,6 +79,18 @@ BEGIN
                FROM core.doc_prec$q$;
     END IF;
 
+    -- 해설 자료(sql/26_guide.sql을 넣은 DB에만 있음): 자료마다 한 줄(행정규칙은 조문 수, 해설서는 쪽 수)
+    IF to_regclass('core.doc_guide') IS NOT NULL THEN
+        RETURN QUERY EXECUTE
+            $q$SELECT '해설 자료'::text, g.title,
+                      g.kind || coalesce(' · ' || g.rule_kind, '') || coalesce(' · ' || g.issuer, '') ||
+                      CASE g.kind WHEN '행정규칙' THEN ' · 조문' ELSE ' · 쪽' END || coalesce(' · ' || g.license, ''),
+                      g.part_count::bigint, g.issued_on::text,
+                      CASE WHEN g.effective_on IS NOT NULL THEN '시행 ' || g.effective_on::text END, g.asof,
+                      ARRAY[CASE g.kind WHEN '행정규칙' THEN 'law_go_kr_admrul' ELSE 'gov_guide_pdf' END]
+               FROM core.doc_guide g ORDER BY g.kind DESC, g.title$q$;
+    END IF;
+
     -- 규제 · 정책
     RETURN QUERY
     SELECT '규제 · 정책'::text, '용도지역 행위제한'::text, '용도지역 x 건물 종류(가능 · 조건부 · 불가)'::text, count(*),

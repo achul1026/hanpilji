@@ -392,8 +392,16 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .dgroup{margin:0 0 30px;scroll-margin-top:12px}
 .dgroup h2 small{font:500 13px/1 var(--body);color:var(--muted)}
 .dnav{display:flex;flex-wrap:wrap;gap:6px;margin:0 0 22px}
-.dnav a{font-size:13px;padding:5px 10px;border:1px solid var(--line);border-radius:999px;text-decoration:none;color:var(--ink2);background:var(--sheet)}
-.dnav a:hover{border-color:var(--survey);color:var(--survey)}
+.dnav button{font:500 13px/1.2 var(--body);padding:6px 12px;border:1px solid var(--line);border-radius:999px;color:var(--ink2);background:var(--sheet);cursor:pointer}
+.dnav button span{margin-left:5px;font-family:var(--mono);font-size:12px;color:var(--muted)}
+.dnav button:hover{border-color:var(--survey);color:var(--survey)}
+.dnav button.on{background:var(--ink);border-color:var(--ink);color:var(--sheet)}
+.dnav button.on span{color:inherit;opacity:.75}
+.dpager{display:flex;flex-wrap:wrap;justify-content:center;gap:4px;margin:16px 0 0}
+.dpager button{font:500 13px/1 var(--mono);min-width:34px;padding:8px 10px;border:1px solid var(--line);border-radius:8px;background:var(--sheet);color:var(--ink2);cursor:pointer}
+.dpager button:hover:not(:disabled){border-color:var(--survey);color:var(--survey)}
+.dpager button:disabled{opacity:.4;cursor:default}
+.dpager button.on{opacity:1;background:var(--ink);border-color:var(--ink);color:var(--sheet)}
 .dgroup h2{font:700 17px/1.3 var(--display);margin:0 0 10px;padding-bottom:8px;border-bottom:2px solid var(--ink)}
 .dtable{width:100%;table-layout:fixed;border-collapse:collapse;background:var(--sheet);font-size:13.5px}
 .dtable th{text-align:left;font-weight:600;color:var(--muted);font-size:12px;padding:8px 10px;border-bottom:1px solid var(--line);white-space:nowrap}
