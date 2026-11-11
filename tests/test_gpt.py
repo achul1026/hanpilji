@@ -31,7 +31,7 @@ def call(name, args, id="t1"):
 class Tools(unittest.TestCase):
     def test_specs_are_mart_functions(self):
         self.assertEqual({t["name"] for t in tools.specs()},
-                         {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_zoning_check",
+                         {"q_property_card", "q_complex_price", "q_deal_list", "q_complex_rank", "q_law_search", "q_kb_search", "q_zoning_check",
                           "q_building_filter", "q_price_trend", "q_land_price_trend", "q_price_vs_official", "q_market_series",
                           "q_house_price", "q_auction_discount", "q_auction_checklist", "q_parcel_map", "q_nearby", "q_policy_events", "q_policy_impact"})
         for t in tools.TOOLS:

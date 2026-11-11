@@ -1,0 +1,4 @@
+# 의미 검색(질문 → 벡터)용. 사이트 이미지와 서버 venv-embed에만 설치(수집 배치 venv에는 넣지 않음)
+onnxruntime>=1.20,<2
+tokenizers>=0.20,<1
+numpy>=1.26,<3

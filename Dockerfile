@@ -6,8 +6,14 @@ ENV PYTHONDONTWRITEBYTECODE=1 PYTHONUNBUFFERED=1 \
     HANPILJI_WEB_PUBLIC=1 HANPILJI_TRUST_PROXY=1 HANPILJI_LLM_MODEL=claude-sonnet-5-5
 WORKDIR /app
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+COPY requirements.txt requirements-embed.txt ./
+RUN pip install --no-cache-dir -r requirements.txt -r requirements-embed.txt
+
+# 지식 DB 의미 검색용 질문 벡터 모델(bge-m3 압축판 0.57GB, 커밋 · 지문 고정)
+# 쓰려면 Cloud Run 메모리를 2GiB 이상으로 올리고 환경 변수 HANPILJI_EMBED_QUERY=1을 켬. 끄면 글자 검색만 함
+COPY scripts/fetch_embed_model.py /tmp/
+RUN python /tmp/fetch_embed_model.py /app/models/bge-m3-int8 && rm /tmp/fetch_embed_model.py
+ENV HANPILJI_EMBED_MODEL=/app/models/bge-m3-int8 HANPILJI_EMBED_FILE=model_quantized.onnx HANPILJI_EMBED_THREADS=1
 
 COPY config.toml .
 COPY hanpilji ./hanpilji

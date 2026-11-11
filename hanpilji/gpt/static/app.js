@@ -835,7 +835,7 @@ function renderAnswer(item, box) {
   if (list) card.append(list);
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
-  if (item.blocks.some(b => b.tool === "q_law_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
+  if (item.blocks.some(b => b.tool === "q_law_search" || b.tool === "q_kb_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
   const si = situEl(p.상황); if (si) box.append(si);
   const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
 }

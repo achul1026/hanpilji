@@ -27,7 +27,7 @@ from pathlib import Path
 from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-from hanpilji import config as config_mod, scope
+from hanpilji import config as config_mod, embedding, scope
 from hanpilji.gpt import blocks, datastatus, engine, llm, report, tools, verify
 
 MAX_SESSIONS = 200
@@ -409,6 +409,7 @@ def main(argv=None):
         return 2
     server = ThreadingHTTPServer((a.host, a.port), make_handler(cfg, model, rounds, token, daily_limit=daily,
                                                                 trust_proxy=hops))
+    embedding.warm_up()   # 의미 검색 모델을 뒤에서 미리 올림(켜져 있을 때만)
     print(f"http://{a.host}:{a.port} 에서 열었습니다 (끄려면 Ctrl+C)", file=sys.stderr)
     try:
         server.serve_forever()
