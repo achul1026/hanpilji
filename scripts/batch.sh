@@ -104,6 +104,7 @@ case "$WHAT" in
     step guide "해설서" 5 "$PY" -m hanpilji.collectors.guide
     # 개념 노트(data/concepts, 직접 쓴 글). 바뀐 노트만 다시 넣음
     step concepts "개념 노트" 5 "$PY" -m hanpilji.collectors.concepts
+    # 의미 검색 벡터(bge-m3)는 여기서 돌지 않음: 메모리 · CPU 상한을 건 별도 컨테이너로 scripts/embed.sh가 돎
     step market "시장 지표" 20 "$PY" -m hanpilji.collectors.market --months 12
     ;;
   monthly)
