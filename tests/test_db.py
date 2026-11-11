@@ -161,7 +161,8 @@ class Pipeline(unittest.TestCase):
     def test_6_data_status_rows(self):
         """법령은 법령ID마다 한 줄 + 가장 새 시행일의 이름, dim_stat에 없는 지표는 source_ids NULL."""
         lawd = self.q("SELECT lawd_cd FROM core.dim_region LIMIT 1")
-        clean = ("DELETE FROM core.doc_law WHERE law_id = 't-ds'", "DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'")
+        clean = ("DELETE FROM core.doc_law WHERE law_id = 't-ds'", "DELETE FROM core.fact_market WHERE stat_id = 'zz_t_ds'",
+                 "DELETE FROM core.fact_deal WHERE deal_id = 't-ds'")
         for sql in clean:   # 앞 실행이 중간에 멈춰 남긴 줄도 지우고 시작
             self.q(sql)
         try:
@@ -171,6 +172,9 @@ class Pipeline(unittest.TestCase):
                               " search_text, effective_date, source, asof) VALUES (%s, 't-ds', %s, '제1조', 't', 'b', 'b',"
                               " %s, 't-ds', current_date)", (aid, name, eff))
                 if lawd:
+                    c.execute("INSERT INTO core.fact_deal (deal_id, lawd_cd, deal_type, contract_date, amount, area,"
+                              " source, asof) VALUES ('t-ds', %s, '오피스텔', '2026-01-01', 1, 1,"
+                              " '국토교통부 오피스텔 매매 실거래가', current_date)", (lawd[0][0],))
                     c.execute("INSERT INTO core.fact_market (lawd_cd, stat_id, period, value, source, asof)"
                               " VALUES (%s, 'zz_t_ds', '202601', 1, '어딘가 표', current_date)", (lawd[0][0],))
             rows = self.q("SELECT label, row_count, source_ids FROM mart.q_data_status() WHERE grp = '법령'"
@@ -179,6 +183,8 @@ class Pipeline(unittest.TestCase):
             if lawd:
                 st = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = 'zz_t_ds'")
                 self.assertEqual(st, [(None,)], "출처 미등록은 NULL(직접 입력 []과 구별)")
+                deal = self.q("SELECT source_ids FROM mart.q_data_status() WHERE label = '국토교통부 오피스텔 매매 실거래가'")
+                self.assertEqual(deal, [(["dg_offi_trade"],)], "실거래는 출처 문구가 들어 있어도 수집처 id를 찾음")
         finally:
             for sql in clean:
                 self.q(sql)

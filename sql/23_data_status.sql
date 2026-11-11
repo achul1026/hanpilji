@@ -12,17 +12,22 @@ RETURNS TABLE (grp text, label text, detail text, row_count bigint, period_from 
                updated date, source_ids text[])
 LANGUAGE plpgsql STABLE AS $$
 BEGIN
-    -- 실거래: 수집처(매매 · 전월세 x 주택 종류)마다 한 줄. source 열에 수집처 id가 들어 있음
+    -- 실거래: 수집처(매매 · 전월세 x 주택 종류)마다 한 줄. source 열에는 출처 문구(예: 국토교통부 아파트 매매 실거래가)가
+    -- 들어 있어 수집처 id는 주택 종류(deal_type · rent_type)로 만듦(rtms.KINDS의 source와 같은 규칙)
     RETURN QUERY
     SELECT '실거래'::text, coalesce(s.name, d.source), '매매(해제 거래 포함)'::text, count(*),
-           min(d.contract_date)::text, max(d.contract_date)::text, max(d.asof), ARRAY[d.source]
+           min(d.contract_date)::text, max(d.contract_date)::text, max(d.asof),
+           ARRAY[coalesce(s.source_id, 'dg_' || CASE d.deal_type WHEN '아파트' THEN 'apt' WHEN '오피스텔' THEN 'offi'
+                 WHEN '연립다세대' THEN 'rh' WHEN '단독다가구' THEN 'sh' WHEN '상업업무용' THEN 'nrg' END || '_trade')]
     FROM core.fact_deal d LEFT JOIN ops.ingest_source s ON s.source_id = d.source
-    GROUP BY d.source, s.name ORDER BY count(*) DESC;
+    GROUP BY d.source, d.deal_type, s.name, s.source_id ORDER BY count(*) DESC;
     RETURN QUERY
     SELECT '실거래'::text, coalesce(s.name, r.source), '전세 · 월세'::text, count(*),
-           min(r.contract_date)::text, max(r.contract_date)::text, max(r.asof), ARRAY[r.source]
+           min(r.contract_date)::text, max(r.contract_date)::text, max(r.asof),
+           ARRAY[coalesce(s.source_id, 'dg_' || CASE r.rent_type WHEN '아파트' THEN 'apt' WHEN '오피스텔' THEN 'offi'
+                 WHEN '연립다세대' THEN 'rh' WHEN '단독다가구' THEN 'sh' END || '_rent')]
     FROM core.fact_rent r LEFT JOIN ops.ingest_source s ON s.source_id = r.source
-    GROUP BY r.source, s.name ORDER BY count(*) DESC;
+    GROUP BY r.source, r.rent_type, s.name, s.source_id ORDER BY count(*) DESC;
 
     -- 단지 · 건물 · 토지
     RETURN QUERY
