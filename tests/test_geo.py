@@ -7,8 +7,10 @@ DB 시험은 HANPILJI_TEST_DSN(PostGIS · 15_geo.sql이 올라간 DB)이 있을 
 import importlib.util
 import json
 import os
+import urllib.parse
 import unittest
 from pathlib import Path
+from unittest import mock
 
 from hanpilji.collectors import vworld_geom
 from hanpilji.gpt import blocks, tools, web
@@ -145,6 +147,52 @@ class Load(unittest.TestCase):
             self.assertEqual(tools.run(conn, "q_parcel_map", {"query": "없는단지"})["row_total"], 0)
             self.assertEqual(sorted(out["sources"]), [vworld_geom.BUILDING_LABEL, vworld_geom.PARCEL_LABEL])
 
+    def test_z_fetch_seoul(self):
+        """서버 모드: 칸마다 받아 바로 넣고 커서를 남김. 서울 필지가 없는 칸은 건물을 부르지 않음. 한도에 닿으면 멈추고 이어 받음."""
+        parcel = json.loads((FIX / "parcel" / "00_00.json").read_text(encoding="utf-8"))["features"]
+        building = json.loads((FIX / "building" / "00_00.json").read_text(encoding="utf-8"))["features"]
+        calls = []
+
+        def fake(url):
+            q = urllib.parse.parse_qs(urllib.parse.urlparse(url).query)
+            calls.append((q["data"][0], q["geomFilter"][0]))
+            first = len(calls) <= 2   # 첫 칸만 도형이 있고 나머지 칸은 결과 없음
+            feats = (parcel if q["data"][0] == "LP_PA_CBND_BUBUN" else building) if first else []
+            body = {"response": {"status": "OK", "record": {"total": str(len(feats))},
+                                 "result": {"featureCollection": {"features": feats}}}} if feats else \
+                {"response": {"status": "NOT_FOUND"}}
+            return json.dumps(body).encode()
+
+        with mock.patch.dict(os.environ, {"VWORLD_KEY": "K"}), self.psycopg.connect(DSN) as c:
+            c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s", (vworld_geom.SOURCE,))
+            c.commit()
+            done, skipped, failed, n, note = vworld_geom.fetch_seoul(c, http_get=fake, max_calls=4, log=lambda *_: None)
+            self.assertEqual((done, failed, n), (3, 0, 4), "칸 1: 필지 + 건물, 칸 2 · 3: 필지만(결과 없음)")
+            self.assertIn("한도", note)
+            self.assertEqual([d for d, _ in calls], ["LP_PA_CBND_BUBUN", "LT_C_SPBD", "LP_PA_CBND_BUBUN", "LP_PA_CBND_BUBUN"])
+            self.assertEqual(c.execute("SELECT count(*) FROM ops.ingest_cursor WHERE source_id = %s",
+                                       (vworld_geom.SOURCE,)).fetchone()[0], 3)
+            self.assertEqual(c.execute("SELECT count(*) FROM core.geo_parcel WHERE pnu = %s", (PNUS[0],)).fetchone()[0], 1)
+            calls.clear()
+            vworld_geom.fetch_seoul(c, http_get=fake, max_calls=1, log=lambda *_: None)
+            self.assertEqual(calls[0][1], "BOX({},{},{},{})".format(*list(vworld_geom.tiles())[3][1]), "받은 칸은 건너뜀")
+            c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s", (vworld_geom.SOURCE,))
+
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class BoxCallerErrors(unittest.TestCase):
+    def test_http_limit_or_server_error_is_fatal(self):
+        import io
+        import urllib.error
+        from hanpilji.collectors import vworld, vworld_geom
+        for code in (403, 429, 503):
+            def get(url, code=code):
+                raise urllib.error.HTTPError(url, code, "x", {}, io.BytesIO(b"<html>error</html>"))
+            with mock.patch.dict("os.environ", {"VWORLD_KEY": "k"}):
+                caller = vworld_geom.BoxCaller(get)
+            with self.assertRaises(vworld.ApiError) as e:
+                caller.box("LP_PA_CBND_BUBUN", (0, 0, 1, 1))
+            self.assertTrue(vworld.is_fatal(e.exception), code)

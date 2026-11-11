@@ -397,6 +397,29 @@ TOOLS = [
         "args": lambda a: (_sigungu(a.get("sigungu")), str(a["query"]).strip()),
     },
     {
+        "name": "q_nearby",
+        "description": (
+            "단지 둘레의 지하철역과 초 · 중 · 고등학교. 종류마다 가까운 5곳: 이름 · 노선(역) 또는 설립형태(학교) · "
+            "직선거리(distance_m) · 도보 어림 분(walk_min, 분속 67m 직선거리 기준이라 실제 걷는 길보다 짧음) · 주소. "
+            "「학교 가까워?」 「역세권이야?」 「주변에 뭐 있어」나 한 곳을 종합할 때 부름. "
+            "학교는 교육부 학교위치 표준데이터(배정 학군이 아님 — 배정은 교육청 확인이라고 덧붙일 것), "
+            "역은 도시철도 역사 표준데이터(2021년 기준이라 그 뒤 생긴 역과 코레일 · 신분당선 같은 일부 노선은 빠질 수 있음). "
+            "단지 위치는 지적도에서 잡아서, 지적도가 아직 없는 단지는 0건(「위치 자료를 받는 중」). 강남구(11680)만."),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "단지명 일부 또는 「동 지번」. 예: 도곡렉슬, 대치동 1027"},
+                "radius_m": {"type": "integer", "description": "반경(m). 기본 1000, 200~3000"},
+                "sigungu": {"type": "string", "description": "시군구 코드 5자리 또는 이름. 기본 11680(강남구)"},
+            },
+            "required": ["query"],
+            "additionalProperties": False,
+        },
+        "sql": "SELECT * FROM mart.q_nearby(%s::text, %s::text, %s::int)",
+        "args": lambda a: (_sigungu(a.get("sigungu")), str(a["query"]).strip(),
+                           max(200, min(int(a.get("radius_m") or 1000), 3000))),
+    },
+    {
         "name": "q_policy_events",
         "description": (
             "부동산 정책 · 규제 변화 목록(2017년부터): 토지거래허가구역 지정 · 해제, 규제지역(투기과열지구 · 조정대상지역), "
@@ -466,6 +489,8 @@ SEOUL_DESC = {
     "q_zoning_check": [("지금 조례 데이터는 강남구(11680)만 있음.", "서울 25개 구(서울시 도시계획조례 기준, 구마다 같음).")],
     "q_house_price": [("강남구(11680)만.", "서울 25개 구.")],
     "q_auction_discount": [("강남구(11680)만.", "서울 25개 구(구 하나씩).")],
+    "q_parcel_map": [("강남구(11680)만.", "서울 25개 구(강남구 밖은 채우는 중이라 없으면 「아직 받는 중」).")],
+    "q_nearby": [("강남구(11680)만.", "서울 25개 구(지적도를 채우는 중이라 강남구 밖은 0건일 수 있음).")],
 }
 SEOUL_SIGUNGU_DESC = ("서울 구 이름(예: 마포구) 또는 코드 5자리. 단지 · 동 이름으로 찾을 때는 비워 두면 그 이름으로 구를 찾음. "
                       "구 전체를 물을 때는 꼭 넣을 것(비우면 강남구)")
