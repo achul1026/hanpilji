@@ -29,9 +29,9 @@ CREATE INDEX IF NOT EXISTS doc_prec_search_trgm ON core.doc_prec USING gin (sear
 CREATE TABLE IF NOT EXISTS core.kb_topic_prec (
     topic_id   text NOT NULL REFERENCES core.kb_topic ON DELETE CASCADE,
     prec_id    text NOT NULL REFERENCES core.doc_prec ON DELETE CASCADE,
-    query      text NOT NULL,                      -- 찾을 때 쓴 주제어
+    query      text NOT NULL,                      -- 찾을 때 쓴 주제어(같은 판례가 주제어 여럿에 걸리면 줄도 여럿)
     asof       date NOT NULL,
-    PRIMARY KEY (topic_id, prec_id)
+    PRIMARY KEY (topic_id, prec_id, query)
 );
 CREATE INDEX IF NOT EXISTS kb_topic_prec_prec_idx ON core.kb_topic_prec (prec_id);
 

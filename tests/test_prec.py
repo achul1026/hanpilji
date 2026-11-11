@@ -33,6 +33,10 @@ class Parse(unittest.TestCase):
         self.assertTrue(r["holding"].startswith("주택임대차보호법 제3조 제2항"), "앞뒤 <br/> · 빈칸 정리")
         self.assertIn("\n① 주민등록은", r["summary"], "<br/>은 줄바꿈으로")
         self.assertIsNone(r["ref_cases"], "빈 참조판례는 None")
+        with self.assertRaises(ValueError):   # 일련번호가 숫자가 아니면(파일 이름에 쓰므로) 받지 않음
+            prec.parse_body(BODY.replace(b">618185<", b">../x<"))
+        rows, _ = prec.parse_search(SEARCH.replace(b">618185<", b">../x<"))
+        self.assertEqual(rows, [])
         self.assertEqual(r["ref_articles"], "주택임대차보호법 제3조 제1항, 제2항, 제3조의2 제2항")
 
     def test_denied(self):
@@ -42,9 +46,14 @@ class Parse(unittest.TestCase):
             prec.parse_body(DENIED)
 
     def test_topics_and_urls(self):
-        cfg = {"prec": {"topics": ["M12:주택임대차 대항력", "J02:중개보수", "잘못된줄", ":빈 단원"]}}
+        cfg = {"prec": {"topics": ["M12:주택임대차 대항력", "J02:중개보수"]}}
         self.assertEqual(prec.topics(cfg), [("M12", "주택임대차 대항력"), ("J02", "중개보수")])
         self.assertEqual(prec.topics(cfg, ["J02"]), [("J02", "중개보수")])
+        for bad in ({}, {"prec": {"topics": []}}, {"prec": {"topics": ["M12:대항력", "잘못된줄"]}},
+                    {"prec": {"topics": [":빈 단원"]}}):
+            with self.assertRaises(ValueError):
+                prec.topics(bad)
+        self.assertTrue(prec.BASE.startswith("https://"), "OC가 주소에 들어가므로 https")
         u = prec.search_url("abc", "대항력", 2)
         self.assertIn("target=prec", u)
         self.assertIn("search=2", u, "본문 검색")
@@ -62,7 +71,7 @@ class Load(unittest.TestCase):
         cls.tmp = tempfile.TemporaryDirectory()
         cfg = Path(cls.tmp.name) / "config.toml"
         cfg.write_text(f'[db]\ndsn = "{DSN}"\n[storage]\nraw_dir = "./raw"\n[law]\noc = "t"\nnames = []\n'
-                       '[prec]\nmax_per_topic = 5\ntopics = ["M12:대항력", "Z99:없는 단원"]\n', encoding="utf-8")
+                       '[prec]\nmax_per_topic = 5\ntopics = ["M12:대항력", "M11:차임", "Z99:없는 단원"]\n', encoding="utf-8")
         cls.cfg = str(cfg)
         os.environ.pop("HANPILJI_DSN", None)
         os.environ.pop("LAW_OC", None)
@@ -71,7 +80,7 @@ class Load(unittest.TestCase):
     @classmethod
     def clean(cls):
         with cls.psycopg.connect(DSN) as c:
-            c.execute("DELETE FROM core.doc_prec WHERE prec_id IN ('618185', '607289')")
+            c.execute("DELETE FROM core.doc_prec WHERE prec_id IN ('618185', '607289', '999')")
 
     @classmethod
     def tearDownClass(cls):
@@ -90,8 +99,7 @@ class Load(unittest.TestCase):
             calls.append("body" if "lawService" in url else "search")
             return BODY if "lawService" in url else SEARCH
 
-        rc = prec.main(["--config", self.cfg], fetch=fetch)
-        self.assertEqual(rc, 1, "없는 단원 Z99는 실패로 남김")
+        self.assertEqual(prec.main(["--config", self.cfg, "--only", "M12"], fetch=fetch), 0)
         self.assertEqual(calls.count("body"), 1, "대법원 1건만 본문을 받음")
         self.assertEqual(calls.count("search"), 1, "100건 미만이면 다음 쪽을 안 부름")
         self.assertEqual(self.q("SELECT topic_id, prec_id, query FROM core.kb_topic_prec WHERE prec_id = '618185'"),
@@ -105,6 +113,23 @@ class Load(unittest.TestCase):
         calls.clear()
         prec.main(["--config", self.cfg, "--only", "M12"], fetch=fetch)
         self.assertEqual(calls, ["search"], "이미 받은 판례는 본문을 다시 받지 않음")
+
+        # 다음 주 검색에서 새 판례(999)가 자리를 차지하면 밀려난 618185는 이 주제어 연결에서 빠짐
+        search2 = SEARCH.replace(b">618185<", b">999<")
+        body2 = BODY.decode().replace(">618185<", ">999<").replace("2025다210305", "2026다1").encode()
+
+        def fetch2(url):
+            return body2 if "lawService" in url else search2
+
+        self.assertEqual(prec.main(["--config", self.cfg, "--only", "M12"], fetch=fetch2), 0)
+        self.assertEqual(self.q("SELECT prec_id FROM core.kb_topic_prec WHERE topic_id = 'M12' AND query = '대항력'"),
+                         [("999",)])
+        self.assertEqual(self.q("SELECT count(*) FROM core.doc_prec WHERE prec_id = '618185'"), [(1,)],
+                         "판례 자체는 남김")
+
+    def test_bad_topic_fails(self):
+        self.assertEqual(prec.main(["--config", self.cfg, "--only", "Z99"], fetch=lambda u: SEARCH), 1,
+                         "없는 단원은 실패로 남김")
 
     def test_denied_stops_and_fails(self):
         calls = []

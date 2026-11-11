@@ -22,7 +22,7 @@ from hanpilji import ingest
 from hanpilji.textnorm import search_text
 
 SOURCE = "law_go_kr_prec"
-BASE = "http://www.law.go.kr/DRF"
+BASE = "https://www.law.go.kr/DRF"   # https로도 같은 응답(2026-11-11 확인). OC가 주소에 들어가므로 암호화
 COURT = "대법원"
 fetch_default = functools.partial(ingest.http_get, tries=2, timeout=20)
 MAX_NET_FAILS = 3
@@ -79,7 +79,7 @@ def parse_search(xml_bytes):
     out, every = [], list(ET.fromstring(xml_bytes).iter("prec"))
     for p in every:
         court = _t(p, "법원명") or _t(p, "데이터출처명")
-        if court != COURT or not _t(p, "판례일련번호"):
+        if court != COURT or not (_t(p, "판례일련번호") or "").isdigit():   # 일련번호는 숫자만(파일 이름에 씀)
             continue
         out.append({"prec_id": _t(p, "판례일련번호"), "case_no": _t(p, "사건번호"), "case_name": _t(p, "사건명"),
                     "court": court, "decided_on": _date(_t(p, "선고일자"))})
@@ -96,18 +96,25 @@ def parse_body(xml_bytes):
            "court": _t(root, "법원명"), "decided_on": _date(_t(root, "선고일자")), "case_type": _t(root, "사건종류명"),
            "judgment_type": _t(root, "판결유형"), "holding": g("판시사항"), "summary": g("판결요지"),
            "ref_articles": g("참조조문"), "ref_cases": g("참조판례"), "body": g("판례내용")}
-    if not rec["prec_id"] or not rec["case_no"]:
-        raise ValueError("판례일련번호 · 사건번호가 없는 응답")
+    if not (rec["prec_id"] or "").isdigit() or not rec["case_no"]:
+        raise ValueError("판례일련번호(숫자) · 사건번호가 없는 응답")
     return rec
 
 
 def topics(cfg, only=None):
-    """config [prec] topics 「단원:주제어」 → [(단원, 주제어)]."""
-    out = []
-    for item in cfg.get("prec", {}).get("topics", []):
-        tid, _, q = item.partition(":")
-        if tid.strip() and q.strip() and (not only or tid.strip() in only):
+    """config [prec] topics 「단원:주제어」 → [(단원, 주제어)]. 비었거나 꼴이 틀린 줄이 있으면 ValueError."""
+    items = cfg.get("prec", {}).get("topics")
+    if not items:
+        raise ValueError("config.toml [prec] topics가 비어 있음")
+    out, bad = [], []
+    for item in items:
+        tid, _, q = str(item).partition(":")
+        if not (tid.strip() and q.strip()):
+            bad.append(item)
+        elif not only or tid.strip() in only:
             out.append((tid.strip(), q.strip()))
+    if bad:
+        raise ValueError(f"config.toml [prec] topics에 「단원:주제어」 꼴이 아닌 줄: {bad}")
     return out
 
 
@@ -149,8 +156,11 @@ def collect_topic(conn, cfg, tid, query, fetch, limit, pages=3):
             save(conn, parse_body(body), today)
             new += 1
         conn.execute("""INSERT INTO core.kb_topic_prec (topic_id, prec_id, query, asof) VALUES (%s, %s, %s, %s)
-                        ON CONFLICT (topic_id, prec_id) DO UPDATE SET query = excluded.query, asof = excluded.asof""",
+                        ON CONFLICT (topic_id, prec_id, query) DO UPDATE SET asof = excluded.asof""",
                      (tid, r["prec_id"], query, today))
+    # 이번 검색에서 상위 limit건 밖으로 밀려난 판례는 이 주제어 연결에서 뺌(판례 자체는 남김)
+    conn.execute("DELETE FROM core.kb_topic_prec WHERE topic_id = %s AND query = %s AND NOT (prec_id = ANY(%s))",
+                 (tid, query, [r["prec_id"] for r in found[:limit]]))
     return new, min(len(found), limit)
 
 
@@ -161,7 +171,11 @@ def main(argv=None, fetch=fetch_default):
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     limit = int(cfg.get("prec", {}).get("max_per_topic", 15))
-    todo = topics(cfg, args.only)
+    try:
+        todo = topics(cfg, args.only)
+    except ValueError as e:   # 설정이 틀리면 조용히 「성공 0건」으로 끝나지 않게
+        print(f"판례 설정 오류: {e}", file=sys.stderr)
+        return 1
     with db.connect(cfg["db"]["dsn"]) as conn:
         valid = {r[0] for r in conn.execute("SELECT topic_id FROM core.kb_topic").fetchall()}
         run_id = ingest.start_run(conn, SOURCE)
