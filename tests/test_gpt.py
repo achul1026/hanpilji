@@ -589,6 +589,11 @@ class Report(unittest.TestCase):
         self.assertEqual([b["tool"] for b in out["blocks"]], ["q_property_card", "q_property_card", "q_price_trend", "q_price_trend"])
 
 
+def web_page(name):
+    from hanpilji.gpt import web
+    return web.page(name)
+
+
 class Web(unittest.TestCase):
     """웹 채팅 서버를 실제 포트로 띄워 요청 처리(키 · DB 없이: 엔진을 가짜로 바꿈)."""
 
@@ -675,6 +680,52 @@ class Web(unittest.TestCase):
             self.assertEqual(get("/api/compare?a=x&b=%EB%9E%98%EB%AF%B8%EC%95%88")[1], {"query": "래미안", "choices": ["a", "b"]})
         self.assertEqual(get("/api/report")[0], 400)
         self.assertEqual(get("/api/compare?a=x")[0], 400)
+
+    def test_data_status_page_and_endpoint(self):
+        self.serve(token="s3cret")
+        import urllib.error
+        import urllib.request
+        from hanpilji.gpt import datastatus
+        for path in ("/data", "/data.js"):
+            with urllib.request.urlopen(self.base + path) as r:
+                self.assertEqual(r.status, 200, path)
+        req = urllib.request.Request(self.base + "/api/data-status")
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(req)
+        self.assertEqual(cm.exception.code, 403, "데이터 현황도 /api/ 라 토큰 필요")
+        fake = {"checked_at": "2026-11-11 10:00", "total_rows": 1, "groups": []}
+        with mock.patch.object(datastatus, "get", return_value=fake):
+            req = urllib.request.Request(self.base + "/api/data-status", headers={"X-Token": "s3cret"})
+            with urllib.request.urlopen(req) as r:
+                self.assertEqual(json.loads(r.read()), fake)
+        with mock.patch.object(datastatus, "get", side_effect=RuntimeError("db")):
+            with self.assertRaises(urllib.error.HTTPError) as cm:
+                urllib.request.urlopen(req)
+            self.assertEqual(cm.exception.code, 500)
+        self.assertIn('href="/data"', web_page("index.html"), "사이드바에 데이터 현황 버튼")
+        self.assertNotIn("innerHTML", web_page("data.js"))
+
+    def test_data_status_build(self):
+        import datetime
+        from hanpilji.gpt import datastatus
+        utc = datetime.timezone.utc
+        status = [("실거래", "아파트 매매", "매매", 50, "2024-01-01", "2026-11-10", ["dg_apt_trade"]),
+                  ("실거래", "오피스텔 매매", "매매", 0, None, None, ["dg_offi_trade"]),
+                  ("법령 · 규제 · 정책", "토지거래허가구역", "직접 입력", 3, None, "2027-04-26", []),
+                  ("시장 · 기타", "학교", "위치", 2, None, "2026-11-01", ["poi_school", "없는것"])]
+        sources = [("dg_apt_trade", "아파트 매매 실거래가", "국토교통부", "매일", "제한 없음", "https://x",
+                    datetime.datetime(2026, 11, 10, 20, 7, tzinfo=utc), 120),
+                   ("poi_school", "학교 위치", "교육부", "분기", None, None, None, None)]
+        got = datastatus.build(status, sources, now=datetime.datetime(2026, 11, 11, 1, 0, tzinfo=utc))
+        self.assertEqual(got["checked_at"], "2026-11-11 10:00")
+        self.assertEqual(got["total_rows"], 55)
+        self.assertEqual([g["name"] for g in got["groups"]], ["실거래", "법령 · 규제 · 정책", "시장 · 기타"])
+        deal = got["groups"][0]["items"]
+        self.assertEqual(len(deal), 1, "줄이 0인 묶음은 뺌")
+        self.assertEqual(deal[0]["updated"], "2026-11-11 05:07", "최신화는 한국 시각")
+        self.assertEqual(deal[0]["sources"][0]["last_rows"], 120)
+        school = got["groups"][2]["items"][0]
+        self.assertEqual((school["updated"], len(school["sources"])), (None, 1), "모르는 수집처 id는 건너뜀")
 
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
