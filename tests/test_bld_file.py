@@ -94,6 +94,10 @@ class Load(unittest.TestCase):
                       "VALUES ('t-bf', '망원빌라', '1168011800', '400', %s, '연립다세대', 't', '2026-11-17')", (P2,))
             c.execute("INSERT INTO ops.ingest_cursor (source_id, cursor_key, cursor_value) VALUES (%s, %s, '2099-01-01')",
                       (bld.SOURCE, P3))
+            run = c.execute("INSERT INTO ops.ingest_run (source_id, status) VALUES (%s, 'done') RETURNING run_id",
+                            (bld.SOURCE,)).fetchone()[0]
+            c.execute("INSERT INTO stg.bld_raw (run_id, pnu, op, row_data) VALUES (%s, %s, 'getBrTitleInfo', %s)",
+                      (run, P3, '[{"mgmBldrgstPk": "api"}]'))
 
     @classmethod
     def tearDownClass(cls):
@@ -115,6 +119,7 @@ class Load(unittest.TestCase):
                       "(SELECT 1 FROM core.dim_parcel p WHERE p.lawd_cd = r.lawd_cd)", (bld.SOURCE_LABEL,))
             c.execute("DELETE FROM core.dim_complex WHERE complex_id = 't-bf'")
             c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s AND cursor_key = %s", (bld.SOURCE, P3))
+            c.execute("DELETE FROM stg.bld_raw WHERE pnu = %s", (P3,))
             c.execute("DELETE FROM ops.reject_estate WHERE source_id = %s", (bld_file.SOURCE,))
             c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s", (bld_file.SOURCE,))
 
@@ -149,6 +154,25 @@ class Load(unittest.TestCase):
         self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", str(self.hub), "--allow-older"]), 0)
         self.assertEqual(self.q("SELECT pnu FROM core.dim_building WHERE bld_pk = 'T-4'"), [(P3,)],
                          "파일보다 먼저 API로 받은 필지는 파일 값으로 올림")
+
+    def test_z_moved_building_drops_old_main_lot(self):
+        """대장의 대표 지번이 바뀌면 예전 대표 필지 연결을 지움(부속지번은 그대로)."""
+        bld_file.main(["--config", self.cfg, "--dir", str(self.hub), "--allow-older"])
+        self.q("INSERT INTO core.bridge_parcel_building (pnu, bld_pk, is_main_lot, source, asof) "
+               "VALUES (%s, 'T-3', true, %s, '2026-01-01') RETURNING 1", P1, bld.SOURCE_LABEL)
+        bld_file.main(["--config", self.cfg, "--dir", str(self.hub), "--allow-older"])
+        self.assertEqual(self.q("SELECT pnu FROM core.bridge_parcel_building WHERE bld_pk = 'T-3'"), [(P2,)])
+
+    def test_incomplete_or_bad_files_stop(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_zips(d)
+            (Path(d) / "mart_djy_10.zip").unlink()
+            self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", d, "--dry-run"]), 1, "zip이 빠지면 멈춤")
+        with tempfile.TemporaryDirectory() as d:
+            make_zips(d)
+            with zipfile.ZipFile(Path(d) / "mart_djy_05.zip", "w") as z:
+                z.writestr("mart_djy_05.txt", ATCH[0] + "|더한열\r\n")
+            self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", d, "--dry-run"]), 1, "열 수가 다르면 멈춤")
 
     def test_mixed_dates_stop(self):
         with tempfile.TemporaryDirectory() as d:
