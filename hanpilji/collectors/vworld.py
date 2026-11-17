@@ -325,10 +325,13 @@ def main(argv=None, fetch=fetch):
         if args.pnu:
             pnus = args.pnu
         elif args.complex_only:   # 단지 대표 필지 + 단지 건물이 선 필지(건축물대장). 단지 카드(q_property_card)가 보는 필지와 같음
+            # 필지 목록(dim_parcel)에 아직 없는 번지는 넣을 수 없으니(외래키) 빼고, 목록이 채워지면 다음에 받음
             pnus = [r[0] for r in conn.execute(
-                """SELECT pnu FROM core.dim_complex WHERE pnu IS NOT NULL AND left(pnu, 5) = ANY(%s)
-                   UNION SELECT pb.pnu FROM core.bridge_complex_building cb
-                         JOIN core.bridge_parcel_building pb USING (bld_pk) WHERE left(pb.pnu, 5) = ANY(%s)
+                """SELECT x.pnu FROM (
+                       SELECT pnu FROM core.dim_complex WHERE pnu IS NOT NULL AND left(pnu, 5) = ANY(%s)
+                       UNION SELECT pb.pnu FROM core.bridge_complex_building cb
+                             JOIN core.bridge_parcel_building pb USING (bld_pk) WHERE left(pb.pnu, 5) = ANY(%s)) x
+                   JOIN core.dim_parcel USING (pnu)
                    ORDER BY 1""", (sigungus, sigungus)).fetchall()]
         else:
             pnus = [r[0] for r in conn.execute(
