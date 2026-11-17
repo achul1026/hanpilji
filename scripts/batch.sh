@@ -12,11 +12,7 @@ PY="${HANPILJI_PYTHON:-$ROOT/../venv/bin/python}"
 mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$(date +%Y%m%d_%H%M)_$WHAT.log"
 
-exec 9>"$LOG_DIR/.batch.lock"
-if ! flock -n 9; then
-  echo "$(date '+%F %T') 다른 배치가 도는 중이라 건너뜀: $WHAT" >> "$LOG_DIR/skipped.log"
-  exit 0
-fi
+case "$WHAT" in daily|weekly|monthly) ;; *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;; esac
 
 # 설정 파일이 없으면 멈춤(없이 돌면 셸에 남은 다른 DB 주소로 쓸 수 있음)
 [ -r "$ENV_FILE" ] || { echo "설정 파일 없음: $ENV_FILE" >> "$LOG"; exit 2; }
@@ -26,6 +22,16 @@ set -a; . "$ENV_FILE"; set +a
 [ -n "${HANPILJI_DSN:-}" ] || { echo "$ENV_FILE 에 HANPILJI_DSN 없음" >> "$LOG"; exit 2; }
 # 서버는 스키마 하나(hanpilji) 구성이라 꼭 있어야 함. 없으면 core. · ops. 그대로 보내 전부 실패함
 [ -n "${HANPILJI_DB_SCHEMA:-}" ] || { echo "$ENV_FILE 에 HANPILJI_DB_SCHEMA 없음" >> "$LOG"; exit 2; }
+
+exec 9>"$LOG_DIR/.batch.lock"
+# daily는 다른 배치가 돌면 건너뜀(다음 날 또 돎). weekly · monthly는 일주일 · 한 달에 한 번뿐이라 앞 배치가 끝날 때까지
+# 기다림(최대 HANPILJI_BATCH_WAIT_MIN분, 기본 1200분 = daily 단계 제한 시간을 다 더한 것보다 김). .env에 적어도 됨.
+# 서울 daily가 길어져 월요일 05:37 weekly가 통째로 빠지던 것(2026-11-16). 기다리다 못 하면 종료 코드 1(cron.out에 남음)
+if [ "$WHAT" = daily ]; then WAIT=0; else WAIT=$(( ${HANPILJI_BATCH_WAIT_MIN:-1200} * 60 )); fi
+if ! flock -w "$WAIT" 9; then
+  echo "$(date '+%F %T') 다른 배치가 도는 중이라 건너뜀: $WHAT (기다린 초 $WAIT)" >> "$LOG_DIR/skipped.log"
+  [ "$WHAT" = daily ] && exit 0 || exit 1
+fi
 cd "$ROOT"
 export PYTHONUNBUFFERED=1
 failed=()
