@@ -193,6 +193,10 @@ class Load(unittest.TestCase):
         with psycopg.connect(DSN) as c:
             c.execute("INSERT INTO core.dim_parcel (pnu, lawd_cd, jibun, source, asof) "
                       "VALUES ('1168011800100010000', '1168011800', '1', 't-vw', '2026-10-28') ON CONFLICT DO NOTHING")
+            # 필지 목록에 아직 없는 번지의 단지(외래키 때문에 넣을 수 없음)
+            c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, pnu, source, asof) VALUES "
+                      "('t-vw-nop', '목록밖단지', '1168011800', '9999', '1168011800199990000', 't-vw', '2026-10-28') "
+                      "ON CONFLICT DO NOTHING")
         try:
             with tempfile.TemporaryDirectory() as d:
                 out = Path(d) / "p.txt"
@@ -200,11 +204,13 @@ class Load(unittest.TestCase):
                 got = out.read_text(encoding="utf-8").split()
                 self.assertIn(PNU, got)
                 self.assertNotIn("1168011800100010000", got, "단지가 없는 필지는 뺌")
+                self.assertNotIn("1168011800199990000", got, "필지 목록에 없는 번지는 뺌(외래키)")
                 vworld.main(["--config", self.cfg, "--export-pnus", str(out)])
                 self.assertIn("1168011800100010000", out.read_text(encoding="utf-8").split(), "기본은 구의 필지 전부")
         finally:
             with psycopg.connect(DSN) as c:
                 c.execute("DELETE FROM core.dim_parcel WHERE pnu = '1168011800100010000'")
+                c.execute("DELETE FROM core.dim_complex WHERE complex_id = 't-vw-nop'")
 
     def test_4_export_and_from_dir(self):
         with tempfile.TemporaryDirectory() as d:
