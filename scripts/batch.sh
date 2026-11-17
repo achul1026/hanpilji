@@ -13,8 +13,11 @@ mkdir -p "$LOG_DIR"
 LOG="$LOG_DIR/$(date +%Y%m%d_%H%M)_$WHAT.log"
 
 exec 9>"$LOG_DIR/.batch.lock"
-if ! flock -n 9; then
-  echo "$(date '+%F %T') 다른 배치가 도는 중이라 건너뜀: $WHAT" >> "$LOG_DIR/skipped.log"
+# daily는 다른 배치가 돌면 건너뜀(다음 날 또 돎). weekly · monthly는 일주일 · 한 달에 한 번뿐이라 앞 배치가 끝날 때까지
+# 기다림(최대 HANPILJI_BATCH_WAIT_MIN분, 기본 600분). 서울 daily가 길어져 월요일 05:37 weekly가 통째로 빠지던 것(2026-11-16)
+if [ "$WHAT" = daily ]; then WAIT=0; else WAIT=$(( ${HANPILJI_BATCH_WAIT_MIN:-600} * 60 )); fi
+if ! flock -w "$WAIT" 9; then
+  echo "$(date '+%F %T') 다른 배치가 도는 중이라 건너뜀: $WHAT (기다린 초 $WAIT)" >> "$LOG_DIR/skipped.log"
   exit 0
 fi
 
