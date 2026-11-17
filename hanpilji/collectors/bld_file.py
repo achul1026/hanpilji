@@ -12,8 +12,10 @@ API(hanpilji.collectors.bld)는 단지 PNU마다 4번씩 불러 아파트 · 오
 아래 열 이름을 API 이름으로 붙이고 API 수집기의 load()로 그대로 올림(정리 규칙이 하나로 유지됨).
 
 - 고른 시군구의 줄만 읽어 필지(PNU)마다 모은 뒤 필지 하나씩 올림. 서울은 표제부 약 60만 줄이라 메모리 1GB 안팎.
-- API로 받은 필지(dg_bld_hub 커서가 있는 단지 필지)는 건너뜀: API 쪽이 더 최근 값이고 원본(stg.bld_raw)도 있음.
-  --include-api면 그 필지도 파일 값으로 덮음.
+- API로 받은 필지(dg_bld_hub 커서)는 파일 날짜 뒤에 받았으면 건너뜀: API 쪽이 더 최근 값이고 원본(stg.bld_raw)도
+  있음. --include-api면 그 필지도 파일 값으로 덮음.
+- zip 4개의 날짜가 다르면(다른 달 파일이 섞임) 멈춤. 이미 올린 파일(커서 hub_bld · file)보다 예전 파일이면 멈춤
+  (--allow-older로 되돌릴 수 있음).
 - 지번이 없는 블록 대장(택지지구 「○○동 블록」)은 필지를 정할 수 없어 세기만 하고 건너뜀(API 수집기가 단지별로 찾음).
 - 다시 돌려도 같은 값으로 덮을 뿐이라 중간에 멈추면 처음부터 다시 돌리면 됨.
 """
@@ -113,6 +115,7 @@ def main(argv=None):
     ap.add_argument("--sigungu", action="append", help="시군구 5자리 또는 seoul. 기본: config [pilot]")
     ap.add_argument("--include-api", action="store_true", help="API로 받은 단지 필지도 파일 값으로 덮음")
     ap.add_argument("--dry-run", action="store_true", help="읽고 세기만 함(DB에 쓰지 않음)")
+    ap.add_argument("--allow-older", action="store_true", help="이미 올린 파일보다 이전 달 파일도 올림(되돌릴 때)")
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
     sigungus = regions.expand(args.sigungu or cfg["pilot"]["sigungu"])
@@ -121,7 +124,12 @@ def main(argv=None):
     if "getBrTitleInfo" not in files:
         print(f"{args.dir}에 표제부 파일(mart_djy_03)이 없음", file=sys.stderr)
         return 1
-    asof = files["getBrTitleInfo"][2]
+    days = {d for _, _, d in files.values()}
+    if len(days) > 1:   # 다른 달 파일이 섞이면 한 날짜로 묶을 수 없음(2026-09월 파일 4개는 모두 2026-10-20)
+        print("파일 날짜가 서로 다름: " + ", ".join(f"{op} {d}" for op, (_, _, d) in files.items())
+              + " — 같은 달 파일 4개를 두세요", file=sys.stderr)
+        return 1
+    asof = days.pop()
     names = {op: re.search(r"(mart_djy_\d\d)", inner)[1] for op, (_, inner, _d) in files.items()}
     got_all, bad_total = {}, 0
     for op, (z, inner, day) in files.items():
@@ -138,11 +146,15 @@ def main(argv=None):
         return 0
 
     with db.connect(cfg["db"]["dsn"]) as conn:
+        last = ingest.get_cursor(conn, SOURCE, "file")
+        if last and asof < datetime.date.fromisoformat(last) and not args.allow_older:
+            print(f"이미 {last} 파일을 올렸음 — 이 파일({asof})이 더 예전이라 멈춤. 되돌리려면 --allow-older",
+                  file=sys.stderr)
+            return 1
+        # API로 받은 필지는 파일보다 뒤에 받았을 때만 건너뜀(커서 값 = 받은 날)
         skip = set() if args.include_api else {r[0] for r in conn.execute(
-            "SELECT cursor_key FROM ops.ingest_cursor WHERE source_id = %s", (bld.SOURCE,)).fetchall()}
-        complexes = {}
-        for cid, pnu in conn.execute("SELECT complex_id, pnu FROM core.dim_complex WHERE pnu IS NOT NULL"):
-            complexes.setdefault(pnu, []).append(cid)
+            "SELECT cursor_key FROM ops.ingest_cursor WHERE source_id = %s AND cursor_value >= %s",
+            (bld.SOURCE, asof.isoformat())).fetchall()}
         run_id = ingest.start_run(conn, SOURCE)
         conn.commit()
         loaded = rejected = done = skipped = failed = 0
@@ -155,8 +167,7 @@ def main(argv=None):
                 got = {op: [to_row(names[op], line) for line in got_all[op].get(pnu, ())] for op in got_all}
                 try:
                     with conn.transaction():
-                        n, r = bld.load(conn, run_id, pnu, got, asof, complexes=complexes.get(pnu, []),
-                                        source=SOURCE, keep_raw=False)
+                        n, r = bld.load(conn, run_id, pnu, got, asof, source=SOURCE, keep_raw=False)   # 단지는 필지마다 찾음
                     loaded, rejected, done = loaded + n, rejected + r, done + 1
                 except Exception as e:  # 한 필지가 실패해도 나머지는 계속
                     failed += 1
@@ -170,6 +181,8 @@ def main(argv=None):
             note = (f"파일 {asof} · 필지 {done:,}개 · API 필지 건너뜀 {skipped:,}개 · 실패 {failed:,}개"
                     + (f" · 열 수가 다른 줄 {bad_total:,}" if bad_total else ""))
             print(note)
+            if not failed and asof.isoformat() > (last or ""):
+                ingest.set_cursor(conn, SOURCE, "file", asof.isoformat())
             ingest.finish_run(conn, run_id, "failed" if failed else "done", loaded, rejected, note)
             finished = True
         finally:

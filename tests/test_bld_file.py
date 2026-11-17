@@ -92,7 +92,7 @@ class Load(unittest.TestCase):
         with psycopg.connect(DSN) as c:
             c.execute("INSERT INTO core.dim_complex (complex_id, name, lawd_cd, jibun, pnu, kind, source, asof) "
                       "VALUES ('t-bf', '망원빌라', '1168011800', '400', %s, '연립다세대', 't', '2026-11-17')", (P2,))
-            c.execute("INSERT INTO ops.ingest_cursor (source_id, cursor_key, cursor_value) VALUES (%s, %s, '2026-11-10')",
+            c.execute("INSERT INTO ops.ingest_cursor (source_id, cursor_key, cursor_value) VALUES (%s, %s, '2099-01-01')",
                       (bld.SOURCE, P3))
 
     @classmethod
@@ -116,6 +116,7 @@ class Load(unittest.TestCase):
             c.execute("DELETE FROM core.dim_complex WHERE complex_id = 't-bf'")
             c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s AND cursor_key = %s", (bld.SOURCE, P3))
             c.execute("DELETE FROM ops.reject_estate WHERE source_id = %s", (bld_file.SOURCE,))
+            c.execute("DELETE FROM ops.ingest_cursor WHERE source_id = %s", (bld_file.SOURCE,))
 
     def q(self, sql, *args):
         with psycopg.connect(DSN) as c:
@@ -140,3 +141,18 @@ class Load(unittest.TestCase):
         self.assertEqual(run, [("done", 3)])
         self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", str(self.hub)]), 0, "다시 돌려도 같은 값")
         self.assertEqual(self.q("SELECT count(*) FROM core.dim_building WHERE bld_pk LIKE 'T-%%'")[0][0], 3)
+        self.q("UPDATE ops.ingest_cursor SET cursor_value = '2099-01-01' WHERE source_id = %s AND cursor_key = 'file' "
+               "RETURNING 1", bld_file.SOURCE)
+        self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", str(self.hub)]), 1, "더 예전 파일이면 멈춤")
+        self.q("UPDATE ops.ingest_cursor SET cursor_value = '2000-01-01' WHERE source_id = %s AND cursor_key = %s "
+               "RETURNING 1", bld.SOURCE, P3)
+        self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", str(self.hub), "--allow-older"]), 0)
+        self.assertEqual(self.q("SELECT pnu FROM core.dim_building WHERE bld_pk = 'T-4'"), [(P3,)],
+                         "파일보다 먼저 API로 받은 필지는 파일 값으로 올림")
+
+    def test_mixed_dates_stop(self):
+        with tempfile.TemporaryDirectory() as d:
+            make_zips(d)
+            with zipfile.ZipFile(Path(d) / "mart_djy_02.zip", "w") as z:
+                z.writestr(zipfile.ZipInfo("mart_djy_02.txt", (2026, 8, 20, 0, 0, 0)), RECAP[0])
+            self.assertEqual(bld_file.main(["--config", self.cfg, "--dir", d, "--dry-run"]), 1)
