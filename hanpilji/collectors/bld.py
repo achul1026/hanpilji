@@ -210,13 +210,14 @@ def _ensure_parcel(cur, pnu, asof):
                 (pnu, pnu[:10], jibun, "임야" if pnu[10] == "2" else "토지", SOURCE_LABEL, asof))
 
 
-def load(conn, run_id, pnu, got, asof, complexes=None, block=False):
+def load(conn, run_id, pnu, got, asof, complexes=None, block=False, source=SOURCE, keep_raw=True):
     """필지 하나의 응답 4개를 올림. 반환: (건물 수, 제외 수).
     complexes를 주면 그 단지에 건물을 붙임(기본: 단지 PNU가 이 필지인 단지).
-    block=True는 지번이 없는 블록 대장(pnu는 stg 열쇠로만 씀): 건물은 필지 없이 단지에 붙이고 용도지역도 단지에 붙임."""
+    block=True는 지번이 없는 블록 대장(pnu는 stg 열쇠로만 씀): 건물은 필지 없이 단지에 붙이고 용도지역도 단지에 붙임.
+    source는 적재 제외를 남길 수집처, keep_raw=False면 stg.bld_raw에 원본을 남기지 않음(대용량 파일은 zip이 원본)."""
     loaded = rejected = 0
     with conn.cursor() as cur:
-        for op, rows in got.items():
+        for op, rows in (got.items() if keep_raw else ()):
             cur.execute(
                 """INSERT INTO stg.bld_raw (run_id, pnu, op, row_data) VALUES (%s, %s, %s, %s)
                    ON CONFLICT (pnu, op) DO UPDATE SET run_id = excluded.run_id, row_data = excluded.row_data,
@@ -232,7 +233,7 @@ def load(conn, run_id, pnu, got, asof, complexes=None, block=False):
         for row in got.get("getBrTitleInfo", []):
             b = to_building(row)
             if not b["bld_pk"] or not (b["pnu"] or block):
-                ingest.reject(conn, run_id, SOURCE, "core.dim_building", "건물 번호 · 지번 없음", row)
+                ingest.reject(conn, run_id, source, "core.dim_building", "건물 번호 · 지번 없음", row)
                 rejected += 1
                 continue
             if b["pnu"]:
@@ -275,7 +276,7 @@ def load(conn, run_id, pnu, got, asof, complexes=None, block=False):
             if not apnu and not _s(row, "atchEtcJibunNm"):
                 continue   # 번 · 지 0000에 글도 빈 부속지번 줄(빈 칸만 있는 기록, 2026-10-27 실측 625줄 · 3필지)
             if not apnu:
-                ingest.reject(conn, run_id, SOURCE, "core.bridge_parcel_building", "부속지번 형식 오류", row)
+                ingest.reject(conn, run_id, source, "core.bridge_parcel_building", "부속지번 형식 오류", row)
                 rejected += 1
                 continue
             _ensure_parcel(cur, apnu, asof)

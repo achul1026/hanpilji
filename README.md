@@ -72,6 +72,7 @@ python -m hanpilji.collectors.rtms                    # 아파트 · 오피스�
 python -m hanpilji.collectors.rtms --only offi_trade --only offi_rent   # 오피스텔만(API 2개를 따로 활용신청)
 python -m hanpilji.collectors.rtms --only rh_trade --only rh_rent       # 연립다세대만(API 2개를 따로 활용신청)
 python -m hanpilji.collectors.bld                     # 단지 필지마다 건축물대장 → core.dim_building · 용도지역 (강남구 2~3시간)
+python -m hanpilji.collectors.bld_file --dir hub --sigungu seoul   # 건축HUB 월간 전국 파일(zip 4개)로 빌라 · 단독 · 상가까지 모든 건물 (sql/29 먼저)
 python -m hanpilji.collectors.vworld                  # 필지마다 V-World → 지목 · 토지 면적 · 개별공시지가 · 토지이용계획 (키: VWORLD_KEY)
 # V-World는 해외(클라우드) IP를 끊음 → 국내 PC에서 받기만 하고 클라우드에서 적재
 python -m hanpilji.collectors.vworld --export-pnus pnus.txt                    # 받을 필지 목록
@@ -411,6 +412,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - 빈 응답 · `05 SERVICETIMEOUT`이 가끔 와서(709필지 중 10번) 잠깐 뒤 다시 부릅니다.
 - 지역지구 코드는 구분(지역 · 지구 · 구역)마다 따로 매겨져 겹칩니다(「980」 = 용도지구미지정 · 용도구역미지정). 「구분-코드」로 저장하고 「…미지정」은 뺍니다.
 - 정리 규칙을 바꿨을 때는 API를 다시 부르지 않고 저장해 둔 응답으로 다시 만들 수 있습니다: `python -m hanpilji.collectors.bld --from-stg`.
+- **모든 건물(빌라 · 단독 · 상가)은 대용량 파일로 받습니다.** API는 필지마다 4번 불러야 해서 서울 단지 필지 10만 개(대부분 연립다세대)만 해도 하루 한도로 몇 주가 걸리고, 단독 · 상가는 실거래에 지번이 없어 부를 필지조차 모릅니다. 건축HUB(hub.go.kr) 「건축물대장」 월간 전국 파일 4개(표제부 · 총괄표제부 · 지역지구구역 · 부속지번, 매월 21일 이후)를 한 폴더에 두고 `bld_file`을 돌립니다. 파일은 UTF-8 · 구분자 `|` · 머리줄 없음이고 열 순서가 API 항목 순서와 같아서, API 이름을 붙여 API 수집기와 같은 적재 함수로 올립니다. API로 받은 단지 필지는 건너뛰고(`--include-api`로 덮기), 지번 없는 블록 대장은 API 수집기가 단지별로 찾습니다. 로그인이 필요해 내려받기는 손으로 하며, 다시 돌리면 같은 값으로 덮습니다.
 
 </details>
 
