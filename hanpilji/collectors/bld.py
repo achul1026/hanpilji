@@ -255,6 +255,9 @@ def load(conn, run_id, pnu, got, asof, complexes=None, block=False, source=SOURC
                        source = excluded.source, asof = excluded.asof""",
                 {**b, "src": SOURCE_LABEL, "asof": asof})
             if b["pnu"]:
+                # 대장의 대표 지번이 바뀌었으면 예전 대표 필지 연결을 지움(부속지번 연결은 그대로)
+                cur.execute("""DELETE FROM core.bridge_parcel_building
+                               WHERE bld_pk = %s AND is_main_lot AND pnu <> %s""", (b["bld_pk"], b["pnu"]))
                 cur.execute(
                     """INSERT INTO core.bridge_parcel_building (pnu, bld_pk, is_main_lot, source, asof)
                        VALUES (%s, %s, true, %s, %s)
