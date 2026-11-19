@@ -137,12 +137,13 @@ class SupabaseConn:
     def __init__(self, ref=None, role=GPT_ROLE):
         self.ref = ref or project_ref()
         self.role = role
+        self.timeout_ms = 5000   # 데이터 현황처럼 큰 표를 세는 곳만 늘림(hanpilji/gpt/datastatus.py)
 
     def execute(self, sql, params=()):
         # API의 read_only 옵션은 supabase_read_only_user(모든 스키마를 읽음)로 돌아 GPT 계정으로 좁힐 수 없음.
         # 그래서 요청 한 번을 읽기 전용 트랜잭션으로 열고 그 안에서만 GPT 계정으로 바꿈(다음 요청엔 남지 않음)
         prefix = ("SET TRANSACTION READ ONLY; SET LOCAL standard_conforming_strings = on; "
-                  "SET LOCAL statement_timeout = 5000; ")
+                  f"SET LOCAL statement_timeout = {int(self.timeout_ms)}; ")
         if self.role:
             prefix += f"SET LOCAL ROLE {self.role}; "
         # 결과를 줄마다 JSON으로 받아야 numeric이 문자열이 아닌 숫자로 옴(열 순서도 그대로)
