@@ -2,6 +2,8 @@
 
 마트 함수 셋(sql/23_data_status.sql)만 부르고 모델은 부르지 않음. 큰 표를 다 세느라 몇 초 걸리므로
 결과를 CACHE_SECONDS 동안 기억해 두고 씀(데이터는 하루 한 번 새로 받으므로 1시간이면 충분).
+GPT 연결의 5초 제한으로는 건축물대장 · 지적도처럼 큰 표를 다 세지 못해서, 이 조회만 STATUS_TIMEOUT_MS까지 기다림.
+다시 세다 실패하면 예전에 센 값을 그대로 보여 줌(화면에 「숫자를 센 때」가 나오므로 언제 값인지 보임).
 """
 import datetime
 import sys
@@ -9,12 +11,15 @@ import threading
 import time
 
 CACHE_SECONDS = 3600
-RETRY_SECONDS = 300   # 용량을 못 셌을 때는 이만큼만 기억하고 다시 셈
+RETRY_SECONDS = 300   # 용량을 못 셌거나 다시 세다 실패했을 때는 이만큼만 기억하고 다시 셈
+STATUS_TIMEOUT_MS = 90000   # 데이터 현황 조회만 늘려 주는 제한 시간(연결 기본 5초는 그대로)
+STATUS_TIMEOUT_SQL = "SET statement_timeout = 90000"   # 위 값과 같게(고정 문장, 바깥 값이 들어가지 않음)
+FAIL_COOLDOWN = 60   # 기억한 값 없이 실패하면 이만큼은 다시 세지 않고 같은 오류를 돌려줌(DB 부담 · 줄 선 요청 대기 막음)
 GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "해설 자료", "규제 · 정책", "시장 지표", "기타"]
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
 _lock = threading.Lock()
-_cache = {"at": None, "data": None, "ttl": CACHE_SECONDS}
+_cache = {"at": None, "data": None, "ttl": CACHE_SECONDS, "fail_at": None, "fail": None}
 
 
 def _kst(ts):
@@ -69,7 +74,20 @@ def build(status_rows, source_rows, size_row=None, now=None):
             "groups": [{"name": g, "items": items} for g, items in groups.items() if items]}
 
 
+def _long_timeout(conn):
+    """이 연결의 문장 제한 시간을 STATUS_TIMEOUT_MS로 늘림. 연결은 요청마다 새로 열고 닫으므로 다른 조회엔 남지 않음.
+    Supabase API 흉내 연결은 SET을 못 보내므로 그 연결의 timeout_ms 값을 바꿈."""
+    if "timeout_ms" in vars(conn):
+        conn.timeout_ms = STATUS_TIMEOUT_MS
+        return
+    try:
+        conn.execute(STATUS_TIMEOUT_SQL)
+    except Exception as e:
+        print(f"제한 시간 설정 못 함: {e!r}", file=sys.stderr)
+
+
 def fetch(conn):
+    _long_timeout(conn)
     status = conn.execute("SELECT * FROM mart.q_data_status()").fetchall()
     sources = conn.execute("SELECT * FROM mart.q_data_sources()").fetchall()
     try:   # 서버에 q_data_size를 아직 안 넣었으면 용량만 비우고 나머지는 보여 줌
@@ -85,13 +103,29 @@ def get(connect, max_age=CACHE_SECONDS):
     with _lock:
         if _cache["data"] is not None and time.monotonic() - _cache["at"] < min(max_age, _cache["ttl"]):
             return _cache["data"]
-        with connect() as conn:
-            data = fetch(conn)
-        ttl = CACHE_SECONDS if data["total_bytes"] is not None else RETRY_SECONDS
-        _cache.update(at=time.monotonic(), data=data, ttl=ttl)
+        if _cache["fail_at"] is not None and time.monotonic() - _cache["fail_at"] < FAIL_COOLDOWN:
+            raise RuntimeError(f"조금 전에 실패해 다시 세지 않음: {_cache['fail']!r}")
+        try:
+            with connect() as conn:
+                data = fetch(conn)
+        except Exception as e:
+            if _cache["data"] is None:
+                _cache.update(fail_at=time.monotonic(), fail=e)
+                raise
+            # 다시 세다 실패: 예전 값을 보여 주고 RETRY_SECONDS 뒤에 다시 셈
+            print(f"데이터 현황을 다시 세지 못해 예전 값을 씀: {e!r}", file=sys.stderr)
+            _cache.update(at=time.monotonic(), ttl=RETRY_SECONDS)
+            return _cache["data"]
+        ttl = CACHE_SECONDS
+        old = _cache["data"]
+        if data["total_bytes"] is None:
+            ttl = RETRY_SECONDS
+            if old and old.get("total_bytes") is not None:   # 용량만 못 셌으면 예전 용량을 둠
+                data.update({k: old[k] for k in ("total_bytes", "total_size", "table_count")})
+        _cache.update(at=time.monotonic(), data=data, ttl=ttl, fail_at=None, fail=None)
         return data
 
 
 def clear():
     with _lock:
-        _cache.update(at=None, data=None, ttl=CACHE_SECONDS)
+        _cache.update(at=None, data=None, ttl=CACHE_SECONDS, fail_at=None, fail=None)

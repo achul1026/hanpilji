@@ -7,6 +7,7 @@ DB가 있으면 실제 마트 함수로 도구 실행 · 읽기 전용 접속.
 import json
 import os
 import tempfile
+import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
@@ -780,6 +781,77 @@ class Web(unittest.TestCase):
         finally:
             datastatus.clear()
         del datetime
+
+    def test_data_status_long_timeout_and_stale(self):
+        from hanpilji.gpt import datastatus
+        row = ("실거래", "아파트 매매", "매매", 5, None, None, None, ["dg_apt_trade"])
+        conn = mock.MagicMock()
+        conn.execute.return_value.fetchall.side_effect = [[row], []]
+        conn.execute.return_value.fetchone.return_value = (2048, 3)
+        datastatus.fetch(conn)
+        first = conn.execute.call_args_list[0].args[0]
+        self.assertIn("statement_timeout", first, "큰 표를 세기 전에 이 연결의 제한 시간을 늘림")
+        self.assertIn(str(datastatus.STATUS_TIMEOUT_MS), first)
+
+        # SET을 못 하는 연결이어도 나머지는 그대로
+        def no_set(q):
+            if q.startswith("SET"):
+                raise RuntimeError("SET 안 됨")
+            r = mock.MagicMock()
+            r.fetchall.return_value = [row] if "q_data_status" in q else []
+            r.fetchone.return_value = (2048, 3)
+            return r
+        conn2 = mock.MagicMock()
+        conn2.execute.side_effect = no_set
+        self.assertEqual(datastatus.fetch(conn2)["total_rows"], 5)
+
+        class Conn:
+            def __init__(self, c): self.c = c
+            def __enter__(self): return self.c
+            def __exit__(self, *a): return False
+        broken = mock.MagicMock()
+        broken.execute.side_effect = RuntimeError("canceling statement due to statement timeout")
+        datastatus.clear()
+        try:
+            with self.assertRaises(RuntimeError, msg="기억한 값이 없으면 오류 그대로"):
+                datastatus.get(lambda: Conn(broken))
+            tries = []
+            with self.assertRaises(RuntimeError, msg="방금 실패했으면 다시 세지 않음"):
+                datastatus.get(lambda: tries.append(1) or Conn(conn2))
+            self.assertEqual(tries, [], "FAIL_COOLDOWN 안에서는 DB에 다시 가지 않음")
+            with mock.patch.object(datastatus.time, "monotonic",
+                                   return_value=time.monotonic() + datastatus.FAIL_COOLDOWN + 1):
+                good = datastatus.get(lambda: Conn(conn2))
+            self.assertEqual(good["total_size"], "2 KB")
+
+            # 용량만 못 센 새 결과는 예전 용량을 그대로 둠
+            def no_size(q):
+                r = no_set(q)
+                if "q_data_size" in q:
+                    raise RuntimeError("용량 실패")
+                return r
+            conn3 = mock.MagicMock()
+            conn3.execute.side_effect = no_size
+            with mock.patch.object(datastatus.time, "monotonic", return_value=10 ** 8):
+                kept = datastatus.get(lambda: Conn(conn3))
+            self.assertEqual((kept["total_size"], kept["table_count"]), ("2 KB", 3))
+            self.assertEqual(datastatus._cache["ttl"], datastatus.RETRY_SECONDS)
+            with mock.patch.object(datastatus.time, "monotonic", return_value=10 ** 9):
+                again = datastatus.get(lambda: Conn(broken))
+            self.assertIs(again, kept, "다시 세다 실패하면 예전 값을 보여 줌")
+            self.assertEqual(datastatus._cache["ttl"], datastatus.RETRY_SECONDS, "조금 뒤 다시 셈")
+        finally:
+            datastatus.clear()
+
+        # Supabase API 연결: SET 대신 그 연결의 제한 시간 값을 늘림
+        from hanpilji import supabase
+        sc = supabase.SupabaseConn(ref="x")
+        with mock.patch.object(supabase, "query", return_value=[]) as q:
+            datastatus._long_timeout(sc)
+            sc.execute("SELECT 1")
+        self.assertIn(f"statement_timeout = {datastatus.STATUS_TIMEOUT_MS};", q.call_args.args[0])
+        self.assertEqual(supabase.SupabaseConn(ref="x").timeout_ms, 5000, "다른 연결은 5초 그대로")
+        self.assertIn(str(datastatus.STATUS_TIMEOUT_MS), datastatus.STATUS_TIMEOUT_SQL, "두 값이 같음")
 
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
