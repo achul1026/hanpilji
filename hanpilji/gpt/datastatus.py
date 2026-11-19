@@ -2,6 +2,8 @@
 
 마트 함수 셋(sql/23_data_status.sql)만 부르고 모델은 부르지 않음. 큰 표를 다 세느라 몇 초 걸리므로
 결과를 CACHE_SECONDS 동안 기억해 두고 씀(데이터는 하루 한 번 새로 받으므로 1시간이면 충분).
+GPT 연결의 5초 제한으로는 건축물대장 · 지적도처럼 큰 표를 다 세지 못해서, 이 조회만 STATUS_TIMEOUT_MS까지 기다림.
+다시 세다 실패하면 예전에 센 값을 그대로 보여 줌(화면에 「숫자를 센 때」가 나오므로 언제 값인지 보임).
 """
 import datetime
 import sys
@@ -9,7 +11,8 @@ import threading
 import time
 
 CACHE_SECONDS = 3600
-RETRY_SECONDS = 300   # 용량을 못 셌을 때는 이만큼만 기억하고 다시 셈
+RETRY_SECONDS = 300   # 용량을 못 셌거나 다시 세다 실패했을 때는 이만큼만 기억하고 다시 셈
+STATUS_TIMEOUT_MS = 90000   # 데이터 현황 조회만 늘려 주는 제한 시간(연결 기본 5초는 그대로)
 GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "해설 자료", "규제 · 정책", "시장 지표", "기타"]
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
@@ -69,7 +72,17 @@ def build(status_rows, source_rows, size_row=None, now=None):
             "groups": [{"name": g, "items": items} for g, items in groups.items() if items]}
 
 
+def _long_timeout(conn):
+    """이 연결의 문장 제한 시간을 STATUS_TIMEOUT_MS로 늘림. 연결은 요청마다 새로 열고 닫으므로 다른 조회엔 남지 않음.
+    SET을 못 하는 연결(Supabase API 흉내)은 원래 제한 그대로 둠."""
+    try:
+        conn.execute(f"SET statement_timeout = {int(STATUS_TIMEOUT_MS)}")
+    except Exception as e:
+        print(f"제한 시간 설정 못 함: {e!r}", file=sys.stderr)
+
+
 def fetch(conn):
+    _long_timeout(conn)
     status = conn.execute("SELECT * FROM mart.q_data_status()").fetchall()
     sources = conn.execute("SELECT * FROM mart.q_data_sources()").fetchall()
     try:   # 서버에 q_data_size를 아직 안 넣었으면 용량만 비우고 나머지는 보여 줌
@@ -85,8 +98,16 @@ def get(connect, max_age=CACHE_SECONDS):
     with _lock:
         if _cache["data"] is not None and time.monotonic() - _cache["at"] < min(max_age, _cache["ttl"]):
             return _cache["data"]
-        with connect() as conn:
-            data = fetch(conn)
+        try:
+            with connect() as conn:
+                data = fetch(conn)
+        except Exception:
+            if _cache["data"] is None:
+                raise
+            # 다시 세다 실패: 예전 값을 보여 주고 RETRY_SECONDS 뒤에 다시 셈
+            print("데이터 현황을 다시 세지 못해 예전 값을 씀", file=sys.stderr)
+            _cache.update(at=time.monotonic(), ttl=RETRY_SECONDS)
+            return _cache["data"]
         ttl = CACHE_SECONDS if data["total_bytes"] is not None else RETRY_SECONDS
         _cache.update(at=time.monotonic(), data=data, ttl=ttl)
         return data

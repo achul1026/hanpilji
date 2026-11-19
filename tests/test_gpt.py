@@ -781,6 +781,47 @@ class Web(unittest.TestCase):
             datastatus.clear()
         del datetime
 
+    def test_data_status_long_timeout_and_stale(self):
+        from hanpilji.gpt import datastatus
+        row = ("실거래", "아파트 매매", "매매", 5, None, None, None, ["dg_apt_trade"])
+        conn = mock.MagicMock()
+        conn.execute.return_value.fetchall.side_effect = [[row], []]
+        conn.execute.return_value.fetchone.return_value = (2048, 3)
+        datastatus.fetch(conn)
+        first = conn.execute.call_args_list[0].args[0]
+        self.assertIn("statement_timeout", first, "큰 표를 세기 전에 이 연결의 제한 시간을 늘림")
+        self.assertIn(str(datastatus.STATUS_TIMEOUT_MS), first)
+
+        # SET을 못 하는 연결이어도 나머지는 그대로
+        def no_set(q):
+            if q.startswith("SET"):
+                raise RuntimeError("SET 안 됨")
+            r = mock.MagicMock()
+            r.fetchall.return_value = [row] if "q_data_status" in q else []
+            r.fetchone.return_value = (2048, 3)
+            return r
+        conn2 = mock.MagicMock()
+        conn2.execute.side_effect = no_set
+        self.assertEqual(datastatus.fetch(conn2)["total_rows"], 5)
+
+        class Conn:
+            def __init__(self, c): self.c = c
+            def __enter__(self): return self.c
+            def __exit__(self, *a): return False
+        broken = mock.MagicMock()
+        broken.execute.side_effect = RuntimeError("canceling statement due to statement timeout")
+        datastatus.clear()
+        try:
+            with self.assertRaises(RuntimeError, msg="기억한 값이 없으면 오류 그대로"):
+                datastatus.get(lambda: Conn(broken))
+            good = datastatus.get(lambda: Conn(conn2))
+            with mock.patch.object(datastatus.time, "monotonic", return_value=10 ** 9):
+                again = datastatus.get(lambda: Conn(broken))
+            self.assertIs(again, good, "다시 세다 실패하면 예전 값을 보여 줌")
+            self.assertEqual(datastatus._cache["ttl"], datastatus.RETRY_SECONDS, "조금 뒤 다시 셈")
+        finally:
+            datastatus.clear()
+
     def test_page_never_uses_innerhtml(self):
         from hanpilji.gpt import web
         js = web.page("app.js")
