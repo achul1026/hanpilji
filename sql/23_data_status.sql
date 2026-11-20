@@ -146,6 +146,43 @@ BEGIN
                       CASE WHEN kind = '지하철역' THEN ARRAY['poi_station'] ELSE ARRAY['poi_school'] END
                FROM core.ref_poi GROUP BY kind ORDER BY count(*) DESC$q$;
     END IF;
+
+    -- 상권 · 인구(sql/30_trade_area.sql을 넣은 DB에만 있음)
+    IF to_regclass('core.ref_store') IS NOT NULL THEN
+        RETURN QUERY EXECUTE
+            $q$SELECT '상권 · 인구'::text, '상가 점포'::text, '업종 · 층 · 필지(PNU), 서울'::text, count(*),
+                      NULL::text, '기준 ' || max(base_ym)::text, max(asof), ARRAY['sbiz_store'] FROM core.ref_store$q$;
+        RETURN QUERY EXECUTE
+            $q$SELECT '상권 · 인구'::text, '상권 · 행정동 목록'::text, '상권 ' || (SELECT count(*) FROM core.dim_trdar)
+                      || '곳 · 행정동 ' || (SELECT count(*) FROM core.dim_adm_dong) || '곳',
+                      (SELECT count(*) FROM core.dim_trdar) + (SELECT count(*) FROM core.dim_adm_dong),
+                      NULL::text, NULL::text, (SELECT max(asof) FROM core.dim_trdar), ARRAY['seoul_trdar']$q$;
+        RETURN QUERY EXECUTE
+            $q$SELECT '상권 · 인구'::text,
+                      CASE t.dataset WHEN 'trdar_sales' THEN '추정매출(상권)' WHEN 'dong_sales' THEN '추정매출(행정동)'
+                           WHEN 'trdar_store' THEN '업종별 점포 · 개폐업(상권)' WHEN 'dong_store' THEN '업종별 점포 · 개폐업(행정동)'
+                           WHEN 'trdar_flpop' THEN '길단위 유동인구(상권)' WHEN 'dong_flpop' THEN '길단위 유동인구(행정동)'
+                           WHEN 'trdar_repop' THEN '상주인구(상권)' WHEN 'dong_repop' THEN '상주인구(행정동)'
+                           WHEN 'trdar_wrcpop' THEN '직장인구(상권)' WHEN 'dong_wrcpop' THEN '직장인구(행정동)'
+                           WHEN 'trdar_fclty' THEN '집객시설(상권)' WHEN 'dong_fclty' THEN '집객시설(행정동)'
+                           WHEN 'trdar_consume' THEN '소득 · 소비(상권)' WHEN 'dong_consume' THEN '소득 · 소비(행정동)'
+                           WHEN 'trdar_apt' THEN '아파트(상권)' WHEN 'dong_apt' THEN '아파트(행정동)'
+                           WHEN 'trdar_change' THEN '상권변화지표(상권)' WHEN 'dong_change' THEN '상권변화지표(행정동)'
+                           ELSE t.dataset END,
+                      '분기 · 서울시 상권분석서비스(추정치)'::text, count(*),
+                      min(t.yyqu)::text, max(t.yyqu)::text, max(t.asof), ARRAY['seoul_trdar']
+               FROM core.fact_trdar_stat t GROUP BY t.dataset ORDER BY t.dataset$q$;
+        RETURN QUERY EXECUTE
+            $q$SELECT '상권 · 인구'::text, '생활인구(행정동 · 시간대)'::text, '서울시 · KT 추정치'::text, count(*),
+                      min(stdr_de)::text, max(stdr_de)::text, max(asof), ARRAY['seoul_living_pop']
+               FROM core.fact_living_pop$q$;
+    END IF;
+    IF to_regclass('core.geo_trdar') IS NOT NULL THEN
+        RETURN QUERY EXECUTE
+            $q$SELECT '상권 · 인구'::text, '상권 · 행정동 경계'::text, '지도 영역'::text,
+                      (SELECT count(*) FROM core.geo_trdar) + (SELECT count(*) FROM core.geo_adm_dong),
+                      NULL::text, NULL::text, (SELECT max(asof) FROM core.geo_trdar), ARRAY['seoul_trdar']$q$;
+    END IF;
 END
 $$;
 

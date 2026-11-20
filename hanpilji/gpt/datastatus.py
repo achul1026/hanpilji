@@ -15,7 +15,7 @@ RETRY_SECONDS = 300   # 용량을 못 셌거나 다시 세다 실패했을 때�
 STATUS_TIMEOUT_MS = 90000   # 데이터 현황 조회만 늘려 주는 제한 시간(연결 기본 5초는 그대로)
 STATUS_TIMEOUT_SQL = "SET statement_timeout = 90000"   # 위 값과 같게(고정 문장, 바깥 값이 들어가지 않음)
 FAIL_COOLDOWN = 60   # 기억한 값 없이 실패하면 이만큼은 다시 세지 않고 같은 오류를 돌려줌(DB 부담 · 줄 선 요청 대기 막음)
-GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "해설 자료", "규제 · 정책", "시장 지표", "기타"]
+GROUPS = ["실거래", "단지 · 건물 · 토지", "법령", "해설 자료", "규제 · 정책", "시장 지표", "상권 · 인구", "기타"]
 KST = datetime.timezone(datetime.timedelta(hours=9))
 
 _lock = threading.Lock()

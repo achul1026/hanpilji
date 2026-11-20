@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 서버 cron용 수집 배치(스키마 하나로 합친 DB). GitHub Actions(.github/workflows/refresh.yml)와 같은 순서 · 같은 수집기를 돎
 #   scripts/batch.sh daily|weekly|monthly
-# 설정은 저장소 옆 .env(권한 600)에서 읽음: HANPILJI_DSN · HANPILJI_DB_SCHEMA · DATA_GO_KR_KEY · ECOS_KEY · RONE_KEY · KOSIS_KEY · LAW_OC · VWORLD_KEY …
+# 설정은 저장소 옆 .env(권한 600)에서 읽음: HANPILJI_DSN · HANPILJI_DB_SCHEMA · DATA_GO_KR_KEY · ECOS_KEY · RONE_KEY · KOSIS_KEY · LAW_OC · VWORLD_KEY · SEOUL_API_KEY …
 # 한 번에 하나만 돎(flock). 단계 하나가 실패해도 다음 단계는 돌고, 끝에 실패가 있으면 종료 코드 1
 set -uo pipefail
 WHAT="${1:?daily|weekly|monthly}"
@@ -39,7 +39,7 @@ failed=()
 # .env의 HANPILJI_BATCH_SKIP=apt,onbid 처럼 쉼표로 적은 작업은 건너뜀(공백으로 띄우려면 따옴표 필수: 없으면 뒤 낱말이 명령으로 실행됨)
 # (다른 서비스가 같은 데이터를 이미 모으고 있어 그쪽 표를 읽을 때).
 # bld는 총괄표제부 · 표제부 · 지역지구 · 부속지번을 함께 받으므로, 네 가지를 모두 다른 곳에서 읽을 때만 넣음
-KEYS="apt offi rh sh nrg onbid law prec admrul guide concepts market bld vworld vworld_geom luinfo house_price land_price poi freshness"
+KEYS="apt offi rh sh nrg onbid law prec admrul guide concepts market bld vworld vworld_geom luinfo house_price land_price poi store trdar living_pop freshness"
 SKIP=" ${HANPILJI_BATCH_SKIP:-} "
 SKIP="${SKIP//,/ }"
 for k in $SKIP; do
@@ -96,6 +96,13 @@ case "$WHAT" in
     else
       echo "-- 건너뜀 V-World (.env에 VWORLD_KEY 없음)" >> "$LOG"
     fi
+    # 서울 생활인구(행정동 x 시간대, 서울시 · KT). 서울 열린데이터광장 Open API(8088 포트, .env의 SEOUL_API_KEY).
+    # 하루치 11번 안팎, 최근 14일 중 빠진 날만. 처음 채우기(--since)는 손으로 한 번
+    if [ -n "${SEOUL_API_KEY:-}" ]; then
+      step living_pop "생활인구(서울 행정동)" 30 "$PY" -m hanpilji.collectors.seoul_living_pop --days 14 --max-calls 500
+    else
+      echo "-- 건너뜀 생활인구 (.env에 SEOUL_API_KEY 없음)" >> "$LOG"
+    fi
     ;;
   weekly)
     # 법제처 본문은 open.law.go.kr에서 받은 ID(.env의 LAW_OC)와 그 ID에 등록한 이 서버의 IP가 있어야 받음.
@@ -122,6 +129,16 @@ case "$WHAT" in
     step land_price "개별공시지가(서울)" 30 "$PY" -m hanpilji.collectors.seoul_land_price
     # 주변 정보: 학교 · 지하철역 위치(공공데이터포털 표준데이터, 인증키 없음). sql/22_poi.sql을 먼저 넣어야 함
     step poi "주변 정보(학교 · 지하철역)" 20 "$PY" -m hanpilji.collectors.poi
+    # 상가 점포(소상공인시장진흥공단 상가(상권)정보, 공공데이터포털 분기 파일, 인증키 없음). 새 파일이 올라왔을 때만 넣음.
+    # sql/30_trade_area.sql을 먼저 넣어야 함
+    step store "상가 점포(서울)" 60 "$PY" -m hanpilji.collectors.sbiz_store
+    # 서울시 상권분석서비스(상권 · 행정동 분기 지표 18종 + 경계). 분기 갱신이라 한 달에 한 번, 받은 분기는 건너뛰고
+    # 가장 최근 받은 2개 분기만 다시 받음. 처음 채울 때는 3,500번쯤 불러서 손으로 한 번 돌림
+    if [ -n "${SEOUL_API_KEY:-}" ]; then
+      step trdar "상권분석(서울)" 120 "$PY" -m hanpilji.collectors.seoul_trdar --max-calls 3000
+    else
+      echo "-- 건너뜀 상권분석 (.env에 SEOUL_API_KEY 없음)" >> "$LOG"
+    fi
     ;;
   *) echo "daily|weekly|monthly 중 하나" >&2; exit 2 ;;
 esac
