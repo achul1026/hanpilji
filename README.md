@@ -89,7 +89,7 @@ python -m hanpilji.collectors.poi                     # 서울 둘레 학교 · 
 python -m hanpilji.collectors.sbiz_store              # 소상공인 상가(상권)정보 분기 파일(인증키 없음) → core.ref_store(서울 점포 55만, 필지 PNU · 층 · 업종)
 # 아래 둘은 서울 열린데이터광장 Open API(키: SEOUL_API_KEY, 8088 포트라 클라우드에선 막혀 서버에서 돎)
 python -m hanpilji.collectors.seoul_trdar             # 상권분석서비스: 상권 1,650곳 · 행정동 425곳 + 경계, 분기 지표 18종(추정매출 · 점포 · 유동 · 상주 · 직장인구 …) → core.fact_trdar_stat
-python -m hanpilji.collectors.seoul_living_pop --since 2025-01-01   # 생활인구(행정동 x 날짜 x 시간대, 서울시 · KT) → core.fact_living_pop
+python -m hanpilji.collectors.seoul_living_pop               # 생활인구(Open API는 최근 약 두 달치만, 공개 3~4달 늦음)(행정동 x 날짜 x 시간대, 서울시 · KT) → core.fact_living_pop
 python scripts/apply_sql.py sql/30_trade_area.sql     # SQL 파일 넣기(HANPILJI_DB_SCHEMA가 있으면 서버 스키마 이름으로 바꿔서)
 
 # 시장 · 거시 지표 (키: ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀) → core.fact_market

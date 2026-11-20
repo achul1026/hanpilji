@@ -3,7 +3,8 @@
     SEOUL_API_KEY=... python -m hanpilji.collectors.seoul_living_pop [--since 2025-01-01] [--days 14] [--max-calls 500]
 
 Open API SPOP_LOCAL_RESD_DONG(서울 열린데이터광장 OA-14991). 하루 = 행정동 약 424곳 x 24시간 ≈ 10,200줄(호출 11번 안팎).
-공개는 약 4일 뒤. 기준일마다 커서를 남겨 받은 날은 건너뛰고, 최근 --days일 중 빠진 날만 받음.
+Open API 공개는 3~4달 늦고, 최근 약 두 달치만 들고 있음(2026-11-20 첫 적재: 2026-07-31까지 62일, 그 전 날은 「아직 없음」).
+기준일마다 커서를 남겨 받은 날은 건너뛰고, 최근 --days일 중 빠진 날만 받음(없는 날은 1번씩 물음).
 처음 채울 때는 --since로 시작 날을 줌(하루 11번 x 날 수만큼 부름, --max-calls에 닿으면 다음 실행이 이어 받음).
 값은 KT 휴대전화 신호 · 공공 자료로 만든 추정치라 소수가 있고, 3명 이하는 원본에서 * 로 가려져 0으로 넣음.
 """
@@ -56,7 +57,7 @@ def load_day(conn, day, rows, asof):
 
 def days_to_fetch(conn, since, days, today):
     start = since or today - datetime.timedelta(days=days)
-    end = today - datetime.timedelta(days=3)   # 공개는 약 4일 뒤
+    end = today - datetime.timedelta(days=3)   # 화면 안내는 4일 뒤 공개(실제 Open API는 더 늦음)
     out, d = [], start
     while d <= end:
         if not ingest.get_cursor(conn, SOURCE, d.isoformat()):
@@ -69,7 +70,7 @@ def main(argv=None, client=None, today=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--since", type=datetime.date.fromisoformat, help="이 날부터 빠진 날을 모두(처음 채울 때)")
-    ap.add_argument("--days", type=int, default=14, help="최근 며칠 중 빠진 날(기본 14)")
+    ap.add_argument("--days", type=int, default=180, help="최근 며칠 중 빠진 날(기본 180, 공개가 3~4달 늦음)")
     ap.add_argument("--max-calls", type=int, default=500)
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)

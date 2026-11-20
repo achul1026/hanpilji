@@ -97,9 +97,10 @@ case "$WHAT" in
       echo "-- 건너뜀 V-World (.env에 VWORLD_KEY 없음)" >> "$LOG"
     fi
     # 서울 생활인구(행정동 x 시간대, 서울시 · KT). 서울 열린데이터광장 Open API(8088 포트, .env의 SEOUL_API_KEY).
-    # 하루치 11번 안팎, 최근 14일 중 빠진 날만. 처음 채우기(--since)는 손으로 한 번
+    # 하루치 11번 안팎. Open API는 공개가 3~4달 늦고 최근 약 두 달치만 들고 있어(2026-11-20 첫 적재: 7/31까지 62일),
+    # 최근 180일 중 빠진 날만 물음(없는 날은 1번씩). 처음 채우기(--since)는 손으로 한 번
     if [ -n "${SEOUL_API_KEY:-}" ]; then
-      step living_pop "생활인구(서울 행정동)" 30 "$PY" -m hanpilji.collectors.seoul_living_pop --days 14 --max-calls 500
+      step living_pop "생활인구(서울 행정동)" 30 "$PY" -m hanpilji.collectors.seoul_living_pop --days 180 --max-calls 500
     else
       echo "-- 건너뜀 생활인구 (.env에 SEOUL_API_KEY 없음)" >> "$LOG"
     fi
