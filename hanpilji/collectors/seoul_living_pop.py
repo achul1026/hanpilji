@@ -70,7 +70,7 @@ def main(argv=None, client=None, today=None):
     ap = argparse.ArgumentParser()
     ap.add_argument("--config", default="config.toml")
     ap.add_argument("--since", type=datetime.date.fromisoformat, help="이 날부터 빠진 날을 모두(처음 채울 때)")
-    ap.add_argument("--days", type=int, default=180, help="최근 며칠 중 빠진 날(기본 180, 공개가 3~4달 늦음)")
+    ap.add_argument("--days", type=int, default=210, help="최근 며칠 중 빠진 날(기본 210, 공개가 3~4달 늦고 약 2달치만 보관)")
     ap.add_argument("--max-calls", type=int, default=500)
     args = ap.parse_args(argv)
     cfg = config_mod.load(args.config)
