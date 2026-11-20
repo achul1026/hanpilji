@@ -632,13 +632,14 @@ function subjectEl(item) {
 }
 // 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기 · 계산 · 범위 밖 · 상황은 글에서 빼서 따로 그림.
 // 예전 답의 「:::숫자」는 글에 남겨 md()가 그대로 그림
-const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖|상황)\s*$/;
+const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖|상황|개별 판단)\s*$/;
 function splitAnswer(text) {
-  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [], 상황: [] };
+  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [], 상황: [], "개별 판단": [], judged: false };
   const lines = String(text || "").replace(/\r/g, "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(PARTS);
     if (!m) { out.prose.push(lines[i]); continue; }
+    if (m[1] === "개별 판단") out.judged = true;   // 빈 칸이어도 「구체적 사안을 판단한 답」 표시
     for (i++; i < lines.length && !FENCE_END.test(lines[i]); i++) if (lines[i].trim()) out[m[1]].push(lines[i].trim());
   }
   out.prose = out.prose.join("\n");
@@ -835,7 +836,8 @@ function renderAnswer(item, box) {
   if (list) card.append(list);
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
-  if (item.blocks.some(b => b.tool === "q_law_search" || b.tool === "q_kb_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
+  // 면책 안내: 법령 · 세법을 내 사안에 적용해 판단한 답(모델이 :::개별 판단 칸을 씀)에만. 「용적률이 뭐야」 같은 개념 설명에는 안 붙임
+  if (p.judged) box.append(el("p", "afine", "법률 · 세무 자문이 아니라 법령 안내예요. 실제 사안은 전문가에게 확인하세요."));
   const si = situEl(p.상황); if (si) box.append(si);
   const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
 }

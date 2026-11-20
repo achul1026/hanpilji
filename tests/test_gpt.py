@@ -109,7 +109,7 @@ class Engine(unittest.TestCase):
         self.assertIn("- [2] q_law_search", ans.footer)
         self.assertIn("화면 안내", bot.seen[0]["system"])
         self.assertNotIn("화면 안내", engine.SYSTEM)
-        for part in (":::핵심", ":::더보기", ":::확인 못 함", ":::다음", ":::고르기", ":::계산", ":::범위 밖", ":::상황"):   # 웹 화면이 나눠 그리는 칸
+        for part in (":::핵심", ":::더보기", ":::확인 못 함", ":::다음", ":::고르기", ":::계산", ":::범위 밖", ":::상황", ":::개별 판단"):   # 웹 화면이 나눠 그리는 칸
             self.assertIn(part, bot.seen[0]["system"])
 
     def test_partial_rows_in_footer(self):
@@ -859,6 +859,26 @@ class Web(unittest.TestCase):
         self.assertNotIn("innerHTML", js, "답 속 HTML이 실행되지 않게 DOM으로만 그림")
         self.assertNotIn("insertAdjacentHTML", js)
         self.assertIn("function md(", js)
+
+    def test_disclaimer_only_on_case_judgment(self):
+        """면책 안내는 모델이 :::개별 판단 칸을 쓴 답에만. 개념 설명(「용적률이 뭐야」)은 법령 도구를 불러도 안 붙음."""
+        import re, shutil, subprocess
+        from hanpilji.gpt import web
+        js = web.page("app.js")
+        self.assertNotIn('b.tool === "q_law_search" || b.tool === "q_kb_search")) box.append', js, "도구 이름으로 붙이지 않음")
+        self.assertIn("if (p.judged)", js)
+        node = shutil.which("node")
+        if not node:
+            self.skipTest("node 없음")
+        src = "\n".join([re.search(r"^const PARTS = .*$", js, re.M).group(0),
+                         re.search(r"^const FENCE = .*$", js, re.M).group(0),
+                         re.search(r"^function splitAnswer\(text\) \{.*?^\}", js, re.M | re.S).group(0),
+                         "const a = splitAnswer(process.argv[1]), b = splitAnswer(process.argv[2]);",
+                         "console.log(JSON.stringify([a.judged, b.judged, b.prose]));"])
+        concept = "용적률은 대지면적 대비 연면적 비율이에요 [1].\n:::다음\n- 건폐율은?\n:::"
+        case = "5%까지 올릴 수 있어요 [1].\n:::개별 판단\n:::\n:::다음\n- 예외는?\n:::"
+        out = subprocess.run([node, "-e", src, concept, case], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(json.loads(out), [False, True, "5%까지 올릴 수 있어요 [1]."], "빈 칸은 글에 안 남음")
 
     def test_static_files_need_no_token(self):
         self.serve(token="s3cret")
