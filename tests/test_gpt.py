@@ -861,24 +861,38 @@ class Web(unittest.TestCase):
         self.assertIn("function md(", js)
 
     def test_disclaimer_only_on_case_judgment(self):
-        """면책 안내는 모델이 :::개별 판단 칸을 쓴 답에만. 개념 설명(「용적률이 뭐야」)은 법령 도구를 불러도 안 붙음."""
+        """면책 안내는 내 사안을 판단한 답에만. 개념 설명(「용적률이 뭐야」)은 법령 도구를 불러도 안 붙음."""
         import re, shutil, subprocess
         from hanpilji.gpt import web
         js = web.page("app.js")
-        self.assertNotIn('b.tool === "q_law_search" || b.tool === "q_kb_search")) box.append', js, "도구 이름으로 붙이지 않음")
-        self.assertIn("if (p.judged)", js)
+        body = re.search(r"^function renderAnswer\(item, box\) \{.*?^\}", js, re.M | re.S).group(0)
+        self.assertNotIn("q_law_search", body, "도구 이름만 보고 붙이지 않음")
+        self.assertEqual(body.count("DISCLAIMER"), 1, "문구는 needsDisclaimer 결과로만 만듦")
+        self.assertIn("const fine = needsDisclaimer(item, p)", body)
+        self.assertLess(body.index("const fine"), body.index("askChips(p.고르기"), "고르기로 일찍 끝나도 붙음")
         node = shutil.which("node")
         if not node:
             self.skipTest("node 없음")
-        src = "\n".join([re.search(r"^const PARTS = .*$", js, re.M).group(0),
-                         re.search(r"^const FENCE = .*$", js, re.M).group(0),
-                         re.search(r"^function splitAnswer\(text\) \{.*?^\}", js, re.M | re.S).group(0),
-                         "const a = splitAnswer(process.argv[1]), b = splitAnswer(process.argv[2]);",
-                         "console.log(JSON.stringify([a.judged, b.judged, b.prose]));"])
+        grab = lambda pat: re.search(pat, js, re.M | re.S).group(0)
+        src = "\n".join([grab(r"^const PARTS = .*?$"), grab(r"^const FENCE = .*?$"),
+                         grab(r"^function splitAnswer\(text\) \{.*?^\}"), grab(r"^const MY_CASE = .*?$"),
+                         grab(r"^const LAW_TOOLS = .*?$"), grab(r"^function needsDisclaimer\(item, p\) \{.*?^\}"),
+                         "const cases = JSON.parse(process.argv[1]);",
+                         "console.log(JSON.stringify(cases.map(([q, a, tool]) => needsDisclaimer({ q, blocks: [{ tool }] }, splitAnswer(a)))));"])
         concept = "용적률은 대지면적 대비 연면적 비율이에요 [1].\n:::다음\n- 건폐율은?\n:::"
-        case = "5%까지 올릴 수 있어요 [1].\n:::개별 판단\n:::\n:::다음\n- 예외는?\n:::"
-        out = subprocess.run([node, "-e", src, concept, case], capture_output=True, text=True, check=True).stdout
-        self.assertEqual(json.loads(out), [False, True, "5%까지 올릴 수 있어요 [1]."], "빈 칸은 글에 안 남음")
+        judged = "5%까지 올릴 수 있어요 [1].\n:::개별 판단\n:::\n:::다음\n- 예외는?\n:::"
+        cases = [["용적률이 뭐야", concept, "q_kb_search"],
+                 ["전세권이란?", concept, "q_law_search"],
+                 ["집주인이 월세 올려 달래요", judged, "q_kb_search"],
+                 ["집주인이 월세를 10% 올려 달래요", concept, "q_kb_search"],    # 칸을 빠뜨렸거나 예전 대화
+                 ["내 보증금 돌려받을 수 있어?", concept, "q_law_search"],
+                 ["도곡렉슬 시세", concept, "q_complex_price"]]
+        out = subprocess.run([node, "-e", src, json.dumps(cases)], capture_output=True, text=True, check=True).stdout
+        self.assertEqual(json.loads(out), [False, False, True, True, True, False])
+        prose = subprocess.run([node, "-e", grab(r"^const PARTS = .*?$") + "\n" + grab(r"^const FENCE = .*?$") + "\n"
+                                + grab(r"^function splitAnswer\(text\) \{.*?^\}") + "\nconsole.log(splitAnswer(process.argv[1]).prose);",
+                                judged], capture_output=True, text=True, check=True).stdout.strip()
+        self.assertEqual(prose, "5%까지 올릴 수 있어요 [1].", "빈 칸은 글에 안 남음")
 
     def test_static_files_need_no_token(self):
         self.serve(token="s3cret")

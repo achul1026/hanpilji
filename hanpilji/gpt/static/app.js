@@ -645,6 +645,16 @@ function splitAnswer(text) {
   out.prose = out.prose.join("\n");
   return out;
 }
+// 면책 안내를 붙일 답인지: 모델이 :::개별 판단 칸을 썼거나, 법령 · 지식 DB를 찾았고 질문이 내 사안을 묻는 꼴일 때.
+// 뒤쪽은 모델이 칸을 빠뜨렸거나, 칸이 생기기 전에 저장된 예전 대화를 다시 열 때를 위한 안전장치.
+// 「용적률이 뭐야」 같은 개념 질문에는 붙이지 않음
+const MY_CASE = /(^|[\s,])(내|제가|저는|저희|우리|나는|제)\s|집주인|세입자|임차인|임대인|해도\s*(되|돼)|할\s*수\s*있(나|어|을까|는지)|받을\s*수|내야|돌려받|가능(한가|할까|해\?|한지)|어떻게\s*해야|어떡해/;
+const LAW_TOOLS = new Set(["q_law_search", "q_kb_search"]);
+function needsDisclaimer(item, p) {
+  if (p.judged) return true;
+  return (item.blocks || []).some(b => LAW_TOOLS.has(b.tool)) && MY_CASE.test(String(item.q || ""));
+}
+const DISCLAIMER = "법률 · 세무 자문이 아니라 법령 안내예요. 실제 사안은 전문가에게 확인하세요.";
 const bullet = t => t.replace(/^\s*[-*•]\s*/, "").trim();
 const refOf = t => parseInt(String(t || "").replace(/\D/g, ""), 10) || null;
 const cells2 = line => line.split("|").map(x => x.trim());
@@ -815,7 +825,8 @@ function renderAnswer(item, box) {
   if (prose.firstElementChild && prose.firstElementChild.tagName === "P") prose.firstElementChild.classList.add("lead");
   box.append(prose);
   citeHandler = null; checks = [];
-  const pick = askChips(p.고르기, "pick"); if (pick) { box.append(pick); return; }
+  const fine = needsDisclaimer(item, p) ? el("p", "afine", DISCLAIMER) : null;
+  const pick = askChips(p.고르기, "pick"); if (pick) { box.append(pick); if (fine) box.append(fine); return; }
   if (p["범위 밖"].length) box.append(scopeEl(p["범위 밖"]));
   const card = el("div", "anscard");
   if (p.핵심.length) {
@@ -836,8 +847,7 @@ function renderAnswer(item, box) {
   if (list) card.append(list);
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
-  // 면책 안내: 법령 · 세법을 내 사안에 적용해 판단한 답(모델이 :::개별 판단 칸을 씀)에만. 「용적률이 뭐야」 같은 개념 설명에는 안 붙임
-  if (p.judged) box.append(el("p", "afine", "법률 · 세무 자문이 아니라 법령 안내예요. 실제 사안은 전문가에게 확인하세요."));
+  if (fine) box.append(fine);   // 면책 안내: 내 사안을 판단한 답에만(needsDisclaimer)
   const si = situEl(p.상황); if (si) box.append(si);
   const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
 }
