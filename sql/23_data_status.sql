@@ -170,7 +170,8 @@ BEGIN
                            WHEN 'trdar_change' THEN '상권변화지표(상권)' WHEN 'dong_change' THEN '상권변화지표(행정동)'
                            ELSE t.dataset END,
                       '분기 · 서울시 상권분석서비스(추정치)'::text, count(*),
-                      min(t.yyqu)::text, max(t.yyqu)::text, max(t.asof), ARRAY['seoul_trdar']
+                      left(min(t.yyqu)::text, 4) || '년 ' || substr(min(t.yyqu)::text, 5, 1) || '분기',
+                      left(max(t.yyqu)::text, 4) || '년 ' || substr(max(t.yyqu)::text, 5, 1) || '분기', max(t.asof), ARRAY['seoul_trdar']
                FROM core.fact_trdar_stat t GROUP BY t.dataset ORDER BY t.dataset$q$;
         RETURN QUERY EXECUTE
             $q$SELECT '상권 · 인구'::text, '생활인구(행정동 · 시간대)'::text, '서울시 · KT 추정치'::text, count(*),
