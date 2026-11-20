@@ -632,18 +632,29 @@ function subjectEl(item) {
 }
 // 답 글을 칸으로 나눔(엔진 프롬프트가 정한 모양). 핵심 · 더보기 · 확인 못 함 · 다음 · 고르기 · 계산 · 범위 밖 · 상황은 글에서 빼서 따로 그림.
 // 예전 답의 「:::숫자」는 글에 남겨 md()가 그대로 그림
-const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖|상황)\s*$/;
+const PARTS = /^\s*:::\s*(핵심|더보기|확인 못 함|다음|고르기|계산|범위 밖|상황|개별 판단)\s*$/;
 function splitAnswer(text) {
-  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [], 상황: [] };
+  const out = { prose: [], 핵심: [], 더보기: [], "확인 못 함": [], 다음: [], 고르기: [], 계산: [], "범위 밖": [], 상황: [], "개별 판단": [], judged: false };
   const lines = String(text || "").replace(/\r/g, "").split("\n");
   for (let i = 0; i < lines.length; i++) {
     const m = lines[i].match(PARTS);
     if (!m) { out.prose.push(lines[i]); continue; }
+    if (m[1] === "개별 판단") out.judged = true;   // 빈 칸이어도 「구체적 사안을 판단한 답」 표시
     for (i++; i < lines.length && !FENCE_END.test(lines[i]); i++) if (lines[i].trim()) out[m[1]].push(lines[i].trim());
   }
   out.prose = out.prose.join("\n");
   return out;
 }
+// 면책 안내를 붙일 답인지: 모델이 :::개별 판단 칸을 썼거나, 법령 · 지식 DB를 찾았고 질문이 내 사안을 묻는 꼴일 때.
+// 뒤쪽은 모델이 칸을 빠뜨렸거나, 칸이 생기기 전에 저장된 예전 대화를 다시 열 때를 위한 안전장치.
+// 「용적률이 뭐야」 같은 개념 질문에는 붙이지 않음
+const MY_CASE = /(^|[\s,])(내|제가|저는|저희|우리|나는|제)\s|집주인|세입자|임차인|임대인|해도\s*(되|돼)|할\s*수\s*있(나|어|을까|는지)|받을\s*수|내야|돌려받|가능(한가|할까|해\?|한지)|어떻게\s*해야|어떡해/;
+const LAW_TOOLS = new Set(["q_law_search", "q_kb_search"]);
+function needsDisclaimer(item, p) {
+  if (p.judged) return true;
+  return (item.blocks || []).some(b => LAW_TOOLS.has(b.tool)) && MY_CASE.test(String(item.q || ""));
+}
+const DISCLAIMER = "법률 · 세무 자문이 아니라 법령 안내예요. 실제 사안은 전문가에게 확인하세요.";
 const bullet = t => t.replace(/^\s*[-*•]\s*/, "").trim();
 const refOf = t => parseInt(String(t || "").replace(/\D/g, ""), 10) || null;
 const cells2 = line => line.split("|").map(x => x.trim());
@@ -814,7 +825,8 @@ function renderAnswer(item, box) {
   if (prose.firstElementChild && prose.firstElementChild.tagName === "P") prose.firstElementChild.classList.add("lead");
   box.append(prose);
   citeHandler = null; checks = [];
-  const pick = askChips(p.고르기, "pick"); if (pick) { box.append(pick); return; }
+  const fine = needsDisclaimer(item, p) ? el("p", "afine", DISCLAIMER) : null;
+  const pick = askChips(p.고르기, "pick"); if (pick) { box.append(pick); if (fine) box.append(fine); return; }
   if (p["범위 밖"].length) box.append(scopeEl(p["범위 밖"]));
   const card = el("div", "anscard");
   if (p.핵심.length) {
@@ -835,7 +847,7 @@ function renderAnswer(item, box) {
   if (list) card.append(list);
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
-  if (item.blocks.some(b => b.tool === "q_law_search" || b.tool === "q_kb_search")) box.append(el("p", "afine", "법률 자문이 아니라 조문 안내예요."));
+  if (fine) box.append(fine);   // 면책 안내: 내 사안을 판단한 답에만(needsDisclaimer)
   const si = situEl(p.상황); if (si) box.append(si);
   const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
 }
