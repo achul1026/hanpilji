@@ -13,7 +13,7 @@ raw_dir = "./raw"
 sigungu = ["11680"]
 # 수집기 --sigungu 에 seoul 을 주면 서울 25개 구(hanpilji/regions.py). 개발서버 배치(scripts/batch.sh)는
 # 실거래(아파트 · 오피스텔 · 연립다세대 · 단독다가구 매매 · 전월세 · 상업업무용 매매) · 건축물대장 · 주택 공시가격 · 공시지가를 서울로 받음.
-# GitHub Actions(Supabase)는 강남구 그대로
+# 지정하지 않으면 이 값(강남구)을 씀(로컬 시범 DB용)
 
 [law]
 # 법제처 Open API 사용자 ID(OC). 개정된 법령의 본문을 받을 때만 씀(개정 확인은 공공데이터포털 키로 함).

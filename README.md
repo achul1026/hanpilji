@@ -18,7 +18,7 @@
 ![pgvector](https://img.shields.io/badge/pgvector-optional-8a63d2)
 ![Data](https://img.shields.io/badge/data-%EB%B2%95%EC%A0%9C%EC%B2%98%20%C2%B7%20%ED%86%A0%EC%A7%80%EC%9D%B4%EC%9D%8C%20%C2%B7%20%EA%B3%B5%EA%B3%B5%EB%8D%B0%EC%9D%B4%ED%84%B0%ED%8F%AC%ED%84%B8-f28b82)
 
-[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [Supabase](#️-supabase-영구-db) · [자동 최신화](#-자동-최신화) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
+[데이터 흐름](#-데이터-흐름) · [빠른 시작](#-빠른-시작) · [GPT가 부르는 함수](#-gpt가-부르는-마트-함수) · [부동산 GPT](#-부동산-gpt) · [운영 DB](#️-운영-db-개발서버) · [자동 최신화](#-자동-최신화) · [진행 상황](#-진행-상황) · [남은 일](#-남은-일)
 
 </div>
 
@@ -267,7 +267,7 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 남에게 열 때(`--host 0.0.0.0`)는 질문마다 API 요금이 나가므로 `HANPILJI_WEB_TOKEN`을 정해야만 켜지고, 주소는 `http://서버:8000/?token=정한값`입니다. 접속 주소마다 시간당 질문 30개, 기간 바꾸기 240번까지 받습니다. 화면 파일은 토큰 없이 열립니다(요금이 나가는 `/api/`만 토큰 필요).
 
 > [!IMPORTANT]
-> 클라우드 환경의 로컬 PostgreSQL은 세션마다 새로 떠서 데이터가 남지 않습니다. 오래 남길 데이터는 [Supabase](#️-supabase-영구-db)에 있고, 클라우드 세션에서는 `HANPILJI_DB_VIA=supabase-api`를 주면 GPT · 웹 카드가 거기서 읽습니다.
+> 클라우드 환경의 로컬 PostgreSQL은 세션마다 새로 떠서 데이터가 남지 않습니다. 오래 남길 데이터는 [개발서버 DB](#️-운영-db-개발서버)에 있는데, 클라우드 작업 환경에서는 개발서버 DB에 접속할 수 없습니다.
 >
 > 수집이 끝날 때마다 프로젝트 공유 폴더에도 백업을 남깁니다. 로컬 DB가 필요하면 다시 수집하지 말고 백업에서 되살리세요(몇 분).
 >
@@ -276,7 +276,7 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 > pg_dump -Fc -Z 6 -d "$HANPILJI_DSN" -f /mnt/project-files/hanpilji-data/hanpilji_YYYYMMDD.dump   # 새로 수집한 뒤 백업
 > ```
 >
-> 접속 주소는 `HANPILJI_DSN` 하나로만 받으므로 Supabase 같은 바깥 DB로 옮겨도 같은 스크립트를 씁니다. 백업 파일은 저장소에 올리지 않습니다.
+> 접속 주소는 `HANPILJI_DSN` 하나로만 받으므로 바깥 DB에도 같은 스크립트를 씁니다. 백업 파일은 저장소에 올리지 않습니다.
 
 ### 모델과 제공자
 
@@ -301,56 +301,38 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 
 </details>
 
-## 🗄️ Supabase (영구 DB)
+## 🗄️ 운영 DB (개발서버)
 
-데이터를 오래 두는 곳은 Supabase(무료 플랜, 서울 리전)입니다. 클라우드 작업 환경은 프록시가 웹(HTTPS)만 통과시켜 DB 직접 연결(5432)이 막히므로, Supabase **Management API**의 SQL 실행 주소로 넣고 읽습니다. 웹사이트를 올릴 서버처럼 직접 연결이 되는 곳에서는 `HANPILJI_DSN`(Session pooler 주소)으로 평소대로 씁니다.
+웹사이트(Cloud Run)와 수집 배치는 회사 개발서버 PostgreSQL의 **스키마 `hanpilji` 하나**를 씁니다. 코드의 SQL은 `ops` · `stg` · `core` · `mart` 네 스키마 이름으로 적혀 있고, `HANPILJI_DB_SCHEMA=hanpilji`를 주면 보내기 직전에 `hanpilji.`로 바꿉니다(`hanpilji/db.py`). 옮긴 절차와 권한 구성은 [`docs/devserver_migration.md`](docs/devserver_migration.md)에 있습니다.
 
 | 환경변수 | 쓰임 |
 |---|---|
-| `HANPILJI_DSN` | Supabase Session pooler 주소. 사용자명 `postgres.<ref>`에서 프로젝트를 알아냄 |
-| `SUPABASE_ACCESS_TOKEN` | 개인 액세스 토큰(`sbp_…`, 계정 전체 권한이라 만료를 짧게). 파일 · 채팅에 쓰지 않음 |
-| `HANPILJI_DB_VIA=supabase-api` | GPT · 웹 카드가 DB 직접 연결 대신 HTTPS로 읽음 |
-
-```bash
-# 백업(pg_dump)을 Supabase에 덮어쓰기 복원 → 테이블별 건수 비교. 파일을 안 주면 공유 폴더의 가장 최근 백업
-python -m hanpilji.supabase restore /mnt/project-files/hanpilji-data/hanpilji_YYYYMMDD.dump
-python -m hanpilji.supabase counts            # 건수만 다시 비교
-
-HANPILJI_DB_VIA=supabase-api python -m hanpilji.gpt "도곡렉슬 84㎡ 최근 1년 매매가랑 전세가"
-HANPILJI_DB_VIA=supabase-api python -m hanpilji.gpt.web --port 8000
-```
-
-복원은 백업을 로컬 임시 DB(`hanpilji_restore`)에 푼 뒤 스키마 → 데이터(테이블마다 약 1MB씩 JSON 묶음) → 제약 · 색인 · 시퀀스 → 권한 순으로 보냅니다. `ops` · `stg` · `core` · `mart` 네 스키마를 지우고 다시 만들므로 여러 번 돌려도 됩니다. 기본 권한(DEFAULT ACL)은 백업에 원래 소유자 이름이 박혀 있어 빼고, `hanpilji_gpt`에 다시 줍니다.
-
-HTTPS로 읽을 때도 지키는 것은 같습니다. 요청마다 읽기 전용 · 5초 제한 · `SET ROLE hanpilji_gpt`(mart만 보임)으로 돌리고, 도구 인자는 따옴표를 풀어 쓴 리터럴로만 넣습니다. 요청 한 번에 1~3초가 더 걸립니다.
+| `HANPILJI_DSN` | 수집기용 주소(`hanpilji_app`, 스키마 주인). 서버 `.env`에만 둠 |
+| `HANPILJI_GPT_DSN` | 웹 · GPT용 읽기 주소(`hanpilji_gpt`, 조회 함수 · 뷰만 읽음) |
+| `HANPILJI_DB_SCHEMA` | `hanpilji`. 없으면 네 스키마 그대로 보냄(로컬 DB용) |
 
 > [!NOTE]
-> 무료 플랜은 7일 동안 쓰지 않으면 멈춥니다. 대시보드에서 **Restore**를 누르면 돌아옵니다. 액세스 토큰은 만료일이 지나면 새로 만들어 환경변수를 바꿔야 합니다.
+> 예전에 쓰던 Supabase(강남구만)는 2026-11-24부터 쓰지 않습니다. 개발서버에 표 40개가 모두 같거나 많은 건수로 있는 것을 확인했고, 최종 백업은 프로젝트 공유 폴더 `hanpilji-data/supabase_final_20261120/`에 있습니다.
 
 ## 🔄 자동 최신화
 
-[`.github/workflows/refresh.yml`](.github/workflows/refresh.yml)이 깃허브 실행기에서 수집기를 정해진 시각에 돌려 Supabase에 바로 넣습니다. 수집기마다 `ops.ingest_cursor`에 어디까지 받았는지 남기므로 매번 전부가 아니라 바뀐 부분만 받습니다. 실행이 겹치면 앞 실행이 끝날 때까지 기다립니다.
+자동 최신화는 개발서버 cron이 [`scripts/batch.sh`](scripts/batch.sh)를 돌려서 합니다. 수집기마다 `ops.ingest_cursor`에 어디까지 받았는지 남기므로 매번 전부가 아니라 바뀐 부분만 받습니다. 한 번에 하나만 돌고(flock), 단계 하나가 실패해도 다음 단계는 돕니다.
 
-| 언제(KST) | 무엇 | 얼마나 |
-|---|---|---|
-| 매일 04:17 | 실거래 매매 · 전월세 | 최근 3개월만 다시(늦은 신고 · 해제 반영). 새 달은 저절로 추가 |
-| 매주 월 05:07 | 법령 17개 | 현행 법령 번호(MST)가 바뀐 것만 본문 받기 |
-| 매주 월 05:07 | 금리 · 물가 · 가격지수 · 인구 | 최근 12개월 덮어쓰기 |
-| 매월 2일 05:37 | 건축물대장 · 행위제한 | 전부 다시(호출 약 2,900 · 576번, 하루 한도 안) |
-| 매월 2일 05:37 | 주택 공시가격 | 포털 파일 번호가 바뀌었을 때만 받음(해마다 한 번) |
-| 매년 6월 | 공시지가 · 지목(V-World) | V-World가 해외 IP를 끊어 국내 PC에서 `--fetch-only` → `--from-dir` |
+| 언제(KST) | 무엇 |
+|---|---|
+| 매일 05:07 | 실거래 매매 · 전월세(최근 3개월 다시) · 공매 · 건축물대장 · V-World · 생활인구 |
+| 매주 월 05:37 | 법령 · 판례 · 행정규칙 · 해설서 · 개념 노트 · 시장 지표(최근 12개월) |
+| 매월 3일 01:07 | 행위제한 · 주택 공시가격 · 개별공시지가 · 주변 정보 · 상가 점포 · 상권분석 |
 
-실행 요약에 수집처별 마지막 성공 시각(`ops.v_source_freshness`)이 표로 나오고, 받은 원본은 14일 동안 실행 결과물로 남습니다. 실패하면 깃허브가 메일을 보냅니다. **Actions → 데이터 자동 최신화 → Run workflow**로 아무 때나 돌릴 수 있습니다.
-
-비밀값(Settings → Secrets and variables → Actions): `HANPILJI_DSN`(Session pooler 주소) · `DATA_GO_KR_KEY` · `ECOS_KEY` · `RONE_KEY` · `KOSIS_KEY` · `LAW_OC`(깃허브 실행기는 IP가 매번 바뀌어 법제처에 등록할 수 없으므로, Actions는 개정만 감지하고 본문은 IP를 등록한 서버가 받음). 매일 도니 무료 플랜이 7일 쉬어 멈추는 일도 없습니다.
+배치가 끝나면 수집처별 마지막 성공 시각(`ops.v_source_freshness`)을 로그에 남깁니다. 예전에 깃허브 실행기에서 Supabase로 넣던 「데이터 자동 최신화」(`refresh.yml`)는 2026-11-24에 껐고 저장소에서 지웠습니다.
 
 ### 서버 배치
 
 [`scripts/batch.sh`](scripts/batch.sh) `daily|weekly|monthly`는 같은 수집기를 서버 cron에서 돌려 스키마 하나(`HANPILJI_DB_SCHEMA`)로 합친 DB에 씁니다. 실거래(아파트 · 오피스텔 · 연립다세대 · 단독다가구 매매 · 전월세 · 상업업무용 매매) · 건축물대장 · 주택 공시가격 · 공시지가 · 공매는 서울 25개 구를 받습니다. 서버는 국내 IP라 V-World(지목 · 토지대장 면적 · 공시지가 이력 · 토지이용계획)도 매일 바로 받습니다(`.env`에 `VWORLD_KEY`가 있을 때, 서울 단지 필지만 `--complex-only`, 하루 `HANPILJI_VWORLD_MAX_CALLS` 기본 9,000번). 지적도 · 건물 윤곽도 서울을 약 500m 칸 5,451개로 나눠 매일 이어 받습니다(`vworld_geom --fetch-seoul`, 하루 `HANPILJI_VWORLD_GEOM_MAX_CALLS` 기본 5,000번, 칸마다 180일 지나면 다시). 주변 정보(학교 · 지하철역)는 매달 공공데이터포털 표준데이터로 바꿉니다(`poi`). 행위제한은 강남구로 받고 서울 다른 구에 복사합니다(`luinfo --copy-to seoul`). 서울은 자치구 조례 없이 서울시 도시계획조례 하나라 구마다 답이 같습니다(2026-11-11 강남 · 마포 · 노원 비교). 설정은 저장소 옆 `.env`에서 읽고, `HANPILJI_BATCH_SKIP=onbid,law`처럼 단계를 뺄 수 있습니다.
 
-**공공데이터포털 하루 한도를 나눠 씀.** 한도는 계정 · API마다 하나이고 자정에 다시 찹니다. 같은 계정을 Actions(강남 매일)와 다른 서비스도 쓰므로, 서버 배치는 실거래 API마다 · 건축물대장 전체로 하루 `HANPILJI_DG_MAX_CALLS`(기본 9,000번, 개발계정 한도 10,000 중 1,000을 남김)까지만 부릅니다. 닿으면 하루 한도에 걸렸을 때와 같이 그 종류만 멈추고 다음 날 이어 받습니다(실패로 세지 않음). 평소 실거래는 최근 3개월만 다시 받아 API마다 하루 75~150번이라, 상한에 닿는 건 서울을 처음 채울 때뿐입니다. 다른 서비스가 대량 수집을 하는 날에는 `.env`에서 이 값을 낮추세요.
+**공공데이터포털 하루 한도를 나눠 씀.** 한도는 계정 · API마다 하나이고 자정에 다시 찹니다. 같은 계정을 다른 서비스도 쓰므로, 서버 배치는 실거래 API마다 · 건축물대장 전체로 하루 `HANPILJI_DG_MAX_CALLS`(기본 9,000번, 개발계정 한도 10,000 중 1,000을 남김)까지만 부릅니다. 닿으면 하루 한도에 걸렸을 때와 같이 그 종류만 멈추고 다음 날 이어 받습니다(실패로 세지 않음). 평소 실거래는 최근 3개월만 다시 받아 API마다 하루 75~150번이라, 상한에 닿는 건 서울을 처음 채울 때뿐입니다. 다른 서비스가 대량 수집을 하는 날에는 `.env`에서 이 값을 낮추세요.
 
-**웹 · GPT의 데이터 범위 안내.** `HANPILJI_DB_SCHEMA`가 있으면(서버 구성) GPT 안내문 · 도구 설명 · 화면 글이 「서울 25개 구」로 바뀌고, 없으면(Supabase 구성) 「강남구」 그대로입니다. 직접 정하려면 `HANPILJI_DATA_SCOPE=seoul|gangnam`. 서울 구성에서는 모델이 구를 비워 두면 `mart.q_find_sigungu`(`sql/20_find_sigungu.sql`)가 단지 · 동 이름으로 구를 찾아 채웁니다. 지적도는 서울을 채우는 중이라 도구 설명에 그렇게 적습니다. 가까운 역 · 학교(`q_nearby`)는 단지 필지 안 한 점에서 직선거리로 찾고, 도보 분은 분속 67m 어림값입니다. 학교 배정(학군)은 데이터에 없습니다.
+**웹 · GPT의 데이터 범위 안내.** GPT 안내문 · 도구 설명 · 화면 글은 기본으로 「서울 25개 구」라고 말합니다. 강남구만 채운 로컬 DB에서는 `HANPILJI_DATA_SCOPE=gangnam`을 주면 「강남구」로 바뀝니다. 서울 구성에서는 모델이 구를 비워 두면 `mart.q_find_sigungu`(`sql/20_find_sigungu.sql`)가 단지 · 동 이름으로 구를 찾아 채웁니다. 지적도는 서울을 채우는 중이라 도구 설명에 그렇게 적습니다. 가까운 역 · 학교(`q_nearby`)는 단지 필지 안 한 점에서 직선거리로 찾고, 도보 분은 분속 67m 어림값입니다. 학교 배정(학군)은 데이터에 없습니다.
 
 **새 서버에서 처음 채울 때.** 단지의 필지번호(PNU)는 실거래의 동 이름을 법정동 코드로 바꿔 만드는데, 서울 동 코드표는 월간 `land_price`(서울 개별공시지가)가 채웁니다. 그래서 처음에는 `seoul_land_price`를 한 번 먼저 돌리고, `sql/10_property.sql`의 「stg 원본에서 한 번 채움」 UPDATE로 이미 받은 단지의 필지번호를 다시 채운 뒤 건축물대장을 받으세요. 순서가 바뀌면 강남구 밖 단지는 건축물대장 대상에 들지 않습니다.
 
@@ -468,7 +450,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 
 | 항목 | 기본값 | 바꾸는 곳 |
 |---|---|---|
-| DB | PostgreSQL 16, DB 하나에 스키마 4개 (+ raw 폴더). 영구 DB는 Supabase(서울) | `HANPILJI_DSN` |
+| DB | PostgreSQL 16, DB 하나에 스키마 4개 (+ raw 폴더). 운영 DB는 개발서버(스키마 `hanpilji` 하나) | `HANPILJI_DSN` |
 | 공간 · 의미 검색 | 없이도 동작 | `scripts/init_db.sh --postgis --pgvector` |
 | 시범 구 | 서울 강남구 (11680) | `config.toml` `[pilot]` |
 | GPT 엔진 | Anthropic Claude `claude-opus-5-5`. 마트 함수는 엔진과 무관 | `config.toml` `[gpt]` |
@@ -492,7 +474,7 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [x] Supabase(서울)에 백업 복원 · 클라우드에서 HTTPS로 GPT · 카드 읽기 (2026-10-27)
 - [x] 지표 분석: 실거래 월별 추세 · 공시지가 연도별 추세 · 공시지가 대비 실거래가, 지표 수집기(ECOS · R-ONE · KOSIS) (2026-10-28)
 - [x] ECOS · R-ONE · KOSIS 키 발급 · 클라우드 허용 도메인 추가 → 첫 실제 수집으로 표 번호 · 항목 코드 확인 (2026-10-28)
-- [x] 자동 최신화: 깃허브 실행기에서 매일 · 매주 · 매월 바뀐 부분만 Supabase로 (2026-10-28)
+- [x] 자동 최신화: 깃허브 실행기에서 매일 · 매주 · 매월 바뀐 부분만 Supabase로 (2026-10-28, 2026-11-24에 개발서버 배치로 바꾸고 끔)
 - [x] 웹사이트 첫 버전: 대화 + 근거 서랍, 답변 블록, 진행 표시, 기간 바꾸기, 휴대폰 화면 (2026-10-28)
 - [x] 웹 2차 1부: Pretendard 글꼴, 결론 + 핵심 숫자 + 확인 못 한 것 답 모양, 숫자 검산, 이어서 볼 것, 첫 화면 비교 (2026-10-28)
 - [x] 웹 2차 2부: 필지 리포트(모델 없이, 인쇄용) · 두 단지 비교 (2026-10-29)
@@ -500,20 +482,18 @@ SELECT bld_count, bld_households, bld_parking, land_area_m2, zones FROM mart.q_p
 - [ ] 웹사이트 올리기(호스팅 · 도메인 결정, 지도 블록은 V-World 운영키 뒤)
 - [x] 경매 · 공매 분석: 공매 수집기(온비드) · 실거래 대비 할인율 · 입찰 전 권리 확인 항목, 경매 법령 4개 추가 (2026-10-28)
 - [x] 온비드 물건목록 API 활용신청 → 첫 실제 응답으로 항목 이름 확인 (2026-10-28: 강남구 입찰 예정 공매 18건, 대부분 오피스텔 · 업무 · 상가)
-- [ ] 경매 법령 4개 Supabase 적재
 - [x] 오피스텔 실거래 수집기 · 공매 할인율 오피스텔 비교(같은 필지 주상복합도 종류별로) · 매일 최신화 (2026-10-28)
 - [x] 오피스텔 API 2개 활용신청 → 실제 응답 항목 이름 확인 · 강남구 36개월 로컬 적재: 매매 2,890건 · 전월세 12,047건 · 225단지 (2026-10-29)
 - [x] 오피스텔 실거래 Supabase 반영 (2026-10-29)
 - [x] 연립다세대 실거래 수집기 · 공매 할인율 다세대 비교 · 매일 최신화 (2026-10-29)
 - [x] 연립다세대 강남구 36개월 적재 · Supabase 반영 (2026-10-29)
 - [x] 공동주택 공시가격 수집기 · 단지 면적별 공시가격과 실거래 비교(`q_house_price`) · 매월 새 파일 확인 (2026-10-30, 강남구 2026년 177,198호)
-- [ ] 공동주택 공시가격 Supabase 반영
 - [ ] 새 공매 물건 · 유찰로 값이 내려간 물건 알림(매주, 웹사이트가 생기면)
 - [ ] 법원경매 물건: 공식 API가 생기거나 제휴 데이터가 정해지면
 - [ ] V-World 상업 이용 회신
 - [x] 지적도 · 건물 윤곽 적재 코드 · 지도 함수(`q_parcel_map`) · 웹 지도 블록 (2026-10-28)
 - [x] 국내 PC에서 강남구 지적도 받기 → 필지 경계 34,658개(면적 합 39.5㎢) · 건물 윤곽 24,235개, 한필지 필지 1,149/1,168개에 경계 (2026-10-28)
-- [x] 지적도 Supabase 반영(`python -m hanpilji.supabase push-geo`) (2026-10-28)
+- [x] 지적도 Supabase 반영 (2026-10-28)
 - [ ] 경계가 없는 한필지 필지 19개: 본번 0 같은 잘못 만든 PNU · 합병 · 분할로 바뀐 번지 확인
 
 ## 📁 폴더
@@ -543,7 +523,6 @@ hanpilji/
 │   │   ├── web.py           # 웹 서버(질문 흐름 · 블록 다시 조회)
 │   │   └── static/          # 웹 화면(index.html · app.css · app.js)
 │   ├── ingest.py            # 원본 보관 · 수집 기록 · 커서
-│   ├── supabase.py          # Supabase를 HTTPS로: 백업 복원 · GPT용 읽기 연결
 │   └── textnorm.py          # 「100분의 5」 → 「5%」
 ├── sql/00~18_*.sql          # 스키마 · 표 · 마트 · 권한 · 기준값 (15_geo는 PostGIS 있을 때, 16_policy는 정책 목록 · 전후 비교 · 토지거래허가구역 기간, 18은 단지 카드)
 ├── scripts/init_db.sh       # 빈 DB에 스키마 올리기

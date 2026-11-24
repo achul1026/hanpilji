@@ -251,7 +251,7 @@ def load_month(conn, run_id, kind, sigungu, ym, rows, asof):
             counts[emd] = counts.get(emd, 0) + 1
             dong_codes[emd] = code
         dong_codes = {k: c for k, c in dong_codes.items() if counts[k] == 1}
-    # 파이프라인: 줄마다 응답을 기다리지 않고 몰아 보냄. 원격 DB(Supabase)에서는 왕복 수천 번이 몇 번으로 줄어듦
+    # 파이프라인: 줄마다 응답을 기다리지 않고 몰아 보냄. 원격 DB(개발서버)에서는 왕복 수천 번이 몇 번으로 줄어듦
     with conn.pipeline(), conn.cursor() as cur:
         cur.execute("DELETE FROM stg.rtms_raw WHERE source_id = %s AND sigungu_cd = %s AND deal_ym = %s",
                     (src, sigungu, ym))

@@ -50,7 +50,7 @@ SYSTEM = """너는 「한필지」 부동산 데이터 도우미다. 한국어�
 오늘: {today}"""
 
 # 웹 화면: 핵심 하나만 보이고 부가정보는 눌러야 열림(2026-10-29 방향). 도구 결과는 「열기」로 원자료 블록이 열림
-# 7번 「지금 데이터 범위」: Supabase(강남구) · 개발서버(서울) 구성에 따라 바꿔 끼움(hanpilji/scope.py)
+# 7번 「지금 데이터 범위」: 서울(개발서버) · 강남구(로컬 시범 DB) 구성에 따라 바꿔 끼움(hanpilji/scope.py)
 SCOPE_NOTE = {
     "gangnam": """7. 지금 데이터 범위: 실거래가와 행위제한 조례는 서울 강남구(11680)만, 실거래가는 아파트 · 오피스텔 · 연립다세대 매매 · 전월세 최근 36개월
    (단지 순위와 구 · 동 시세 추이는 아파트만).
@@ -277,11 +277,7 @@ def ask(question, llm, conn, history=None, max_rounds=6, today=None, on_event=No
 
 
 def connect(cfg):
-    """GPT용 읽기 전용 접속. HANPILJI_GPT_DSN(hanpilji_gpt 계정)을 권장, 없으면 HANPILJI_DSN.
-    HANPILJI_DB_VIA=supabase-api면 Supabase를 HTTPS로 읽음(DB 직접 연결이 막힌 클라우드 작업 환경용)."""
-    if os.environ.get("HANPILJI_DB_VIA") == "supabase-api":
-        from hanpilji import supabase
-        return supabase.SupabaseConn()
+    """GPT용 읽기 전용 접속. HANPILJI_GPT_DSN(hanpilji_gpt 계정)을 권장, 없으면 HANPILJI_DSN."""
     from hanpilji import db
     dsn = os.environ.get("HANPILJI_GPT_DSN") or cfg["db"]["dsn"]
     conn = db.connect(dsn, autocommit=True, connect_timeout=5,

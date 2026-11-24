@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# 서버 cron용 수집 배치(스키마 하나로 합친 DB). GitHub Actions(.github/workflows/refresh.yml)와 같은 순서 · 같은 수집기를 돎
+# 서버 cron용 수집 배치(스키마 하나로 합친 DB). 자동 최신화는 이 배치 하나로 함(예전 GitHub Actions refresh.yml은 2026-11-24에 지움)
 #   scripts/batch.sh daily|weekly|monthly
 # 설정은 저장소 옆 .env(권한 600)에서 읽음: HANPILJI_DSN · HANPILJI_DB_SCHEMA · DATA_GO_KR_KEY · ECOS_KEY · RONE_KEY · KOSIS_KEY · LAW_OC · VWORLD_KEY · SEOUL_API_KEY …
 # 한 번에 하나만 돎(flock). 단계 하나가 실패해도 다음 단계는 돌고, 끝에 실패가 있으면 종료 코드 1

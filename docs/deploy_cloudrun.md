@@ -42,22 +42,18 @@
 4. **예산 알림**: 왼쪽 메뉴 「결제」 → 「예산 및 알림」 → 「예산 만들기」 → 금액 5,000원, 50% · 90% · 100%에 메일 알림.
    (알림일 뿐 자동으로 멈추지는 않지만, 뭔가 새면 바로 압니다.)
 
-## 2. Supabase에 웹 전용 읽기 계정 켜기 (약 3분)
+## 2. 개발서버 DB의 웹 전용 읽기 주소 준비하기 (약 3분)
 
-웹 서버는 관리자(postgres) 대신 `mart`만 읽을 수 있는 `hanpilji_gpt` 계정으로 DB에 붙습니다. 계정은 이미 있고
-로그인만 꺼져 있습니다.
+웹 서버는 회사 개발서버 PostgreSQL의 스키마 `hanpilji`를 읽습니다. 관리자 계정 대신 조회 함수 · 뷰만 읽을 수 있는
+`hanpilji_gpt` 계정으로 붙습니다. 계정 만들기와 권한은 [devserver_migration.md](devserver_migration.md) 4단계에 있습니다.
 
-1. https://supabase.com/dashboard → 한필지 프로젝트 → 왼쪽 「SQL Editor」.
-2. 아래를 붙여 넣고 `여기에-긴-비밀번호`를 새 비밀번호(영문 · 숫자 20자 이상, `@` `:` `/` 는 빼기)로 바꾼 뒤 「Run」.
-   ```sql
-   ALTER ROLE hanpilji_gpt LOGIN PASSWORD '여기에-긴-비밀번호';
-   ALTER ROLE hanpilji_gpt SET default_transaction_read_only = on;
-   ALTER ROLE hanpilji_gpt SET statement_timeout = '5s';
-   ```
-3. 위쪽 「Connect」 → 「Session pooler」 주소를 봅니다. 모양이 이렇습니다.
-   `postgresql://postgres.<프로젝트ref>:[YOUR-PASSWORD]@aws-0-ap-northeast-2.pooler.supabase.com:5432/postgres`
-   여기서 `postgres.` 를 `hanpilji_gpt.` 로, `[YOUR-PASSWORD]`를 방금 정한 비밀번호로 바꾼 것이
-   `HANPILJI_GPT_DSN` 값입니다. 메모장에만 두고 채팅에 붙이지 마세요.
+1. 주소 모양은 이렇습니다(서버 · 포트 · DB 이름은 개발서버 관리자에게 확인).
+   `postgresql://hanpilji_gpt:<비밀번호>@<서버>:<포트>/<DB>?sslmode=require`
+   비밀번호에 `@` `:` `/` 가 있으면 주소가 깨지니 영문 · 숫자로만 정하세요.
+2. 이 주소가 `HANPILJI_GPT_DSN` 값입니다. 메모장에만 두고 채팅에 붙이지 마세요.
+3. Cloud Run(Google 서울)에서 `<서버>:<포트>`에 닿아야 합니다. 회사 방화벽이 막으면 열어 달라고 요청하세요.
+
+예전에는 Supabase를 읽었지만 2026-11-24부터 쓰지 않습니다. 지금 저장소에는 Supabase로 붙는 코드가 없습니다.
 
 ## 3. Anthropic 월 사용 한도 정하기 (약 2분)
 
@@ -86,6 +82,7 @@
      |---|---|
      | `HANPILJI_LLM_API_KEY` | 3단계에서 만든 키(`sk-ant-…`) |
      | `HANPILJI_GPT_DSN` | 2단계에서 만든 주소 |
+     | `HANPILJI_DB_SCHEMA` | `hanpilji` (개발서버의 스키마 이름. 없으면 조회가 모두 실패함) |
      | `HANPILJI_WEB_DAILY_LIMIT` | `50` (하루 전체 질문 수, 필요하면 조정) |
      | `HANPILJI_VWORLD_MAP_KEY` | V-World 운영키가 나오면 추가(없으면 지도는 선만 그림) |
 

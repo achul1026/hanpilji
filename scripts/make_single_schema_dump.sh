@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # 네 스키마(ops · stg · core · mart) DB를 복사해 스키마 하나로 합친 뒤 백업 파일을 만듦. 원본 DB는 건드리지 않음
 #   scripts/make_single_schema_dump.sh <원본 DB 이름> <백업 파일> [스키마 이름, 기본 hanpilji]
-# 원본은 같은 PostgreSQL 안의 DB(예: scripts/supabase_mirror.py로 채운 hanpilji_mirror). 접속은 PG* 환경변수로
+# 원본은 같은 PostgreSQL 안의 DB(네 스키마 구성의 로컬 DB 등). 접속은 PG* 환경변수로
 set -euo pipefail
 SRC="$1"; OUT="$2"; TARGET="${3:-hanpilji}"
 WORK="${SRC}_single_tmp"
