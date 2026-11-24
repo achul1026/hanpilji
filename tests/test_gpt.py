@@ -266,8 +266,10 @@ class SeoulScope(unittest.TestCase):
 
     def test_scope_from_env(self):
         from hanpilji import scope
-        self.assertEqual(scope.current({}), "gangnam")
+        self.assertEqual(scope.current({}), "seoul", "변수가 없으면 개발서버(서울)")
         self.assertEqual(scope.current({"HANPILJI_DB_SCHEMA": "hanpilji"}), "seoul")
+        self.assertEqual(scope.current({"HANPILJI_DATA_SCOPE": "gangnam"}), "gangnam")
+        self.assertEqual(scope.current({"HANPILJI_DATA_SCOPE": "x"}), "seoul", "모르는 값은 기본값")
         self.assertEqual(scope.current({"HANPILJI_DB_SCHEMA": "hanpilji", "HANPILJI_DATA_SCOPE": "gangnam"}), "gangnam")
         self.assertEqual(scope.current({"HANPILJI_DATA_SCOPE": "Seoul"}), "seoul")
 
@@ -843,14 +845,6 @@ class Web(unittest.TestCase):
         finally:
             datastatus.clear()
 
-        # Supabase API 연결: SET 대신 그 연결의 제한 시간 값을 늘림
-        from hanpilji import supabase
-        sc = supabase.SupabaseConn(ref="x")
-        with mock.patch.object(supabase, "query", return_value=[]) as q:
-            datastatus._long_timeout(sc)
-            sc.execute("SELECT 1")
-        self.assertIn(f"statement_timeout = {datastatus.STATUS_TIMEOUT_MS};", q.call_args.args[0])
-        self.assertEqual(supabase.SupabaseConn(ref="x").timeout_ms, 5000, "다른 연결은 5초 그대로")
         self.assertIn(str(datastatus.STATUS_TIMEOUT_MS), datastatus.STATUS_TIMEOUT_SQL, "두 값이 같음")
 
     def test_page_never_uses_innerhtml(self):

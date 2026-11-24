@@ -5,7 +5,7 @@ Supabase에 있는 한필지 데이터를 다른 서비스와 같이 쓰는 Post
 
 - 정한 이름: 스키마 **`hanpilji`**, 앱 계정 **`hanpilji_app`**(스키마 주인). 웹 · GPT용 읽기 계정 **`hanpilji_gpt`** 를 하나 더 권합니다(조회 함수 · 뷰만 읽고 표는 못 읽음. 지금 Supabase와 같은 구성).
 - 다른 서비스의 스키마와 `public`에는 아무것도 만들지 않습니다. 한필지 객체는 바깥 스키마를 참조하지 않습니다(확인함).
-- 옮긴 뒤에도 웹사이트(Cloud Run)와 자동 갱신(GitHub Actions)은 Supabase를 그대로 씁니다. 바꾸는 법은 [7단계](#7-앱-연결-바꾸기).
+- 이전은 끝났습니다. 웹사이트(Cloud Run)와 자동 갱신(서버 cron의 `scripts/batch.sh`)은 개발서버의 `hanpilji` 스키마만 씁니다. Supabase는 2026-11-24부터 쓰지 않고, 최종 백업은 프로젝트 공유 폴더 `hanpilji-data/supabase_final_20261120/`에 있습니다. 아래 1~6단계는 그때 한 절차의 기록입니다.
 
 ## 1. 지금 DB 파악(이미 확인한 결과)
 
@@ -155,21 +155,18 @@ SQL
 ## 7. 앱 연결 바꾸기
 
 코드에 `public.`을 직접 적은 곳은 없습니다. 대신 SQL이 `core.` · `mart.` · `ops.` · `stg.`를 쓰므로,
-환경변수 `HANPILJI_DB_SCHEMA=hanpilji`를 넣으면 보내기 직전에 `hanpilji.`로 바꿉니다(`hanpilji/db.py`, PR #41). 없으면 지금처럼 Supabase 구성입니다.
+환경변수 `HANPILJI_DB_SCHEMA=hanpilji`를 넣으면 보내기 직전에 `hanpilji.`로 바꿉니다(`hanpilji/db.py`, PR #41). 없으면 네 스키마 이름 그대로 보냅니다(로컬 DB용).
 
 | 환경변수 | 값 |
 |---|---|
 | `HANPILJI_DB_SCHEMA` | `hanpilji` |
 | `HANPILJI_DSN` (수집기) | `postgresql://hanpilji_app:<비밀번호>@<서버>:<포트>/<DB>` |
 | `HANPILJI_GPT_DSN` (웹 · GPT) | `postgresql://hanpilji_gpt:<비밀번호>@<서버>:<포트>/<DB>` |
-| `HANPILJI_DB_VIA` | 비움(Supabase를 HTTPS로 읽을 때만 씀) |
 
-웹사이트 · 자동 갱신까지 옮길 때(지금은 하지 않음):
+지금 구성(2026-11-24):
 
-1. Cloud Run(Google 서울)과 GitHub Actions 실행기(해외 IP)가 `<서버>:<포트>`에 닿아야 합니다. 회사 방화벽이 막으면 웹사이트는 Supabase에 남깁니다.
-2. Cloud Run 서비스 `hanpilji-git`: `HANPILJI_GPT_DSN` 바꾸고 `HANPILJI_DB_SCHEMA=hanpilji` 추가.
-3. `refresh.yml`: 비밀값 `HANPILJI_DSN`을 위 수집기 주소로, `env`에 `HANPILJI_DB_SCHEMA: hanpilji`. 실행기가 막히면 서버 cron에서 같은 수집기를 돌림.
-4. 그 전까지 Supabase가 원본입니다. 개발서버 사본은 다시 받을 때 5단계를 반복합니다(먼저 `DROP SCHEMA hanpilji CASCADE`를 `hanpilji_app`으로).
+1. Cloud Run 서비스 `hanpilji-git`: `HANPILJI_GPT_DSN`은 개발서버 `hanpilji_gpt` 주소, `HANPILJI_DB_SCHEMA=hanpilji`.
+2. 자동 갱신: 서버 cron이 `scripts/batch.sh daily|weekly|monthly`를 돌림(설정은 저장소 옆 `.env`). 예전 GitHub Actions `refresh.yml`은 껐고 저장소에서 지웠습니다.
 
 ## 8. 이후 백업
 
@@ -180,20 +177,3 @@ docker exec <컨테이너> pg_dump -U <관리자> -d <DB> -n hanpilji -Fc -Z 6 -
 docker cp <컨테이너>:/tmp/hanpilji_$(date +%Y%m%d).dump <작업 폴더>/
 docker exec <컨테이너> rm /tmp/hanpilji_$(date +%Y%m%d).dump
 ```
-
-## 백업을 새로 만드는 법(클라우드 작업 환경)
-
-클라우드에서는 Supabase에 DB로 바로 붙을 수 없어서(HTTPS만 열림), Supabase를 조회만 해서 로컬 PostgreSQL에 복사한 뒤 백업을 뜹니다.
-자동 갱신이 Supabase에 쓰는 동안에는 숫자가 움직이니 끝난 뒤에 돌립니다.
-
-```bash
-apt-get install -y postgresql-16-postgis-3 postgresql-16-pgvector
-createdb hanpilji_mirror
-HANPILJI_DSN=postgresql:///hanpilji_mirror scripts/init_db.sh --postgis --pgvector
-psql -d hanpilji_mirror -c "ALTER TABLE core.dim_building DROP COLUMN geom; ALTER TABLE core.dim_parcel DROP COLUMN geom; ALTER TABLE core.doc_law DROP COLUMN embedding"
-python scripts/supabase_mirror.py --verify          # Supabase → 로컬, 건수 · 줄 내용 비교
-pg_dump -Fc -Z 6 -d hanpilji_mirror -n ops -n stg -n core -n mart -f hanpilji_YYYYMMDD.dump   # 네 스키마 그대로(Supabase 복원용)
-scripts/make_single_schema_dump.sh hanpilji_mirror hanpilji_YYYYMMDD_single.dump             # hanpilji 하나(개발서버용)
-```
-
-`DROP COLUMN` 줄은 Supabase에 없는 선택 열 셋을 맞추는 것입니다.

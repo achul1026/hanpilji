@@ -75,11 +75,7 @@ def build(status_rows, source_rows, size_row=None, now=None):
 
 
 def _long_timeout(conn):
-    """이 연결의 문장 제한 시간을 STATUS_TIMEOUT_MS로 늘림. 연결은 요청마다 새로 열고 닫으므로 다른 조회엔 남지 않음.
-    Supabase API 흉내 연결은 SET을 못 보내므로 그 연결의 timeout_ms 값을 바꿈."""
-    if "timeout_ms" in vars(conn):
-        conn.timeout_ms = STATUS_TIMEOUT_MS
-        return
+    """이 연결의 문장 제한 시간을 STATUS_TIMEOUT_MS로 늘림. 연결은 요청마다 새로 열고 닫으므로 다른 조회엔 남지 않음."""
     try:
         conn.execute(STATUS_TIMEOUT_SQL)
     except Exception as e:

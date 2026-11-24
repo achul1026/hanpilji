@@ -1,6 +1,6 @@
 """DB 접속 한 곳. 스키마를 하나로 합친 서버(개발서버 등)도 같은 코드로 쓰게 함.
 
-코드의 SQL은 ops · stg · core · mart 네 스키마 이름을 그대로 씀(Supabase 구성).
+코드의 SQL은 ops · stg · core · mart 네 스키마 이름을 그대로 씀(로컬 DB 구성).
 환경변수 HANPILJI_DB_SCHEMA=hanpilji 처럼 스키마 이름을 주면, 보내기 직전에
 `core.fact_deal` → `hanpilji.fact_deal` 처럼 바꿔서 보냄. 네 스키마의 표 · 뷰 · 함수 이름이
 겹치지 않아(2026-11-02 확인) 하나로 합쳐도 됨. 값이 없으면 아무것도 바꾸지 않음.

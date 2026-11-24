@@ -541,7 +541,7 @@ def specs(data_scope=None):
 
 def find_sigungu(conn, tool, args, data_scope=None):
     """서울 범위이고 모델이 구를 비워 두면, 단지 · 동 이름으로 구를 찾아 args에 채움(못 찾으면 그대로).
-    찾는 함수가 없는 DB(Supabase 강남 구성 등)면 조용히 넘어감."""
+    찾는 함수가 없는 DB(강남구만 채운 로컬 DB 등)면 조용히 넘어감."""
     if (data_scope or scope.current()) != "seoul" or args.get("sigungu") not in (None, ""):
         return args
     if "sigungu" not in tool["input_schema"]["properties"]:
