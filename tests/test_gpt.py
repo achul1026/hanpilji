@@ -711,6 +711,10 @@ class Web(unittest.TestCase):
             self.assertIn("Map3D", r.read().decode())
         self.assertNotIn("innerHTML", web_page("map3d.js"))
         self.assertLess(web_page("index.html").index("/map3d.js"), web_page("index.html").index("/app.js"))
+        # 리포트 지도 칸: 「3D · 지적도」 버튼으로 바꿔 봄, 따로 붙이는 3D 칸은 겹치지 않게
+        app = web_page("app.js")
+        self.assertIn('Map3D.section(m3name, token, { bare: true })', app)
+        self.assertIn('!box.querySelector(".m3")', app)
 
     def test_data_status_page_and_endpoint(self):
         self.serve(token="s3cret")
