@@ -351,13 +351,13 @@ function Scene(frame, D, ui) {
 }
 
 // 답 카드 아래 붙는 칸. 화면에 보이면 자료를 받아 그림
-function section(name, token) {
-  const box = el("section", "m3"), head = el("div", "m3-h");
+function section(name, token, opt) {   // opt.bare: 머리말 · 테두리 없이(리포트 지도 칸 안에 넣을 때)
+  const bare = opt && opt.bare, box = el("section", bare ? "m3 bare" : "m3"), head = el("div", "m3-h");
   head.append(el("b", null, "3D 지도 · 주변"), el("span", "m3-s", name + " 둘레 사방 300m"));
   const frame = el("div", "m3-f"), msg = el("div", "m3-msg", "3D 지도를 그리는 중이에요…"); frame.append(msg);
   const info = el("div", "m3-info"); info.hidden = true;
   const near = el("div", "m3-near"), note = el("p", "m3-note", "건물 높이는 건축물대장 층수 기준이고, 건물 색 · 창 · 옥상 설비 · 가로수는 용도와 위치에 따라 자동으로 그린 것이라 실제와 다를 수 있어요. 연속지적도는 참고용 도면이에요.");
-  box.append(head, frame, info, near, note);
+  box.append(...(bare ? [] : [head]), frame, info, near, note);
   let S = null, D = null, img = null;
   const ui = {
     clear() { info.hidden = true; },
