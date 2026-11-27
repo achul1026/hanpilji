@@ -147,6 +147,20 @@ class Load(unittest.TestCase):
             self.assertEqual(tools.run(conn, "q_parcel_map", {"query": "없는단지"})["row_total"], 0)
             self.assertEqual(sorted(out["sources"]), [vworld_geom.BUILDING_LABEL, vworld_geom.PARCEL_LABEL])
 
+    def test_map3d(self):
+        """3D 지도 자료: 대상 필지 가운데를 0,0으로 옮긴 필지 · 건물 · 도로 포장면. 없는 단지는 NULL."""
+        with self.psycopg.connect(DSN) as conn:
+            from hanpilji.gpt import map3d
+            out = map3d.get(conn, "시험지도렉슬")
+            self.assertEqual(out["name"], "시험지도렉슬")
+            self.assertEqual(out["target"], [PNUS[0]])
+            self.assertEqual(sorted(p["p"] for p in out["parcels"]), sorted(PNUS + ["1168011800105310000"]))
+            self.assertEqual([(b["n"], b["f"]) for b in out["buildings"]], [("도곡렉슬 101동", 25)])
+            xs = [q[0] for p in out["parcels"] if p["p"] == PNUS[0] for poly in (p["g"] if isinstance(p["g"][0][0][0], list) else [p["g"]]) for q in poly[0]]
+            self.assertTrue(min(xs) < 0 < max(xs), "대상 필지가 가운데(0,0)에 걸침")
+            self.assertTrue(all(abs(x) <= out["half"] for x in xs), "상자 밖은 잘라 냄")
+            self.assertIsNone(map3d.get(conn, "없는단지"))
+
     def test_z_fetch_seoul(self):
         """서버 모드: 칸마다 받아 바로 넣고 커서를 남김. 서울 필지가 없는 칸은 건물을 부르지 않음. 한도에 닿으면 멈추고 이어 받음."""
         parcel = json.loads((FIX / "parcel" / "00_00.json").read_text(encoding="utf-8"))["features"]

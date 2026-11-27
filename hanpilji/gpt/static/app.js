@@ -847,6 +847,7 @@ function renderAnswer(item, box) {
   if (list) card.append(list);
   if (p["확인 못 함"].length) card.append(gapsFold(p["확인 못 함"]));
   if (card.children.length) box.append(card);
+  if (vis.subject && vis.subject.name && window.Map3D) box.append(Map3D.section(vis.subject.name, token));   // 3D 지도 · 주변(보일 때 받음)
   if (fine) box.append(fine);   // 면책 안내: 내 사안을 판단한 답에만(needsDisclaimer)
   const si = situEl(p.상황); if (si) box.append(si);
   const nx = askChips(p.다음, p["범위 밖"].length ? "big" : ""); if (nx) box.append(nx);
@@ -931,6 +932,7 @@ function renderReport(item, box) {
   const inl = el("div", "inline a");
   item.blocks.forEach((b, i) => { if (b.kind !== "card") inl.append(blockEl(item, i, true)); });
   box.append(inl);
+  if (r && r.complex_name && window.Map3D && item.kind === "report") box.append(Map3D.section(r.complex_name, token));
   const miss = [...((r && r.missing) || []).map(m => m + ": 아직 수집 전이에요."),
     ...(r && r.bld_violation == null ? ["위반건축물 여부: 건축물대장에 이 항목 데이터가 아직 없어요."] : []),
     "근저당 · 가압류 같은 권리관계: 등기부는 모으지 않아요.", "지금 나온 매물 호가: 매물 데이터는 없어요. 실거래만 봤어요."];

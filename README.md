@@ -91,6 +91,7 @@ python -m hanpilji.collectors.sbiz_store              # 소상공인 상가(상�
 python -m hanpilji.collectors.seoul_trdar             # 상권분석서비스: 상권 1,650곳 · 행정동 425곳 + 경계, 분기 지표 18종(추정매출 · 점포 · 유동 · 상주 · 직장인구 …) → core.fact_trdar_stat
 python -m hanpilji.collectors.seoul_living_pop               # 생활인구(Open API는 최근 약 두 달치만, 공개 3~4달 늦음)(행정동 x 날짜 x 시간대, 서울시 · KT) → core.fact_living_pop
 python scripts/apply_sql.py sql/30_trade_area.sql     # SQL 파일 넣기(HANPILJI_DB_SCHEMA가 있으면 서버 스키마 이름으로 바꿔서)
+python scripts/apply_sql.py sql/32_map3d.sql          # 답 아래 3D 지도 · 주변 자료 함수(PostGIS 필요)
 
 # 시장 · 거시 지표 (키: ECOS_KEY · RONE_KEY · KOSIS_KEY, 없는 기관은 건너뜀) → core.fact_market
 python -m hanpilji.collectors.market                  # 금리 · 물가(ECOS) · 아파트 가격지수(R-ONE) · 인구 · 세대(KOSIS) 10년
@@ -238,6 +239,7 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 - **기간 바꾸기:** 그래프 · 표의 1년 · 2년 · 3년 단추는 모델을 다시 부르지 않고 마트 함수만 다시 부릅니다(요금 없음).
 - **진행 표시:** 답을 만드는 동안 「실거래 목록을 찾는 중」처럼 지금 무엇을 찾는지 보여 줍니다(Server-Sent Events).
 - **지적도:** 단지 · 주소를 물으면 대상 필지 경계(측량 청색), 둘레 이웃 필지와 번지 · 지목, 건물 윤곽, 축척 막대를 그립니다. 도형은 화면에만 가고 모델에게는 번지 · 면적 · 중심 좌표만 넘깁니다(토큰 절약). 배경지도는 V-World(밝은 화면 white · 어두운 화면 midnight)이고 `HANPILJI_VWORLD_MAP_KEY`를 넣으면 켜집니다. 키가 없으면 모눈 위에 선만 그립니다(`HANPILJI_MAP_TILES=osm` · `none`으로 바꿀 수 있음). 연속지적도는 참고용 도면이라 측량 · 경계 확정에 쓸 수 없다고 늘 함께 적습니다.
+- **3D 지도 · 주변:** 단지를 다룬 답과 필지 리포트 아래에 그 단지 둘레 사방 300m를 도면식 3D로 그립니다(직교 카메라, 해 그림자, 윤곽선). 건물은 도로명주소 건물 윤곽을 건축물대장 층수만큼 세우고, 대상 단지는 파랗게 칠합니다. 지하철역 · 학교 핀과 주변 단지의 최근 12개월 매매(전용 평당 가운데값)를 함께 보여 줍니다. 자료는 `mart.q_map3d` 하나로 받고(모델 없이, 요금 없음, gzip), three.js는 칸이 화면에 보일 때 처음 받습니다. 움직이는 3D 지도는 한 화면에 하나만 두고 앞의 것은 그림으로 멈춥니다. 건물 색 · 창 · 옥상 설비 · 가로수는 용도와 위치에 따라 자동으로 그린 것이라고 지도 아래에 적습니다.
 - **정책 전후 비교:** 「10·15 대책 뒤 거래는?」처럼 물으면 정책 머리(발표 · 시행일, 원문 링크), 발표 전달을 100으로 맞춘 강남구 · 서울 · 전국 매매가격지수와 월별 매매 건수(발표 달에 점선), 전후를 맞댄 표(실거래 · 같은 단지 · 지정 동 · 지수 · 금리 · 겹친 정책)를 그립니다. 표 아래에는 「전후 비교일 뿐 정책 하나의 효과로 나눌 수 없음」을 늘 적습니다.
 - **대화 목록:** 이 브라우저에만 저장합니다. 휴대폰에서는 근거 자료 창이 아래에서 올라옵니다.
 
@@ -258,6 +260,7 @@ python -m hanpilji.gpt.web --port 8000                          # 웹 → http:/
 | `GET /api/report?q=` · `GET /api/compare?a=&b=` | 필지 리포트 · 두 단지 비교(모델 없이 마트 함수만). 이름이 여럿에 맞으면 `choices` |
 | `POST /api/tool` | 블록 기간 바꾸기와 「이어서 볼 것」 열기(모델 없이 마트 함수만). 정한 도구만, 인자는 도구 형식대로 확인 |
 | `GET /api/card?q=` | 단지 카드만(LLM 없이) |
+| `GET /api/map3d?q=` | 답 아래 3D 지도 · 주변 자료(모델 없이 `mart.q_map3d` 하나, gzip). 지적도가 없으면 `{"empty": true}` |
 | `GET /config.json` | 지도 배경 타일 설정(토큰 없이. 배경지도 키는 원래 브라우저에 드러남) |
 
 <p align="center"><img src="docs/assets/web_card.png" width="860" alt="단지 종합 질문: 답과 단지 카드(거래 · 토지 · 용도지역 · 건물)"></p>
