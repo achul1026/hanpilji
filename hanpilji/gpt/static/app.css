@@ -453,4 +453,5 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
 .m3-info .m3-note{margin:6px 0 0}
 @media(max-width:700px){.m3-f{height:340px}.m3-near{grid-template-columns:1fr}.m3-tip{display:none}}
 .m3.bare{margin:0;border:0;border-radius:0}
-@media print{.m3{display:none}.m3pair .bd[hidden]{display:block!important}}
+.m3pair.on3 .x2,.m3pair:not(.on3) .x3{display:none}
+@media print{.m3{display:none}.m3pair .bd[hidden]{display:block!important}.m3pair .x2{display:inline!important}.m3pair .x3{display:none!important}}
