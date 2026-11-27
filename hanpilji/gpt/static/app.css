@@ -427,3 +427,29 @@ table.cmp td.n{color:var(--survey);font-weight:600;white-space:nowrap}
   .dtable td.num,.dtable td.mono{text-align:left}
   .dtable td[data-k]::before{content:attr(data-k);display:inline-block;min-width:76px;color:var(--muted);font-size:12px;font-family:var(--body)}
 }
+
+/* 3D 지도 · 주변(map3d.js) */
+.m3{margin:18px 0 6px;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--sheet)}
+.m3-h{display:flex;align-items:baseline;gap:10px;padding:10px 14px;border-bottom:1px solid var(--line)}
+.m3-h b{font-size:15px}.m3-s{font-size:12.5px;color:var(--muted)}
+.m3-f{position:relative;height:440px;background:#efece6;touch-action:none;overflow:hidden}
+.m3-f canvas{display:block}.m3-ov{position:absolute;left:0;top:0;pointer-events:none}
+.m3-msg{position:absolute;inset:0;display:grid;place-items:center;color:#56626C;font-size:14px;padding:0 20px;text-align:center}
+.m3-ctl{position:absolute;right:10px;top:10px;display:flex;flex-direction:column;gap:6px}
+.m3-ctl button{width:36px;height:36px;border-radius:9px;border:1px solid #cfcbc2;background:#fff;color:#1f2328;font-size:16px;font-weight:600;cursor:pointer;box-shadow:0 1px 3px #0001}
+.m3-ctl button:last-child{font-size:12px}
+.m3-tip{position:absolute;left:46px;bottom:8px;font-size:11px;color:#5f6670;background:#ffffffd9;border-radius:6px;padding:2px 7px;pointer-events:none}
+.m3-img{display:block;width:100%;height:100%;object-fit:cover;cursor:pointer}
+.m3-wake{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);border:0;border-radius:999px;background:#1f2328e6;color:#fff;padding:10px 16px;font-size:13px;cursor:pointer}
+.m3-info{position:relative;margin:10px 14px 0;padding:10px 12px;border:1px solid var(--line);border-radius:10px;font-size:13px;line-height:1.55}
+.m3-info b{display:block;font-size:14px;margin:0 24px 4px 0}.m3-info table{width:100%;border-collapse:collapse}
+.m3-info td{padding:3px 0;border-bottom:1px solid var(--grid)}.m3-info td:first-child{color:var(--muted);width:42%}
+.m3-x{position:absolute;right:6px;top:4px;border:0;background:none;font-size:18px;color:var(--muted);cursor:pointer}
+.m3-near{display:grid;grid-template-columns:1fr 1fr;gap:4px 18px;padding:10px 14px 0}
+.m3-near h4{margin:6px 0 4px;font-size:13px}
+.m3-row{display:flex;justify-content:space-between;gap:10px;width:100%;border:0;border-bottom:1px solid var(--grid);background:none;padding:6px 0;font-size:13px;color:var(--ink);text-align:left;cursor:pointer}
+.m3-row:hover{color:var(--survey,#2f62d0)}.m3-d{color:var(--muted);font-size:12px;white-space:nowrap}
+.m3-note{font-size:11.5px;color:var(--muted);line-height:1.55;margin:8px 14px 12px}
+.m3-info .m3-note{margin:6px 0 0}
+@media(max-width:700px){.m3-f{height:340px}.m3-near{grid-template-columns:1fr}.m3-tip{display:none}}
+@media print{.m3{display:none}}

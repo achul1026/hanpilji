@@ -12,7 +12,7 @@ for a in "$@"; do
   esac
 done
 files+=(05_stg_regulation.sql 06_mart.sql 07_roles.sql 08_seed.sql 09_stage1.sql 10_property.sql 11_building.sql 12_vworld.sql 13_market.sql 14_auction.sql 16_policy.sql 17_house_price.sql 18_property_card.sql 19_seoul_land_price.sql 20_find_sigungu.sql 21_seoul_regions.sql 23_data_status.sql 24_kb_topics.sql 25_prec.sql 26_guide.sql 27_concepts.sql 29_bld_file.sql 30_trade_area.sql)
-[ -n "${geo:-}" ] && files+=(15_geo.sql 22_poi.sql 31_trade_area_geo.sql)   # 지적도 · 건물 윤곽 · 지도 함수 · 상권 경계(PostGIS 필요)
+[ -n "${geo:-}" ] && files+=(15_geo.sql 22_poi.sql 31_trade_area_geo.sql 32_map3d.sql)   # 지적도 · 건물 윤곽 · 지도 함수 · 상권 경계(PostGIS 필요)
 [ -n "${vec:-}" ] && files+=(28_kb_vector.sql)       # 지식 DB 의미 검색(pgvector 필요)
 for f in "${files[@]}"; do
   echo "== $f"

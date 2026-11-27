@@ -684,6 +684,34 @@ class Web(unittest.TestCase):
         self.assertEqual(get("/api/report")[0], 400)
         self.assertEqual(get("/api/compare?a=x")[0], 400)
 
+    def test_map3d_endpoint(self):
+        """3D 지도 자료: 모델 없이 마트 함수 하나. 크면 gzip으로 줄여 보내고, 지적도가 없으면 empty."""
+        self.serve()
+        import gzip
+        import urllib.error
+        import urllib.request
+        from hanpilji.gpt import map3d
+        big = {"name": "도곡렉슬", "half": 300, "buildings": [{"n": "도곡렉슬 101동", "f": 25, "g": [[[0, 0], [1, 0], [1, 1]]]}] * 200}
+        with mock.patch.object(map3d, "get", return_value=big) as get:
+            req = urllib.request.Request(self.base + "/api/map3d?q=%EB%8F%84%EA%B3%A1", headers={"Accept-Encoding": "gzip"})
+            with urllib.request.urlopen(req) as r:
+                self.assertEqual(r.headers["Content-Encoding"], "gzip")
+                self.assertEqual(json.loads(gzip.decompress(r.read())), big)
+            with urllib.request.urlopen(self.base + "/api/map3d?q=%EB%8F%84%EA%B3%A1") as r:
+                self.assertIsNone(r.headers["Content-Encoding"], "gzip을 받는다고 하지 않으면 그대로")
+                self.assertEqual(json.loads(r.read())["name"], "도곡렉슬")
+        self.assertEqual(get.call_args.args[1], "도곡")
+        with mock.patch.object(map3d, "get", return_value=None):
+            with urllib.request.urlopen(self.base + "/api/map3d?q=x") as r:
+                self.assertEqual(json.loads(r.read()), {"empty": True})
+        with self.assertRaises(urllib.error.HTTPError) as cm:
+            urllib.request.urlopen(self.base + "/api/map3d")
+        self.assertEqual(cm.exception.code, 400)
+        with urllib.request.urlopen(self.base + "/map3d.js") as r:
+            self.assertIn("Map3D", r.read().decode())
+        self.assertNotIn("innerHTML", web_page("map3d.js"))
+        self.assertLess(web_page("index.html").index("/map3d.js"), web_page("index.html").index("/app.js"))
+
     def test_data_status_page_and_endpoint(self):
         self.serve(token="s3cret")
         import urllib.error

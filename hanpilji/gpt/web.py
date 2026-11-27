@@ -15,6 +15,7 @@ HANPILJI_WEB_DAILY_LIMIT개(기본 50)로 막아 요금이 한도 밖으로 나�
 (프록시가 덧붙인 값. Cloud Run은 1, 앞에 부하분산기를 두면 그것이 자기 주소를 하나 더 붙여 2).
 """
 import argparse
+import gzip
 import hmac
 import ipaddress
 import json
@@ -28,7 +29,7 @@ from urllib.parse import parse_qs, urlsplit
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 from hanpilji import config as config_mod, embedding, scope
-from hanpilji.gpt import blocks, datastatus, engine, llm, report, tools, verify
+from hanpilji.gpt import blocks, datastatus, engine, llm, map3d, report, tools, verify
 
 MAX_SESSIONS = 200
 MAX_QUESTION = 1000
@@ -46,7 +47,8 @@ STATIC = Path(__file__).with_name("static")
 FILES = {"/": ("index.html", "text/html; charset=utf-8"), "/index.html": ("index.html", "text/html; charset=utf-8"),
          "/app.css": ("app.css", "text/css; charset=utf-8"), "/app.js": ("app.js", "text/javascript; charset=utf-8"),
          "/favicon.svg": ("favicon.svg", "image/svg+xml"),
-         "/data": ("data.html", "text/html; charset=utf-8"), "/data.js": ("data.js", "text/javascript; charset=utf-8")}
+         "/data": ("data.html", "text/html; charset=utf-8"), "/data.js": ("data.js", "text/javascript; charset=utf-8"),
+         "/map3d.js": ("map3d.js", "text/javascript; charset=utf-8")}
 TOOL_PER_HOUR = 240           # 블록 기간 바꾸기(모델 없이 DB만 읽음)는 넉넉히
 
 # 배경지도 타일 주소. {key}는 V-World 키, {style}은 화면 색(밝음 white · 어두움 midnight)으로 채움
@@ -122,8 +124,19 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
             self.end_headers()
             self.wfile.write(data)
 
-        def _json(self, code, obj):
-            self._send(code, json.dumps(obj, ensure_ascii=False), "application/json; charset=utf-8")
+        def _json(self, code, obj, zip_ok=False):
+            data = json.dumps(obj, ensure_ascii=False, separators=(",", ":") if zip_ok else None).encode("utf-8")
+            if not (zip_ok and "gzip" in (self.headers.get("Accept-Encoding") or "") and len(data) > 2048):
+                return self._send(code, data.decode("utf-8"), "application/json; charset=utf-8")
+            data = gzip.compress(data, 6)   # 3D 지도 자료는 수백 KB라 줄여 보냄(텍스트라 1/4 안팎)
+            self.send_response(code)
+            self.send_header("Content-Type", "application/json; charset=utf-8")
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+            self.send_header("Content-Length", str(len(data)))
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.end_headers()
+            self.wfile.write(data)
 
         def _allowed(self):
             if token is None:
@@ -182,6 +195,8 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 self._auto(qs.get("q", ""))
             elif url.path == "/api/data-status":
                 self._data_status()
+            elif url.path == "/api/map3d":
+                self._map3d(qs.get("q", ""))
             else:
                 self._json(404, {"error": "없는 주소"})
 
@@ -229,6 +244,20 @@ def make_handler(cfg, model, rounds, token=None, per_hour=PER_HOUR, tool_per_hou
                 print(f"오류: {e!r}", file=sys.stderr)
                 out = None
             self._json(200, out or {"kind": "ask"})
+
+        def _map3d(self, query):
+            """답 카드 아래 3D 지도 · 주변 자료(모델 없이 마트 함수 하나, 요금 없음). 지적도가 없으면 {"empty": true}."""
+            if not query:
+                return self._json(400, {"error": "단지명이나 주소를 넣어 주세요"})
+            if not self._rate_ok("tool", tool_per_hour):
+                return self._json(429, {"error": "너무 자주 열었습니다. 잠시 뒤 다시 해 주세요."})
+            try:
+                with engine.connect(cfg) as conn:
+                    out = map3d.get(conn, query)
+            except Exception as e:
+                print(f"오류: {e!r}", file=sys.stderr)
+                return self._json(500, {"error": "3D 지도 자료를 읽는 중 오류가 났습니다."})
+            self._json(200, out or {"empty": True}, zip_ok=True)
 
         def _data_status(self):
             """데이터 현황(모델 없이 마트 함수 둘, 1시간 기억). 화면 /data 가 부름."""
