@@ -543,7 +543,7 @@ function blockEl(item, idx, inlineMode) {
   }
   return wrap;
 }
-const M3_SRC = "V-World 연속지적도 · 도로명주소 건물(국토교통부) · 건축HUB 건축물대장 · 국토교통부 실거래가 · 공공데이터포털 학교 · 역 위치";
+const M3_SRC = "V-World 연속지적도(국토교통부) · V-World 도로명주소 건물(국토교통부) · 건축HUB 건축물대장 · 국토교통부 실거래가 · 공공데이터포털 학교 · 역 위치";
 function alertLine(after, text) { const p = el("div", "err-msg", text); after.after(p); setTimeout(() => p.remove(), 5000); }
 // 답 안과 근거 자료 창에 같은 블록이 둘 다 떠 있으면 나머지 하나도 바꿈
 function refreshTwin(item, idx, inlineMode) {
