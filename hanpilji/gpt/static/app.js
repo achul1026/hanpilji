@@ -528,14 +528,15 @@ function blockEl(item, idx, inlineMode) {
   // 리포트의 지적도 칸: 「3D · 지적도」 버튼으로 한 칸에서 바꿔 봄(3D가 먼저, 3D 데이터는 처음 열 때 받음)
   const m3name = b.kind === "map" && inlineMode && item.kind === "report" && window.Map3D ? (cardRow(item) || {}).complex_name : null;
   if (m3name) {
-    const span = t.lastChild, seg = el("div", "seg"); let m3 = null;
+    // 제목 · 출처는 둘 다 두고 CSS로 하나만 보임(인쇄하면 늘 지적도 쪽)
+    const seg = el("div", "seg"); let m3 = null;
+    t.lastChild.classList.add("x2"); t.append(el("span", "x3", m3name + " 3D 지도 · 주변"));
+    ft.textContent = ""; ft.append(el("span", "x2", sourceLine(b)), el("span", "x3", M3_SRC));
     seg.setAttribute("role", "group"); seg.setAttribute("aria-label", "지도 보기");
     const set = on3 => {
       [...seg.children].forEach((c, j) => c.classList.toggle("on", (j === 0) === on3));
       if (on3 && !m3) { m3 = Map3D.section(m3name, token, { bare: true }); bd.after(m3); }
-      bd.hidden = on3; if (m3) m3.hidden = !on3;
-      span.textContent = on3 ? m3name + " 3D 지도 · 주변" : b.title;
-      ft.textContent = on3 ? M3_SRC : sourceLine(b);
+      bd.hidden = on3; if (m3) m3.hidden = !on3; wrap.classList.toggle("on3", on3);
     };
     seg.append(btn("", "3D", () => set(true)), btn("", "지적도", () => set(false)));
     tools.prepend(seg); wrap.classList.add("m3pair"); set(true);
